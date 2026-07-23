@@ -1,6 +1,9 @@
+export * from "./companion/local-response-engine";
+export * from "./companion/settings";
 export * from "./fragments/dormancy";
 export * from "./fragments/fragment-card-list";
 export * from "./fragments/local-fragment-title";
+export * from "./garden/companion-view-model";
 export * from "./garden/plant-view-model";
 export * from "./growth/growth";
 export * from "./movement/geometry";
@@ -8,6 +11,7 @@ export * from "./movement/grid";
 export * from "./movement/pathfinding";
 export * from "./movement/route-motion";
 export * from "./plants/plant-slots";
+export * from "./recommendations/select-fragment-recommendation";
 export * from "./shared/id";
 export * from "./shared/time";
 export * from "./shared/types";

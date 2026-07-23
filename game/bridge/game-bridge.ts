@@ -1,18 +1,20 @@
-import type { ReactToGameEvent } from "./game-events";
+import type { GameToReactEvent, ReactToGameEvent } from "./game-events";
 
-export type GameBridgeListener = (event: ReactToGameEvent) => void;
+export type ReactToGameListener = (event: ReactToGameEvent) => void;
+export type GameToReactListener = (event: GameToReactEvent) => void;
 export type UnsubscribeGameBridge = () => void;
 
 export class GameBridge {
-  private readonly listeners = new Set<GameBridgeListener>();
+  private readonly reactToGameListeners = new Set<ReactToGameListener>();
+  private readonly gameToReactListeners = new Set<GameToReactListener>();
   private isDestroyed = false;
 
-  subscribe(listener: GameBridgeListener): UnsubscribeGameBridge {
+  subscribeToGame(listener: ReactToGameListener): UnsubscribeGameBridge {
     if (this.isDestroyed) {
       throw new Error("Cannot subscribe to a destroyed GameBridge");
     }
 
-    this.listeners.add(listener);
+    this.reactToGameListeners.add(listener);
     let isSubscribed = true;
 
     return () => {
@@ -21,16 +23,44 @@ export class GameBridge {
       }
 
       isSubscribed = false;
-      this.listeners.delete(listener);
+      this.reactToGameListeners.delete(listener);
     };
   }
 
-  publish(event: ReactToGameEvent): void {
+  publishToGame(event: ReactToGameEvent): void {
     if (this.isDestroyed) {
       return;
     }
 
-    for (const listener of [...this.listeners]) {
+    for (const listener of [...this.reactToGameListeners]) {
+      listener(event);
+    }
+  }
+
+  subscribeToReact(listener: GameToReactListener): UnsubscribeGameBridge {
+    if (this.isDestroyed) {
+      throw new Error("Cannot subscribe to a destroyed GameBridge");
+    }
+
+    this.gameToReactListeners.add(listener);
+    let isSubscribed = true;
+
+    return () => {
+      if (!isSubscribed) {
+        return;
+      }
+
+      isSubscribed = false;
+      this.gameToReactListeners.delete(listener);
+    };
+  }
+
+  publishToReact(event: GameToReactEvent): void {
+    if (this.isDestroyed) {
+      return;
+    }
+
+    for (const listener of [...this.gameToReactListeners]) {
       listener(event);
     }
   }
@@ -41,6 +71,7 @@ export class GameBridge {
     }
 
     this.isDestroyed = true;
-    this.listeners.clear();
+    this.reactToGameListeners.clear();
+    this.gameToReactListeners.clear();
   }
 }

@@ -2,15 +2,19 @@ import * as Phaser from "phaser";
 
 import type { PlantViewModel } from "../../domain/garden/plant-view-model";
 import { PLANT_SLOT_CONFIGS } from "../config/garden-map";
-import { PlantSprite } from "../entities/PlantSprite";
+import { PlantSprite, type PlantClickHandler } from "../entities/PlantSprite";
 import { calculatePlantRenderDiff } from "./plant-render-diff";
 
 const PLANT_SLOT_BY_ID = new Map(PLANT_SLOT_CONFIGS.map((slot) => [slot.id, slot] as const));
 
 export class PlantRenderSystem {
   private readonly sprites = new Map<string, PlantSprite>();
+  private selectedPlantId: string | null = null;
 
-  constructor(private readonly scene: Phaser.Scene) {}
+  constructor(
+    private readonly scene: Phaser.Scene,
+    private readonly onPlantClicked: PlantClickHandler,
+  ) {}
 
   loadGarden(plants: readonly PlantViewModel[]): void {
     const previousPlants = [...this.sprites.values()].map((sprite) => sprite.viewModel);
@@ -43,7 +47,25 @@ export class PlantRenderSystem {
       return;
     }
 
-    this.sprites.set(plant.plantId, new PlantSprite(this.scene, plant, slot));
+    const sprite = new PlantSprite(this.scene, plant, slot, this.onPlantClicked);
+    sprite.setSelected(this.selectedPlantId === plant.plantId);
+    this.sprites.set(plant.plantId, sprite);
+  }
+
+  getPlant(plantId: string): PlantViewModel | undefined {
+    return this.sprites.get(plantId)?.viewModel;
+  }
+
+  hasPlant(plantId: string): boolean {
+    return this.sprites.has(plantId);
+  }
+
+  setSelectedPlant(plantId: string | null): void {
+    this.selectedPlantId = plantId;
+
+    for (const [currentPlantId, sprite] of this.sprites) {
+      sprite.setSelected(currentPlantId === plantId);
+    }
   }
 
   removePlant(plantId: string): void {
@@ -55,6 +77,10 @@ export class PlantRenderSystem {
 
     sprite.destroy();
     this.sprites.delete(plantId);
+
+    if (this.selectedPlantId === plantId) {
+      this.selectedPlantId = null;
+    }
   }
 
   destroy(): void {
@@ -63,5 +89,6 @@ export class PlantRenderSystem {
     }
 
     this.sprites.clear();
+    this.selectedPlantId = null;
   }
 }

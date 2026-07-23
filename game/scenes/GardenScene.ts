@@ -2,17 +2,31 @@ import * as Phaser from "phaser";
 
 import type { GameBridge, UnsubscribeGameBridge } from "../bridge/game-bridge";
 import type { ReactToGameEvent } from "../bridge/game-events";
+import type { PlantViewModel } from "../../domain";
 import { GARDEN_MAP_CONFIG } from "../config/garden-map";
 import { GARDEN_SCENE_KEY } from "../config/game-config";
 import { PlayerSprite } from "../entities/PlayerSprite";
 import { GardenMapRenderer } from "../systems/GardenMapRenderer";
+import { InteractionSystem } from "../systems/InteractionSystem";
+import { MovementSystem, type MovementSnapshot } from "../systems/MovementSystem";
+import { PathfindingSystem } from "../systems/PathfindingSystem";
 import { PlantRenderSystem } from "../systems/PlantRenderSystem";
 
 type RuntimeFailureHandler = (kind: "initialize" | "update") => void;
 
 export class GardenScene extends Phaser.Scene {
   private plantRenderSystem: PlantRenderSystem | null = null;
+  private movementSystem: MovementSystem | null = null;
+  private interactionSystem: InteractionSystem | null = null;
+  private player: PlayerSprite | null = null;
   private unsubscribeBridge: UnsubscribeGameBridge | null = null;
+  private movementSnapshot: MovementSnapshot = {
+    x: GARDEN_MAP_CONFIG.playerSpawn.x,
+    y: GARDEN_MAP_CONFIG.playerSpawn.y,
+    state: "idle",
+  };
+  private selectedPlantId: string | null = null;
+  private isDisposed = false;
 
   constructor(
     private readonly bridge: GameBridge,
@@ -25,19 +39,59 @@ export class GardenScene extends Phaser.Scene {
   create(): void {
     try {
       new GardenMapRenderer(this, GARDEN_MAP_CONFIG).render();
-      new PlayerSprite(this, GARDEN_MAP_CONFIG.playerSpawn.x, GARDEN_MAP_CONFIG.playerSpawn.y);
-      this.plantRenderSystem = new PlantRenderSystem(this);
-      this.unsubscribeBridge = this.bridge.subscribe((event) => this.handleBridgeEvent(event));
+      this.player = new PlayerSprite(
+        this,
+        GARDEN_MAP_CONFIG.playerSpawn.x,
+        GARDEN_MAP_CONFIG.playerSpawn.y,
+      );
+      const pathfindingSystem = new PathfindingSystem(GARDEN_MAP_CONFIG);
+      this.plantRenderSystem = new PlantRenderSystem(this, (plant) =>
+        this.handlePlantClicked(plant),
+      );
+      this.movementSystem = new MovementSystem(this.player, pathfindingSystem, (snapshot) => {
+        this.movementSnapshot = snapshot;
+        this.publishPlayerState();
+      });
+      this.interactionSystem = new InteractionSystem(
+        this,
+        GARDEN_MAP_CONFIG,
+        this.bridge,
+        pathfindingSystem,
+        this.movementSystem,
+        this.plantRenderSystem,
+        (plantId) => {
+          this.selectedPlantId = plantId;
+          this.publishPlayerState();
+        },
+      );
+      this.input.on(Phaser.Input.Events.POINTER_DOWN, this.handleGroundPointer, this);
+      this.unsubscribeBridge = this.bridge.subscribeToGame((event) =>
+        this.handleBridgeEvent(event),
+      );
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.dispose, this);
       this.events.once(Phaser.Scenes.Events.DESTROY, this.dispose, this);
+      this.publishPlayerState();
       this.onReady();
     } catch {
       this.onFailure("initialize");
     }
   }
 
+  update(_time: number, delta: number): void {
+    try {
+      this.movementSystem?.update(delta);
+    } catch {
+      this.interactionSystem?.reportUnexpectedFailure();
+    }
+  }
+
   private handleBridgeEvent(event: ReactToGameEvent): void {
     try {
+      if (event.type === "CANCEL_INTERACTION") {
+        this.interactionSystem?.cancelInteraction();
+        return;
+      }
+
       const renderSystem = this.plantRenderSystem;
 
       if (renderSystem === null) {
@@ -56,15 +110,64 @@ export class GardenScene extends Phaser.Scene {
           renderSystem.removePlant(event.plantId);
           break;
       }
+
+      this.interactionSystem?.handlePlantDataChanged();
     } catch {
       this.onFailure("update");
     }
   }
 
+  private handleGroundPointer(pointer: Phaser.Input.Pointer): void {
+    if (!pointer.leftButtonDown()) {
+      return;
+    }
+
+    try {
+      this.interactionSystem?.moveToGround({
+        x: pointer.worldX,
+        y: pointer.worldY,
+      });
+    } catch {
+      this.interactionSystem?.reportUnexpectedFailure();
+    }
+  }
+
+  private handlePlantClicked(plant: PlantViewModel): void {
+    try {
+      this.interactionSystem?.moveToPlant(plant);
+    } catch {
+      this.interactionSystem?.reportUnexpectedFailure(plant.plantId);
+    }
+  }
+
+  private publishPlayerState(): void {
+    if (this.isDisposed) {
+      return;
+    }
+
+    this.bridge.publishToReact({
+      type: "PLAYER_STATE_CHANGED",
+      playerX: this.movementSnapshot.x,
+      playerY: this.movementSnapshot.y,
+      movementState: this.movementSnapshot.state,
+      selectedPlantId: this.selectedPlantId,
+    });
+  }
+
   private dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
+
+    this.isDisposed = true;
+    this.input.off(Phaser.Input.Events.POINTER_DOWN, this.handleGroundPointer, this);
     this.unsubscribeBridge?.();
     this.unsubscribeBridge = null;
+    this.interactionSystem?.destroy();
+    this.interactionSystem = null;
+    this.movementSystem = null;
     this.plantRenderSystem?.destroy();
     this.plantRenderSystem = null;
+    this.player = null;
   }
 }

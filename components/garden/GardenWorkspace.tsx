@@ -327,12 +327,13 @@ export function GardenWorkspace() {
           isChatOpen={isCompanionChatOpen}
           onChatOpenChange={handleCompanionChatOpenChange}
           onCompanionTypeChange={handleCompanionTypeChange}
-          onOpenRecommendedFragment={(fragmentId, triggerElement) =>
+          onOpenFragment={(fragmentId, triggerElement, viewAlreadyRecorded = false) =>
             openFragment(fragmentId, {
               triggerElement,
-              viewAlreadyRecorded: true,
+              viewAlreadyRecorded,
             })
           }
+          onStartLinkImport={startExternalLinkImport}
         />
 
         <Activity mode={mode === "garden" ? "visible" : "hidden"}>

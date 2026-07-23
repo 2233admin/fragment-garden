@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { DuplicateLinkDialog } from "@/components/link-imports/DuplicateLinkDialog";
+import { GetNoteDisclosureDialog } from "@/components/link-imports/GetNoteDisclosureDialog";
 import type { CompanionType } from "@/domain";
 import type { CurrentRecommendationView } from "@/data/queries/companion-query";
 import { completeCompanionOnboarding } from "@/services/complete-companion-onboarding";
@@ -19,16 +21,19 @@ import type {
   RecommendationPendingAction,
 } from "./FragmentRecommendationCard";
 import { useCompanionData } from "./useCompanionData";
+import { useCompanionLinkImport } from "./useCompanionLinkImport";
 
 type CompanionExperienceProps = {
   gardenRevision: string;
   isChatOpen: boolean;
   onChatOpenChange: (isOpen: boolean) => void;
   onCompanionTypeChange: (companionType: CompanionType | null) => void;
-  onOpenRecommendedFragment: (
+  onOpenFragment: (
     fragmentId: string,
     triggerElement: HTMLButtonElement | null,
+    viewAlreadyRecorded?: boolean,
   ) => Promise<boolean>;
+  onStartLinkImport: (fragmentId: string) => void;
 };
 
 const RECOMMENDATION_QUERY_ERROR = "暂时没能找到适合回看的内容，你仍然可以在卡片模式中查找。";
@@ -60,7 +65,8 @@ export function CompanionExperience({
   isChatOpen,
   onChatOpenChange,
   onCompanionTypeChange,
-  onOpenRecommendedFragment,
+  onOpenFragment,
+  onStartLinkImport,
 }: CompanionExperienceProps) {
   const [settingsAttempt, setSettingsAttempt] = useState(0);
   const [isChoosing, setIsChoosing] = useState(false);
@@ -83,6 +89,13 @@ export function CompanionExperience({
     recommendationState.status === "ready" ? recommendationState.value : null;
   const recommendationView =
     currentRecommendation === null ? null : createRecommendationView(currentRecommendation);
+  const linkImportFlow = useCompanionLinkImport({
+    disclosureAcceptedAt:
+      settingsState.status === "ready" ? settingsState.value.getNoteDisclosureAcceptedAt : null,
+    onChatOpenChange,
+    onOpenFragment,
+    onStartLinkImport,
+  });
 
   useEffect(() => {
     onCompanionTypeChange(companionType);
@@ -138,10 +151,11 @@ export function CompanionExperience({
 
   async function sendMessage(content: string): Promise<void> {
     setRecommendationError(null);
-    await sendCompanionMessage({
+    const result = await sendCompanionMessage({
       content,
       now: new Date().toISOString(),
     });
+    await linkImportFlow.handleAction(result.response.action);
   }
 
   async function openRecommendation(): Promise<void> {
@@ -163,9 +177,10 @@ export function CompanionExperience({
         await waitForDialogTransition();
       }
 
-      const didOpen = await onOpenRecommendedFragment(
+      const didOpen = await onOpenFragment(
         result.viewed.fragment.id,
         companionButtonRef.current,
+        true,
       );
 
       if (!didOpen) {
@@ -176,6 +191,19 @@ export function CompanionExperience({
       throw error;
     } finally {
       setRecommendationPending(null);
+    }
+  }
+
+  async function openLinkedFragment(
+    fragmentId: string,
+    triggerElement: HTMLButtonElement,
+  ): Promise<void> {
+    onChatOpenChange(false);
+    await waitForDialogTransition();
+    const didOpen = await onOpenFragment(fragmentId, triggerElement);
+    if (!didOpen) {
+      onChatOpenChange(true);
+      throw new Error("The shared fragment detail could not be opened");
     }
   }
 
@@ -265,23 +293,43 @@ export function CompanionExperience({
         <CompanionChatPanel
           companionType={companionType}
           errorMessage={
-            messagesState.status === "error"
+            linkImportFlow.errorMessage ??
+            (messagesState.status === "error"
               ? CHAT_HISTORY_QUERY_ERROR
               : recommendationState.status === "error"
                 ? RECOMMENDATION_QUERY_ERROR
-                : recommendationError
+                : recommendationError)
           }
           isLoading={messagesState.status === "loading" || recommendationState.status === "loading"}
           isOpen={isChatOpen}
-          isPending={recommendationPending !== null}
+          isPending={recommendationPending !== null || linkImportFlow.isPending}
           messages={messagesState.status === "ready" ? messagesState.value : []}
           onClose={() => onChatOpenChange(false)}
           onDismissRecommendation={dismissRecommendation}
+          onOpenLinkedFragment={openLinkedFragment}
           onOpenRecommendation={openRecommendation}
           onSend={sendMessage}
           recommendation={recommendationView}
         />
       ) : null}
+
+      <GetNoteDisclosureDialog
+        errorMessage={linkImportFlow.disclosureErrorMessage}
+        isOpen={linkImportFlow.isDisclosureOpen}
+        isPending={linkImportFlow.isPending}
+        onAccept={() => void linkImportFlow.acceptDisclosure()}
+        onCancel={linkImportFlow.cancelDisclosure}
+      />
+
+      <DuplicateLinkDialog
+        errorMessage={linkImportFlow.errorMessage}
+        existingTitle={linkImportFlow.duplicateLink?.existingTitle ?? "已有链接碎片"}
+        isOpen={linkImportFlow.duplicateLink !== null}
+        isPending={linkImportFlow.isPending}
+        onCancel={linkImportFlow.cancelDuplicate}
+        onCreateDuplicate={() => void linkImportFlow.createDuplicate()}
+        onOpenExisting={(triggerElement) => void linkImportFlow.openExisting(triggerElement)}
+      />
     </>
   );
 }

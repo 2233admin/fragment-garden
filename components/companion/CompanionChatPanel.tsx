@@ -16,6 +16,7 @@ import {
 export type CompanionMessageView = {
   content: string;
   createdAt: string;
+  fragmentId: string | null;
   id: string;
   role: ChatMessageRole;
 };
@@ -30,6 +31,7 @@ export type CompanionChatPanelProps = {
   recommendation: FragmentRecommendationView | null;
   onClose: () => void;
   onDismissRecommendation: () => Promise<void>;
+  onOpenLinkedFragment: (fragmentId: string, triggerElement: HTMLButtonElement) => Promise<void>;
   onOpenRecommendation: () => Promise<void>;
   onSend: (content: string) => Promise<void>;
 };
@@ -54,6 +56,7 @@ export function CompanionChatPanel({
   recommendation,
   onClose,
   onDismissRecommendation,
+  onOpenLinkedFragment,
   onOpenRecommendation,
   onSend,
 }: CompanionChatPanelProps) {
@@ -66,8 +69,10 @@ export function CompanionChatPanel({
   const [isSending, setIsSending] = useState(false);
   const [recommendationAction, setRecommendationAction] =
     useState<RecommendationPendingAction>(null);
+  const [openingFragmentId, setOpeningFragmentId] = useState<string | null>(null);
   const [localErrorMessage, setLocalErrorMessage] = useState<string | null>(null);
-  const isBusy = isPending || isSending || recommendationAction !== null;
+  const isBusy =
+    isPending || isSending || recommendationAction !== null || openingFragmentId !== null;
   const displayedErrorMessage = localErrorMessage ?? errorMessage;
 
   useEffect(() => {
@@ -151,6 +156,25 @@ export function CompanionChatPanel({
     }
   }
 
+  async function handleOpenLinkedFragment(
+    fragmentId: string,
+    triggerElement: HTMLButtonElement,
+  ): Promise<void> {
+    if (isBusy) {
+      return;
+    }
+
+    setOpeningFragmentId(fragmentId);
+    setLocalErrorMessage(null);
+    try {
+      await onOpenLinkedFragment(fragmentId, triggerElement);
+    } catch {
+      setLocalErrorMessage("这株植物暂时没有打开。链接和读取结果仍保存在本地，请重试。");
+    } finally {
+      setOpeningFragmentId(null);
+    }
+  }
+
   function handleRequestClose(): void {
     if (!isBusy) {
       setLocalErrorMessage(null);
@@ -204,6 +228,7 @@ export function CompanionChatPanel({
         >
           {messages.map((message) => {
             const isUser = message.role === "user";
+            const linkedFragmentId = message.fragmentId;
 
             return (
               <li className={`flex ${isUser ? "justify-end" : "justify-start"}`} key={message.id}>
@@ -216,6 +241,22 @@ export function CompanionChatPanel({
                 >
                   <p className="sr-only">{isUser ? "你说：" : "花园伙伴说："}</p>
                   <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+                  {linkedFragmentId !== null ? (
+                    <button
+                      className={`mt-3 rounded-full border px-3 py-1.5 text-xs font-semibold disabled:cursor-wait disabled:opacity-60 ${
+                        isUser
+                          ? "border-white/55 text-white hover:bg-white/10"
+                          : "border-garden-accent text-garden-accent hover:bg-garden-soft"
+                      }`}
+                      disabled={isBusy}
+                      onClick={(event) =>
+                        void handleOpenLinkedFragment(linkedFragmentId, event.currentTarget)
+                      }
+                      type="button"
+                    >
+                      {openingFragmentId === linkedFragmentId ? "正在打开…" : "打开这株植物"}
+                    </button>
+                  ) : null}
                   <time
                     className={`mt-1 block text-right text-[0.68rem] ${
                       isUser ? "text-white/75" : "text-garden-muted"

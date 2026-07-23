@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { PlantViewModel } from "../../../domain/garden/plant-view-model";
 import { GameBridge } from "../../../game/bridge/game-bridge";
-import type { ReactToGameEvent } from "../../../game/bridge/game-events";
+import type { GameToReactEvent, ReactToGameEvent } from "../../../game/bridge/game-events";
 
 const PLANT: PlantViewModel = {
   plantId: "plant-01",
@@ -16,42 +16,116 @@ const PLANT: PlantViewModel = {
 };
 
 function assertEventPayloadTypes(bridge: GameBridge): void {
-  bridge.publish({ type: "LOAD_GARDEN", plants: [PLANT] });
-  bridge.publish({ type: "ADD_PLANT", plant: PLANT });
-  bridge.publish({ type: "UPDATE_PLANT", plant: PLANT });
-  bridge.publish({ type: "REMOVE_PLANT", plantId: PLANT.plantId });
+  bridge.publishToGame({ type: "LOAD_GARDEN", plants: [PLANT] });
+  bridge.publishToGame({ type: "ADD_PLANT", plant: PLANT });
+  bridge.publishToGame({ type: "UPDATE_PLANT", plant: PLANT });
+  bridge.publishToGame({ type: "REMOVE_PLANT", plantId: PLANT.plantId });
+  bridge.publishToGame({ type: "CANCEL_INTERACTION" });
+  bridge.publishToReact({
+    type: "PLAYER_STATE_CHANGED",
+    playerX: 496,
+    playerY: 560,
+    movementState: "idle",
+    selectedPlantId: null,
+  });
+  bridge.publishToReact({ type: "PLAYER_REACHED_PLANT", plantId: PLANT.plantId });
+  bridge.publishToReact({ type: "MOVEMENT_STARTED", targetType: "ground" });
+  bridge.publishToReact({ type: "MOVEMENT_FAILED", reason: "target_blocked" });
+  bridge.publishToReact({
+    type: "MOVEMENT_FAILED",
+    reason: "plant_unavailable",
+    targetId: PLANT.plantId,
+  });
 
   // @ts-expect-error LOAD_GARDEN requires a plants array.
-  bridge.publish({ type: "LOAD_GARDEN" });
+  bridge.publishToGame({ type: "LOAD_GARDEN" });
   // @ts-expect-error ADD_PLANT requires a complete PlantViewModel.
-  bridge.publish({ type: "ADD_PLANT", plantId: PLANT.plantId });
-  // @ts-expect-error Stage 3 does not expose scene click events.
-  bridge.publish({ type: "PLANT_CLICKED", plantId: PLANT.plantId });
+  bridge.publishToGame({ type: "ADD_PLANT", plantId: PLANT.plantId });
+  // @ts-expect-error PLAYER_REACHED_PLANT requires a plant id.
+  bridge.publishToReact({ type: "PLAYER_REACHED_PLANT" });
+  // @ts-expect-error Movement targets only use the documented target types.
+  bridge.publishToReact({ type: "MOVEMENT_STARTED", targetType: "companion" });
+  // @ts-expect-error Movement failures only use the documented reasons.
+  bridge.publishToReact({ type: "MOVEMENT_FAILED", reason: "unknown" });
+  bridge.publishToReact({
+    type: "PLAYER_STATE_CHANGED",
+    playerX: 496,
+    playerY: 560,
+    // @ts-expect-error Player state cannot use an arbitrary movement state.
+    movementState: "paused",
+    selectedPlantId: null,
+  });
 }
 
 describe("GameBridge", () => {
-  it("publishes a LOAD_GARDEN event to subscribers", () => {
+  it("publishes React events only to game subscribers", () => {
     const bridge = new GameBridge();
-    const listener = vi.fn();
+    const gameListener = vi.fn();
+    const reactListener = vi.fn();
     const event: ReactToGameEvent = { type: "LOAD_GARDEN", plants: [PLANT] };
 
-    bridge.subscribe(listener);
-    bridge.publish(event);
+    bridge.subscribeToGame(gameListener);
+    bridge.subscribeToReact(reactListener);
+    bridge.publishToGame(event);
 
-    expect(listener).toHaveBeenCalledOnce();
-    expect(listener).toHaveBeenCalledWith(event);
+    expect(gameListener).toHaveBeenCalledOnce();
+    expect(gameListener).toHaveBeenCalledWith(event);
+    expect(reactListener).not.toHaveBeenCalled();
   });
 
-  it("stops delivering events after unsubscribe", () => {
+  it("publishes reached and failed events only to React subscribers", () => {
+    const bridge = new GameBridge();
+    const gameListener = vi.fn();
+    const reactListener = vi.fn();
+    const reachedEvent: GameToReactEvent = {
+      type: "PLAYER_REACHED_PLANT",
+      plantId: PLANT.plantId,
+    };
+    const failedEvent: GameToReactEvent = {
+      type: "MOVEMENT_FAILED",
+      reason: "path_not_found",
+      targetId: PLANT.plantId,
+    };
+
+    bridge.subscribeToGame(gameListener);
+    bridge.subscribeToReact(reactListener);
+    bridge.publishToReact(reachedEvent);
+    bridge.publishToReact(failedEvent);
+
+    expect(reactListener).toHaveBeenNthCalledWith(1, reachedEvent);
+    expect(reactListener).toHaveBeenNthCalledWith(2, failedEvent);
+    expect(gameListener).not.toHaveBeenCalled();
+  });
+
+  it("stops delivering either direction after unsubscribe", () => {
+    const bridge = new GameBridge();
+    const gameListener = vi.fn();
+    const reactListener = vi.fn();
+    const unsubscribeGame = bridge.subscribeToGame(gameListener);
+    const unsubscribeReact = bridge.subscribeToReact(reactListener);
+
+    unsubscribeGame();
+    unsubscribeGame();
+    unsubscribeReact();
+    unsubscribeReact();
+    bridge.publishToGame({ type: "LOAD_GARDEN", plants: [PLANT] });
+    bridge.publishToReact({ type: "PLAYER_REACHED_PLANT", plantId: PLANT.plantId });
+
+    expect(gameListener).not.toHaveBeenCalled();
+    expect(reactListener).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate a listener during a Strict Mode style resubscription", () => {
     const bridge = new GameBridge();
     const listener = vi.fn();
-    const unsubscribe = bridge.subscribe(listener);
+    const firstCleanup = bridge.subscribeToReact(listener);
 
-    unsubscribe();
-    unsubscribe();
-    bridge.publish({ type: "LOAD_GARDEN", plants: [PLANT] });
+    firstCleanup();
+    bridge.subscribeToReact(listener);
+    bridge.subscribeToReact(listener);
+    bridge.publishToReact({ type: "PLAYER_REACHED_PLANT", plantId: PLANT.plantId });
 
-    expect(listener).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledOnce();
   });
 
   it("keeps bridge instances isolated", () => {
@@ -60,36 +134,30 @@ describe("GameBridge", () => {
     const firstListener = vi.fn();
     const secondListener = vi.fn();
 
-    firstBridge.subscribe(firstListener);
-    secondBridge.subscribe(secondListener);
-    firstBridge.publish({ type: "ADD_PLANT", plant: PLANT });
+    firstBridge.subscribeToReact(firstListener);
+    secondBridge.subscribeToReact(secondListener);
+    firstBridge.publishToReact({ type: "PLAYER_REACHED_PLANT", plantId: PLANT.plantId });
 
     expect(firstListener).toHaveBeenCalledOnce();
     expect(secondListener).not.toHaveBeenCalled();
   });
 
-  it("does not register the same listener twice", () => {
+  it("clears both directions on destroy and remains inert when destroyed again", () => {
     const bridge = new GameBridge();
-    const listener = vi.fn();
+    const gameListener = vi.fn();
+    const reactListener = vi.fn();
 
-    bridge.subscribe(listener);
-    bridge.subscribe(listener);
-    bridge.publish({ type: "LOAD_GARDEN", plants: [PLANT] });
-
-    expect(listener).toHaveBeenCalledOnce();
-  });
-
-  it("clears listeners on destroy and remains inert when destroyed again", () => {
-    const bridge = new GameBridge();
-    const listener = vi.fn();
-
-    bridge.subscribe(listener);
+    bridge.subscribeToGame(gameListener);
+    bridge.subscribeToReact(reactListener);
     bridge.destroy();
     bridge.destroy();
-    bridge.publish({ type: "REMOVE_PLANT", plantId: PLANT.plantId });
+    bridge.publishToGame({ type: "REMOVE_PLANT", plantId: PLANT.plantId });
+    bridge.publishToReact({ type: "MOVEMENT_FAILED", reason: "target_blocked" });
 
-    expect(listener).not.toHaveBeenCalled();
-    expect(() => bridge.subscribe(listener)).toThrow(/destroyed GameBridge/u);
+    expect(gameListener).not.toHaveBeenCalled();
+    expect(reactListener).not.toHaveBeenCalled();
+    expect(() => bridge.subscribeToGame(gameListener)).toThrow(/destroyed GameBridge/u);
+    expect(() => bridge.subscribeToReact(reactListener)).toThrow(/destroyed GameBridge/u);
   });
 
   it("keeps invalid event payloads as compile-time failures", () => {

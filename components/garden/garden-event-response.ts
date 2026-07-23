@@ -1,6 +1,8 @@
 import type { PlantViewModel } from "@/domain";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
 
+export type GardenMovementEvent = Exclude<GardenInteractionEvent, { type: "COMPANION_CLICKED" }>;
+
 export type GardenEventResponse =
   | Readonly<{
       type: "status";
@@ -25,7 +27,7 @@ function findPlant(plants: readonly PlantViewModel[], plantId: string): PlantVie
 }
 
 export function resolveGardenEventResponse(
-  event: GardenInteractionEvent,
+  event: GardenMovementEvent,
   plants: readonly PlantViewModel[],
 ): GardenEventResponse {
   if (event.type === "MOVEMENT_STARTED") {

@@ -43,7 +43,7 @@ export function ModalDialog({
     <dialog
       aria-describedby={describedBy}
       aria-labelledby={labelledBy}
-      className={className}
+      className={`${className ?? ""} [&:not([open])]:hidden`}
       onCancel={(event) => {
         event.preventDefault();
 

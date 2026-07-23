@@ -6,6 +6,7 @@ import type { PlantViewModel } from "../../domain";
 import { GARDEN_MAP_CONFIG } from "../config/garden-map";
 import { GARDEN_SCENE_KEY } from "../config/game-config";
 import { PlayerSprite } from "../entities/PlayerSprite";
+import { CompanionRenderSystem } from "../systems/CompanionRenderSystem";
 import { GardenMapRenderer } from "../systems/GardenMapRenderer";
 import { InteractionSystem } from "../systems/InteractionSystem";
 import { MovementSystem, type MovementSnapshot } from "../systems/MovementSystem";
@@ -15,6 +16,7 @@ import { PlantRenderSystem } from "../systems/PlantRenderSystem";
 type RuntimeFailureHandler = (kind: "initialize" | "update") => void;
 
 export class GardenScene extends Phaser.Scene {
+  private companionRenderSystem: CompanionRenderSystem | null = null;
   private plantRenderSystem: PlantRenderSystem | null = null;
   private movementSystem: MovementSystem | null = null;
   private interactionSystem: InteractionSystem | null = null;
@@ -47,6 +49,11 @@ export class GardenScene extends Phaser.Scene {
       const pathfindingSystem = new PathfindingSystem(GARDEN_MAP_CONFIG);
       this.plantRenderSystem = new PlantRenderSystem(this, (plant) =>
         this.handlePlantClicked(plant),
+      );
+      this.companionRenderSystem = new CompanionRenderSystem(
+        this,
+        GARDEN_MAP_CONFIG.companionPosition,
+        () => this.handleCompanionClicked(),
       );
       this.movementSystem = new MovementSystem(this.player, pathfindingSystem, (snapshot) => {
         this.movementSnapshot = snapshot;
@@ -89,6 +96,17 @@ export class GardenScene extends Phaser.Scene {
     try {
       if (event.type === "CANCEL_INTERACTION") {
         this.interactionSystem?.cancelInteraction();
+        return;
+      }
+
+      if (event.type === "SET_COMPANION") {
+        const companionRenderSystem = this.companionRenderSystem;
+
+        if (companionRenderSystem === null) {
+          throw new Error("Companion render system is not ready");
+        }
+
+        companionRenderSystem.setCompanion(event.companion);
         return;
       }
 
@@ -140,6 +158,15 @@ export class GardenScene extends Phaser.Scene {
     }
   }
 
+  private handleCompanionClicked(): void {
+    if (this.isDisposed) {
+      return;
+    }
+
+    this.interactionSystem?.cancelInteraction();
+    this.bridge.publishToReact({ type: "COMPANION_CLICKED" });
+  }
+
   private publishPlayerState(): void {
     if (this.isDisposed) {
       return;
@@ -166,6 +193,8 @@ export class GardenScene extends Phaser.Scene {
     this.interactionSystem?.destroy();
     this.interactionSystem = null;
     this.movementSystem = null;
+    this.companionRenderSystem?.destroy();
+    this.companionRenderSystem = null;
     this.plantRenderSystem?.destroy();
     this.plantRenderSystem = null;
     this.player = null;

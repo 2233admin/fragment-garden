@@ -37,4 +37,9 @@ export const GARDEN_RENDER_COLORS = Object.freeze({
   selection: 0xf0c55e,
   hedge: 0x557b59,
   hedgeShade: 0x3f6548,
+  companionCat: 0x718b79,
+  companionDog: 0xb78a62,
+  companionAccent: 0xf3e5ca,
+  companionOutline: 0x324b41,
+  companionHover: 0xf0c55e,
 });

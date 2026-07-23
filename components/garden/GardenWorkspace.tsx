@@ -1,12 +1,14 @@
 "use client";
 
-import { Activity, useRef, useState } from "react";
+import { Activity, useCallback, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
+import { CompanionExperience } from "@/components/companion/CompanionExperience";
 import { FragmentDetailDialog } from "@/components/fragments/FragmentDetailDialog";
 import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
 import { useDormancySync } from "@/components/fragments/useDormancySync";
 import type { GardenPlantSnapshot } from "@/domain";
+import type { CompanionViewModel } from "@/domain/garden/companion-view-model";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
 import { queryGardenPlantSnapshot } from "@/services/garden-query-service";
 import { recordFragmentViewed } from "@/services/record-fragment-viewed";
@@ -31,6 +33,7 @@ type OpenFragmentOptions = Readonly<{
   replaceSelected?: boolean;
   successMessage?: string;
   triggerElement: HTMLButtonElement | null;
+  viewAlreadyRecorded?: boolean;
 }>;
 
 const LOADING_GARDEN_STATE: GardenQueryState = { status: "loading" };
@@ -43,12 +46,33 @@ export function GardenWorkspace() {
   const [openingPlantId, setOpeningPlantId] = useState<string | null>(null);
   const [cancelInteractionRequest, setCancelInteractionRequest] = useState(0);
   const [interactionFeedback, setInteractionFeedback] = useState<InteractionFeedback | null>(null);
+  const [companion, setCompanion] = useState<CompanionViewModel | null>(null);
+  const [isCompanionChatOpen, setIsCompanionChatOpen] = useState(false);
   const selectedFragmentIdRef = useRef<string | null>(null);
   const openingLockRef = useRef<string | null>(null);
   const openRequestGenerationRef = useRef(0);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const gardenModeButtonRef = useRef<HTMLButtonElement>(null);
   const cardModeButtonRef = useRef<HTMLButtonElement>(null);
+  const handleCompanionTypeChange = useCallback(
+    (companionType: CompanionViewModel["type"] | null): void => {
+      setCompanion((current) => {
+        if (companionType === null) {
+          return null;
+        }
+
+        return current?.type === companionType ? current : { type: companionType };
+      });
+    },
+    [],
+  );
+  const handleCompanionChatOpenChange = useCallback((shouldOpen: boolean): void => {
+    if (shouldOpen) {
+      setCancelInteractionRequest((request) => request + 1);
+    }
+
+    setIsCompanionChatOpen(shouldOpen);
+  }, []);
 
   useDormancySync({ onFeedback: setInteractionFeedback });
 
@@ -87,7 +111,13 @@ export function GardenWorkspace() {
 
   async function openFragment(
     fragmentId: string,
-    { plantId, replaceSelected = false, successMessage, triggerElement }: OpenFragmentOptions,
+    {
+      plantId,
+      replaceSelected = false,
+      successMessage,
+      triggerElement,
+      viewAlreadyRecorded = false,
+    }: OpenFragmentOptions,
   ): Promise<boolean> {
     if (
       openingLockRef.current !== null ||
@@ -110,7 +140,9 @@ export function GardenWorkspace() {
     });
 
     try {
-      await recordFragmentViewed({ fragmentId });
+      if (!viewAlreadyRecorded) {
+        await recordFragmentViewed({ fragmentId });
+      }
 
       if (openRequestGenerationRef.current !== requestGeneration) {
         return false;
@@ -167,6 +199,11 @@ export function GardenWorkspace() {
   }
 
   function handleGameEvent(event: GardenInteractionEvent): void {
+    if (event.type === "COMPANION_CLICKED") {
+      handleCompanionChatOpenChange(true);
+      return;
+    }
+
     const response = resolveGardenEventResponse(
       event,
       gardenState.status === "ready" ? gardenState.snapshot.plants : [],
@@ -189,6 +226,7 @@ export function GardenWorkspace() {
 
   function handleModeChange(nextMode: GardenMode): void {
     setMode(nextMode);
+    setIsCompanionChatOpen(false);
     setInteractionFeedback(
       nextMode === "cards"
         ? {
@@ -263,6 +301,28 @@ export function GardenWorkspace() {
           {interactionFeedback?.message}
         </div>
 
+        <CompanionExperience
+          gardenRevision={
+            gardenState.status === "ready"
+              ? gardenState.snapshot.plants
+                  .map(
+                    (plant) =>
+                      `${plant.plantId}:${plant.vitality}:${plant.stage}:${plant.fragmentId}`,
+                  )
+                  .join("|")
+              : gardenState.status
+          }
+          isChatOpen={isCompanionChatOpen}
+          onChatOpenChange={handleCompanionChatOpenChange}
+          onCompanionTypeChange={handleCompanionTypeChange}
+          onOpenRecommendedFragment={(fragmentId, triggerElement) =>
+            openFragment(fragmentId, {
+              triggerElement,
+              viewAlreadyRecorded: true,
+            })
+          }
+        />
+
         <Activity mode={mode === "garden" ? "visible" : "hidden"}>
           <section aria-labelledby="garden-mode-title" className="pt-3" id="garden-mode-panel">
             <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
@@ -300,6 +360,7 @@ export function GardenWorkspace() {
               <div className="mx-auto max-w-[960px] space-y-4">
                 <GardenCanvas
                   cancelInteractionRequest={cancelInteractionRequest}
+                  companion={companion}
                   onGameEvent={handleGameEvent}
                   onShowCards={() => handleModeChange("cards")}
                   plants={gardenState.snapshot.plants}

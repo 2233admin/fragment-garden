@@ -1,3 +1,4 @@
+import type { CompanionViewModel } from "../../domain/garden/companion-view-model";
 import type { PlantViewModel } from "../../domain/garden/plant-view-model";
 
 export type ReactToGameEvent =
@@ -19,6 +20,10 @@ export type ReactToGameEvent =
     }
   | {
       type: "CANCEL_INTERACTION";
+    }
+  | {
+      type: "SET_COMPANION";
+      companion: CompanionViewModel | null;
     };
 
 export type MovementFailureReason = "target_blocked" | "path_not_found" | "plant_unavailable";
@@ -44,6 +49,9 @@ export type GameToReactEvent =
       type: "MOVEMENT_FAILED";
       reason: MovementFailureReason;
       targetId?: string;
+    }
+  | {
+      type: "COMPANION_CLICKED";
     };
 
 export type GardenInteractionEvent = Exclude<GameToReactEvent, { type: "PLAYER_STATE_CHANGED" }>;

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PlantViewModel } from "@/domain";
+import type { CompanionViewModel } from "@/domain/garden/companion-view-model";
 import { GameBridge } from "@/game/bridge/game-bridge";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
 import { GARDEN_MAP_CONFIG } from "@/game/config/garden-map";
@@ -13,6 +14,7 @@ import { GardenLoadingState } from "./GardenLoadingState";
 
 type GardenCanvasProps = {
   plants: readonly PlantViewModel[];
+  companion: CompanionViewModel | null;
   cancelInteractionRequest: number;
   onGameEvent: (event: GardenInteractionEvent) => void;
   onShowCards: () => void;
@@ -25,6 +27,7 @@ const LOADING_RUNTIME_STATE: RuntimeState = { status: "loading" };
 
 export function GardenCanvas({
   plants,
+  companion,
   cancelInteractionRequest,
   onGameEvent,
   onShowCards,
@@ -36,6 +39,7 @@ export function GardenCanvas({
   const bridgeRef = useRef<GameBridge | null>(null);
   const runtimeRef = useRef<GardenGameRuntime | null>(null);
   const latestPlantsRef = useRef(plants);
+  const latestCompanionRef = useRef(companion);
   const isSceneReadyRef = useRef(false);
   const failureHandlerRef = useRef<((kind: GardenRuntimeFailure) => void) | null>(null);
   const gameEventHandlerRef = useRef(onGameEvent);
@@ -44,6 +48,10 @@ export function GardenCanvas({
   useEffect(() => {
     latestPlantsRef.current = plants;
   }, [plants]);
+
+  useEffect(() => {
+    latestCompanionRef.current = companion;
+  }, [companion]);
 
   useEffect(() => {
     gameEventHandlerRef.current = onGameEvent;
@@ -142,6 +150,10 @@ export function GardenCanvas({
               type: "LOAD_GARDEN",
               plants: [...latestPlantsRef.current],
             });
+            bridge.publishToGame({
+              type: "SET_COMPANION",
+              companion: latestCompanionRef.current,
+            });
 
             if (isCancelled || didFail) {
               return;
@@ -186,6 +198,21 @@ export function GardenCanvas({
   }, [plants]);
 
   useEffect(() => {
+    if (!isSceneReadyRef.current) {
+      return;
+    }
+
+    try {
+      bridgeRef.current?.publishToGame({
+        type: "SET_COMPANION",
+        companion,
+      });
+    } catch {
+      failureHandlerRef.current?.("update");
+    }
+  }, [companion]);
+
+  useEffect(() => {
     if (cancelInteractionRequest <= handledCancelRequestRef.current) {
       return;
     }
@@ -218,6 +245,8 @@ export function GardenCanvas({
     <div
       aria-busy={runtimeState.status === "loading"}
       className="relative aspect-[3/2] w-full overflow-hidden rounded-2xl border border-garden-line bg-garden-paper shadow-[0_18px_45px_rgba(37,72,56,0.14)]"
+      data-companion-count={companion === null ? 0 : 1}
+      data-companion-type={companion?.type}
       data-plant-count={plants.length}
       data-player-x={GARDEN_MAP_CONFIG.playerSpawn.x.toFixed(2)}
       data-player-y={GARDEN_MAP_CONFIG.playerSpawn.y.toFixed(2)}
@@ -226,7 +255,9 @@ export function GardenCanvas({
       ref={containerRef}
     >
       <div
-        aria-label={`花园画面。可以点击地面移动人物，点击植物走近并查看内容。当前有 ${plants.length} 株已放置植物。`}
+        aria-label={`花园画面。可以点击地面移动人物，点击植物走近并查看内容。当前有 ${plants.length} 株已放置植物。${
+          companion === null ? "尚未选择花园伙伴。" : "可以点击花园伙伴打开本地聊天。"
+        }`}
         className="absolute inset-0 [&_canvas]:block [&_canvas]:max-h-full [&_canvas]:max-w-full"
         ref={hostRef}
         role="img"

@@ -90,6 +90,8 @@ Next.js Route Handlers
 OpenAI API
 ```
 
+上图中的 Route Handlers 和 OpenAI 是后续目标架构。阶段 6 的 Chatbot 已完成本地外壳，但只使用确定性本地回复引擎，不存在 `/api/ai/chat` 请求，也不读取链接、图片或语音。
+
 ---
 
 ## 4. 模块边界
@@ -172,6 +174,10 @@ Domain 不依赖 React、Phaser 或 Dexie。
 - 复盘、封存、恢复和软删除；
 - 标记完成；
 - 从父碎片原子创建新想法及关系；
+- 完成唯一伙伴的首次选择并保存统一欢迎语；
+- 原子保存本地聊天和推荐动作；
+- 创建每日非强制旧碎片推荐；
+- 打开或忽略推荐；
 - 后台 AI 分析；
 - 相似候选生成；
 - 备份恢复。
@@ -271,7 +277,14 @@ type Settings = {
 };
 ```
 
-猫和狗只影响外观。
+阶段 6 只保存一个本地 Settings 记录。首次选择通过
+`completeCompanionOnboarding({ companionType, now })` 在 Settings 与 ChatMessage 的同一事务内完成：
+
+- Settings 不存在时使用未完成 onboarding、`companionType = null` 的默认值；
+- 只能提交 `cat` 或 `dog`，成功后同时写入 `onboardingCompleted = true`；
+- onboarding 完成后不提供更换入口，Service 也拒绝把已选择的猫改成狗或反向修改；
+- 猫和狗只影响外观，不进入回复、推荐或工具逻辑；
+- 统一欢迎语只写一次；Settings 或欢迎语任一写入失败时全部回滚。
 
 ### 6.2 Fragment
 
@@ -468,6 +481,14 @@ type Recommendation = {
 };
 ```
 
+阶段 6 继续复用该结构，不增加 `status` 字段：
+
+- `openedAt = null` 且 `dismissedAt = null` 表示已展示；
+- `openedAt != null` 表示已打开；
+- `dismissedAt != null` 表示已忽略。
+
+推荐只有在即将呈现给用户时才写入，不在纯候选计算阶段写库。
+
 ### 6.9 ChatMessage
 
 ```ts
@@ -479,6 +500,9 @@ type ChatMessage = {
 };
 ```
 
+阶段 6 只有一个本地对话线程，不增加 Conversation 表，不支持新建、切换或清空会话。消息按
+`createdAt`、`id` 稳定排序；发送 Service 在一个事务中保存 user 和 assistant 消息，并使用单调时间保证刷新后的阅读顺序。伙伴回复或推荐写入失败时，整个发送事务回滚，不伪造已保存的回复。
+
 ### 6.10 数据库版本 2
 
 阶段 5 首次启用显式历史数据迁移。V2 不增加表或索引，只修复阶段 2 以来可能遗留的退休植物槽位：
@@ -489,6 +513,8 @@ Fragment.lifecycleStatus = archived 或 deleted
 ```
 
 迁移不物理删除 Fragment、Plant 或 Event，也不修改原始内容、成长分和完成状态。新产生的封存与软删除由各自 Service 在同一事务内立即释放槽位；V2 只负责修复升级前已经存在的数据。
+
+阶段 6 直接复用 V1 已建立的 Settings、Recommendation 和 ChatMessage 表及其现有字段。当前数据库仍为 V2，没有新增 V3、表、索引或迁移。
 
 ---
 
@@ -672,7 +698,8 @@ type PlantSlotConfig = {
 
 当前 36 个槽位直接复用领域层的 `slot-01` 至 `slot-36`，每个槽位都有固定显示坐标和为阶段 4 预留的 interaction point。坐标通过单元测试保证完整、唯一、位于地图内、避开道路和水池，并保持最小间距。
 
-`companionPosition` 仅为后续阶段保留，不渲染猫或狗。
+阶段 6 在固定 `companionPosition` 渲染唯一伙伴。React 只把已完成 onboarding 的
+`{ type: "cat" | "dog" }` 发送给 Phaser；未选择或 Settings 读取失败时发送 `null`，场景不渲染伙伴。猫狗使用相同位置、点击区域、hover 和点击行为，只以简单颜色与耳形占位图区分外观，不移动、不跟随人物，也没有养成状态。
 
 ### 8.1 阶段 4 导航网格
 
@@ -735,10 +762,15 @@ type ReactToGameEvent =
   | { type: "ADD_PLANT"; plant: PlantViewModel }
   | { type: "UPDATE_PLANT"; plant: PlantViewModel }
   | { type: "REMOVE_PLANT"; plantId: string }
-  | { type: "CANCEL_INTERACTION" };
+  | { type: "CANCEL_INTERACTION" }
+  | {
+      type: "SET_COMPANION";
+      companion: { type: "cat" | "dog" } | null;
+    };
 ```
 
-每个 `GardenCanvas` 创建独立 Bridge 实例。React 的 live query 初次和后续变化都发送完整 `LOAD_GARDEN`；`GardenScene` 按 `plantId` 做确定性新增、更新和移除。Bridge 不访问 Dexie 或 React state，场景关闭时取消订阅，组件清理时销毁实例。
+每个 `GardenCanvas` 创建独立 Bridge 实例。React 的 live query 初次和后续变化都发送完整 `LOAD_GARDEN`；`GardenScene` 按 `plantId` 做确定性新增、更新和移除。伙伴选择变化通过独立的
+`SET_COMPANION` 同步，重复发送同一类型不会重复创建，类型变化会先销毁旧实例，`null` 会移除实例，因此同一场景最多只有一个伙伴。Bridge 不访问 Dexie 或 React state，场景关闭时取消订阅，组件清理时销毁实例。
 
 植物数据变化不会重置普通地面移动；当前交互目标植物被移除时，Phaser 取消目标并安全发送 `plant_unavailable`。
 
@@ -768,7 +800,8 @@ type GameToReactEvent =
         | "path_not_found"
         | "plant_unavailable";
       targetId?: string;
-    };
+    }
+  | { type: "COMPANION_CLICKED" };
 ```
 
 点击植物流程：
@@ -789,11 +822,54 @@ type GameToReactEvent =
 
 Bridge 为双向独立监听集合，两个方向不会接收到自己的事件。订阅可单独取消，销毁会清空全部监听；Strict Mode 重订阅不会产生重复到达处理。`PLAYER_STATE_CHANGED` 只在初始化、开始、停止、到达、取消或选择变化时发送，供 Canvas 容器更新非敏感诊断属性，不在 Phaser `update` 中逐帧发送，也不进入业务详情处理。
 
+伙伴点击不会触发人物寻路，也不传递 Settings、ChatMessage 或伙伴类型。Phaser 只发出无 payload 的
+`COMPANION_CLICKED`，React 打开与 Canvas 外“打开花园伙伴”按钮共用的聊天面板。这样即使 Phaser 渲染失败，键盘和屏幕阅读器用户仍可进入同一功能。
+两个聊天入口都会先取消尚未完成的植物交互，避免人物随后到达时把碎片详情叠加到聊天面板上。
+
 ### 9.3 Canvas 生命周期
 
 Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡片模式时，React Activity 保留卡片搜索、排序和创建状态，同时销毁 Phaser Game、输入监听、路线、Bridge 和 Canvas。返回花园时使用最新快照重建单个 Canvas，人物一致地回到出生点，旧交互目标不会继续。
 
 异步 import 使用取消标记，避免 Strict Mode 或 HMR 留下孤立 Canvas。同一页面最多存在一个 Canvas。测试诊断属性由 GameBridge 的低频状态转换事件更新，只暴露人物坐标、移动状态和选中 plant id，不包含正文或附件，产品逻辑不依赖这些属性。
+
+### 9.4 阶段 6 本地 Chatbot 与推荐边界
+
+本地回复引擎是无状态纯 TypeScript：
+
+```ts
+type CompanionResponse = {
+  message: string;
+  action: null | { type: "RECOMMEND_FRAGMENT" };
+};
+```
+
+`LocalCompanionResponseEngine` 只接收用户文本，不接收 `companionType`，不访问 Dexie、Phaser、React、网络或外部模型。当前确定性意图包括使用帮助、真实成长规则、72 小时休眠规则、旧碎片推荐和有界 fallback。对成长规则会明确说明当前主要支持文字补充，不声称链接、图片或语音已经实现。
+
+回复引擎只产生 action，应用 Service 负责执行：
+
+```text
+用户消息
+→ 本地回复引擎生成 message + action
+→ Service 执行可选 RECOMMEND_FRAGMENT
+→ user、assistant 与真正展示的 Recommendation 原子写入
+→ React 通过 live query 更新消息和推荐卡片
+```
+
+旧碎片候选由 `selectFragmentRecommendation` 纯函数计算：
+
+- 只包含 lifecycle 为 active 或 dormant 且 completion 为 open 的 Fragment；
+- archived、deleted、completed 和创建不足 24 小时的内容均被排除；
+- 排除浏览器本地日期当天已经展示过的 Fragment；
+- 依次按最早 `lastInteractedAt`、最早 `createdAt`、`id` 稳定升序，返回第一条；
+- 不使用随机、AI、Embedding、标题判断，也不修改传入数组。
+
+用户主动在聊天中请求推荐时可选择当天尚未展示的下一条内容；每日主动入口另外以
+`Settings.lastRecommendationDate` 限制每个浏览器本地日期最多展示一次。每日 Service 在
+Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期，兼容 Strict Mode 并发重入；没有候选时不写 Recommendation，也不消耗当天机会。入口只提供温和建议，不使用通知、定时任务、连续天数或强制操作。
+
+打开推荐时，`openFragmentRecommendation` 在单一事务中把 Recommendation 标记为 opened，并复用
+`recordFragmentViewed` 写入 viewed、恢复 dormant 内容，再由 React 打开共用
+`FragmentDetailDialog`，不会创建伙伴专用详情。忽略只写 `dismissedAt`，不改变 Fragment、Plant、生命周期、成长分或事件。任一事务步骤失败都回滚，卡片模式和普通详情入口继续可用。
 
 ---
 
@@ -884,7 +960,7 @@ Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡�
 }
 ```
 
-### 11.5 Chatbot
+### 11.5 未来 AI Chatbot（尚未实现）
 
 `POST /api/ai/chat`
 
@@ -912,7 +988,11 @@ Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡�
 }
 ```
 
-Chatbot 只能建议动作，不能直接写数据库。
+该接口属于后续目标，阶段 6 没有实现或调用它。即使未来接入模型，Chatbot 仍只能建议动作，不能直接写数据库。
+
+阶段 7 尚未开始。未来若让 Chatbot 导入链接，只能注册输入输出受校验的受限
+`import_link` 工具，并通过 `GetNoteConnector` 执行；阶段 6 没有注册或执行该工具，也没有
+得到大脑（GetNote）、GETNOTE_API_KEY、链接读取结果或连接器实现。
 
 ---
 

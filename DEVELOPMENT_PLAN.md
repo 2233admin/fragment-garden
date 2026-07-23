@@ -55,6 +55,9 @@
 | 10 | 备份、回归与容错 | 可导入导出，关键流程有自动测试 |
 | 11 | 一周自测与 MVP 收口 | 根据真实使用结果修正产品 |
 
+当前阶段 6 已完成，阶段 7 尚未开始。浏览器数据库仍为 V2；阶段 6 直接复用既有
+Settings、Recommendation 和 ChatMessage 表，没有新增 V3 或迁移。
+
 ---
 
 # 4. 阶段 0：项目初始化
@@ -269,8 +272,8 @@ test: cover typed GameBridge events
 
 # 9. 阶段 5：成长、休眠、完成与新想法（已完成）
 
-阶段 5 的本地生命周期闭环已完成；阶段 6 尚未开始。完成本阶段的本地提交后，以
-`m2-garden-loop` 标记这一里程碑。
+阶段 5 的本地生命周期闭环已完成，并已以 `m2-garden-loop` 标记这一里程碑。阶段 6 也已完成，
+但没有新增里程碑标签。
 
 ## 目标
 
@@ -326,9 +329,8 @@ test: cover typed GameBridge events
 
 ## 完成边界
 
-上述功能、自动化检查和差异审查构成阶段 5 的完成边界；本地提交完成后创建
-`m2-garden-loop` 标签。在明确开始下一阶段前，阶段 6 仍视为未开始；本阶段未提前实现伙伴选择或
-Chatbot 外壳。
+上述功能、自动化检查和差异审查构成阶段 5 的完成边界；`m2-garden-loop` 标签已创建。阶段 6
+在此基础上增加伙伴与本地推荐，没有改变阶段 5 的生命周期规则。
 
 ## 建议 commits
 
@@ -343,33 +345,52 @@ docs: document complete garden lifecycle
 
 ---
 
-# 10. 阶段 6：伙伴选择与 Chatbot 外壳
+# 10. 阶段 6：伙伴选择与 Chatbot 外壳（已完成）
 
 ## 目标
 
-建立猫或狗作为统一 AI Chatbot 入口的产品结构，先不接真实模型。
+猫或狗现在作为同一个本地 Chatbot 的花园入口；阶段 6 使用确定性本地引擎，没有接入真实模型。
 
 ## 范围
 
-- 首次选择猫或狗；
-- 本地保存选择；
-- 花园中只显示一个伙伴；
-- 猫狗仅替换外观；
-- Chatbot 面板；
-- 本地固定回复或 Mock；
-- 每日推荐入口；
-- 推荐一株旧植物的确定性逻辑；
-- 伙伴点击打开 Chatbot。
+- 首次必须选择猫或狗，选择与统一欢迎语在单一事务中本地持久化；
+- Settings 缺失时使用默认未完成状态，保存失败不留下部分选择；
+- onboarding 完成后不提供更换入口，Service 同样拒绝替换伙伴；
+- 花园固定 `companionPosition` 最多渲染一个伙伴，猫狗只以颜色和耳形区分；
+- `SET_COMPANION` 只传 `{ type } | null`，`COMPANION_CLICKED` 不携带 Settings 或聊天数据；
+- Canvas 点击和 Canvas 外可访问按钮打开同一个 Chatbot 面板；
+- `LocalCompanionResponseEngine` 以同一套文案处理使用帮助、成长、休眠、推荐和 fallback；
+- 回复引擎不接收 companionType、不读 Dexie、不调用网络，只返回 message 与可选 action；
+- `sendCompanionMessage` 通过 Service 原子保存 user、assistant 和真正展示的可选 Recommendation；
+- ChatMessage 只有一个本地线程，刷新后仍可按稳定顺序读取，不支持清空或多会话；
+- 旧碎片推荐使用纯函数，只选择 active/dormant + open、创建至少 24 小时且当天未展示的内容；
+- 推荐按最早互动、最早创建、id 稳定排序，不使用随机、AI、Embedding 或标题判断；
+- 每日入口使用浏览器本地日期和 `lastRecommendationDate`，有候选时每天最多主动展示一次；
+- 主动聊天请求可继续选择当天未展示的其他候选，不强制打开或修改内容；
+- 打开推荐在事务中标记 opened 并复用 `recordFragmentViewed`，然后打开共用详情；
+- 忽略推荐只标记 dismissed，不修改生命周期、成长分或原始内容；
+- 阶段 6 复用现有 Settings、Recommendation、ChatMessage 表，数据库保持 V2。
 
 ## 验收
 
-- 首次只能选择一个伙伴；
-- 刷新后保留选择；
-- 猫狗的功能和文案完全一致；
-- 点击伙伴打开 Chatbot；
-- 推荐可打开对应碎片；
-- 用户可以忽略；
-- 不存在宠物养成或两套逻辑。
+- 首次只能选择一个伙伴，选择失败可以重试，刷新后不会重复 onboarding；
+- 猫狗使用相同位置、点击区域、功能、文案、回复引擎和推荐规则；
+- 重复同步或 Strict Mode 重建不会产生两个伙伴、Canvas、欢迎语或每日推荐；
+- 点击伙伴或 Canvas 外按钮都能打开同一聊天面板；
+- 欢迎语、用户消息和伙伴回复刷新后仍存在且顺序正确；
+- 帮助、成长、休眠和推荐意图给出确定性回复，未知输入明确说明能力边界；
+- 回复不声称尚未完成的链接、图片或语音已经可用，也不产生 OpenAI 或 GetNote 请求；
+- 推荐排除 archived、deleted、completed、新建不足 24 小时和当天已展示的内容；
+- 每日推荐无候选时不写记录、不消耗日期，有候选时并发调用也只产生一次；
+- 打开 dormant 推荐会写 viewed 并恢复 active，且复用现有 `FragmentDetailDialog`；
+- 忽略不修改 Fragment、Plant、成长分或事件；
+- 任一聊天、推荐或打开事务失败都不留下部分状态；
+- 不存在宠物养成、两套猫狗逻辑、多会话、浏览器通知或强制提醒。
+
+## 完成边界
+
+阶段 6 已完成本地伙伴选择、GameBridge 伙伴呈现、Chatbot 外壳、单线程消息持久化和确定性旧碎片推荐。
+当前仍没有真实 AI、OpenAI Chat Route、链接读取、图片、语音、Embedding、相似碎片或花丛。
 
 ## 建议 commits
 
@@ -381,7 +402,7 @@ feat: add gentle fragment recommendations
 
 ---
 
-# 11. 阶段 7：链接与 AI 内容分析
+# 11. 阶段 7：链接与 AI 内容分析（尚未开始）
 
 ## 目标
 
@@ -389,6 +410,8 @@ feat: add gentle fragment recommendations
 
 ## 范围
 
+- 为 Chatbot 注册输入输出受校验的受限 `import_link` 工具；
+- `import_link` 只能通过 `GetNoteConnector` 访问外部链接能力，不能让回复引擎直接访问网络或数据库；
 - 链接碎片；
 - URL 校验；
 - 安全链接抓取；
@@ -399,6 +422,9 @@ feat: add gentle fragment recommendations
 - 重试；
 - 原始 URL 降级保存；
 - `.env.local` 使用模型配置，不把模型名散落在业务代码中。
+
+以上均为后续计划。当前没有 `import_link`、`GetNoteConnector`、GETNOTE_API_KEY、链接抓取、OpenAI
+Chatbot 或得到大脑（GetNote）调用；不得把阶段 6 的本地确定性回复描述成真实 AI。
 
 ## 验收
 

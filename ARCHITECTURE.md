@@ -63,6 +63,7 @@ MVP 阶段锁定 Phaser 3.90.0，不升级到 Phaser 4，不混用不同版本 A
 ├── Domain
 │   ├── 成长规则
 │   ├── 休眠规则
+│   ├── 网格、坐标转换与路线计算
 │   ├── 推荐规则
 │   ├── 相似度规则
 │   └── 植物槽位规则
@@ -222,6 +223,7 @@ fragment-garden/
 ├── domain/
 │   ├── fragments/
 │   ├── growth/
+│   ├── movement/
 │   ├── plants/
 │   ├── similarity/
 │   └── recommendations/
@@ -534,7 +536,30 @@ type PlantSlotConfig = {
 
 当前 36 个槽位直接复用领域层的 `slot-01` 至 `slot-36`，每个槽位都有固定显示坐标和为阶段 4 预留的 interaction point。坐标通过单元测试保证完整、唯一、位于地图内、避开道路和水池，并保持最小间距。
 
-阶段 3 只在出生点显示静态人物。`companionPosition` 仅为后续阶段保留，不渲染猫或狗；可行走区域和障碍也只配置，不执行人物移动、碰撞或寻路。
+`companionPosition` 仅为后续阶段保留，不渲染猫或狗。
+
+### 8.1 阶段 4 导航网格
+
+阶段 4 在固定地图上使用 `32px` 格心网格：
+
+```text
+960 ÷ 32 = 30 列
+640 ÷ 32 = 20 行
+```
+
+出生点、36 个植物本体格和 36 个 interaction point 均对齐统一格心。场景创建时从 `walkableAreas`、`obstacleAreas` 和固定植物槽生成一次可行走网格并缓存：
+
+- 地图边界不可走；
+- 水池和固定装饰树篱不可走；
+- 植物本体所在格不可走；
+- interaction point 保持可走；
+- 道路与草地属于同一连通可行走区域。
+
+开发期校验会验证出生点可行走、interaction point 唯一且可行走、36 个 interaction point 均可从出生点到达，以及道路与水池不重叠。配置不合法时场景初始化失败并回退到现有花园错误状态，而不是在移动逻辑中增加槽位特例。
+
+坐标转换、栅格化、路线推进和四方向 BFS 位于纯 TypeScript 模块，不导入 Phaser。BFS 使用固定邻居顺序，不支持随机、斜向、动态障碍或第三方寻路依赖；相同输入始终返回相同路线。
+
+人物以 `160px/s` 沿格心路线移动，使用 Phaser `update` 的 delta time。新点击会原子替换旧路线；若人物正位于两个格心之间，会先沿原轴回到当前格心，再执行新 BFS 路线，避免重定向产生斜线或切过障碍角。取消的旧目标不发送失败或到达事件。人物位置不逐帧进入 React state。
 
 槽位满时：
 
@@ -543,7 +568,7 @@ type PlantSlotConfig = {
 - 卡片模式仍可用；
 - 不因地图容量丢失内容。
 
-### 8.1 花园显示数据
+### 8.2 花园显示数据
 
 Phaser 只接收为显示准备的 `PlantViewModel`：
 
@@ -566,46 +591,73 @@ React 通过花园查询服务在一个只读事务中批量读取 Fragment 和 
 
 ## 9. GameBridge
 
-### 9.1 阶段 3 已实现：React → Phaser
+### 9.1 React → Phaser
 
 ```ts
 type ReactToGameEvent =
   | { type: "LOAD_GARDEN"; plants: PlantViewModel[] }
   | { type: "ADD_PLANT"; plant: PlantViewModel }
   | { type: "UPDATE_PLANT"; plant: PlantViewModel }
-  | { type: "REMOVE_PLANT"; plantId: string };
+  | { type: "REMOVE_PLANT"; plantId: string }
+  | { type: "CANCEL_INTERACTION" };
 ```
 
 每个 `GardenCanvas` 创建独立 Bridge 实例。React 的 live query 初次和后续变化都发送完整 `LOAD_GARDEN`；`GardenScene` 按 `plantId` 做确定性新增、更新和移除。Bridge 不访问 Dexie 或 React state，场景关闭时取消订阅，组件清理时销毁实例。
 
-Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡片模式时，React Activity 保留卡片工作区状态并清理 Phaser effect；返回花园时用最新快照重建单个 Game 和 Canvas。异步 import 使用取消标记，避免 Strict Mode 或 HMR 留下孤立 Canvas。
+植物数据变化不会重置普通地面移动；当前交互目标植物被移除时，Phaser 取消目标并安全发送 `plant_unavailable`。
 
-### 9.2 后续阶段预留，尚未实现
+可访问植物列表直接打开详情时，React 发送 `CANCEL_INTERACTION`，取消 Canvas 中尚未结束的旧植物目标，防止稍后再次触发到达与查看记录。
+
+### 9.2 Phaser → React
 
 ```ts
-type FutureReactToGameEvent =
-  | { type: "FOCUS_PLANT"; plantId: string }
-  | { type: "SET_COMPANION"; companion: "cat" | "dog" };
-
-type FutureGameToReactEvent =
-  | { type: "PLANT_CLICKED"; plantId: string }
+type GameToReactEvent =
+  | {
+      type: "PLAYER_STATE_CHANGED";
+      playerX: number;
+      playerY: number;
+      movementState: "idle" | "moving";
+      selectedPlantId: string | null;
+    }
+  | {
+      type: "MOVEMENT_STARTED";
+      targetType: "ground" | "plant";
+      targetId?: string;
+    }
   | { type: "PLAYER_REACHED_PLANT"; plantId: string }
-  | { type: "COMPANION_CLICKED" }
-  | { type: "MOVEMENT_FAILED"; targetId?: string };
+  | {
+      type: "MOVEMENT_FAILED";
+      reason:
+        | "target_blocked"
+        | "path_not_found"
+        | "plant_unavailable";
+      targetId?: string;
+    };
 ```
 
 点击植物流程：
 
 ```text
 点击植物
+→ Phaser 阻止同一次点击继续触发地面移动
+→ 计算到固定 interaction point 的 BFS 路线
 → Phaser 控制人物移动
 → 到达 interaction point
 → 发出 PLAYER_REACHED_PLANT
-→ React 查询 Dexie
-→ 打开 Fragment Drawer
+→ React 用 plantId 映射 fragmentId
+→ recordFragmentViewed
+→ 打开共用 FragmentDetailDialog
 ```
 
-以上点击、移动和伙伴事件不属于阶段 3。
+移动失败且事件包含植物 ID 时，React 使用同一查看记录和详情流程直接打开内容，并提示“暂时无法走到这株植物，已直接为你打开内容”。普通地面失败只显示可访问状态，不打开碎片。
+
+Bridge 为双向独立监听集合，两个方向不会接收到自己的事件。订阅可单独取消，销毁会清空全部监听；Strict Mode 重订阅不会产生重复到达处理。`PLAYER_STATE_CHANGED` 只在初始化、开始、停止、到达、取消或选择变化时发送，供 Canvas 容器更新非敏感诊断属性，不在 Phaser `update` 中逐帧发送，也不进入业务详情处理。
+
+### 9.3 Canvas 生命周期
+
+Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡片模式时，React Activity 保留卡片搜索、排序和创建状态，同时销毁 Phaser Game、输入监听、路线、Bridge 和 Canvas。返回花园时使用最新快照重建单个 Canvas，人物一致地回到出生点，旧交互目标不会继续。
+
+异步 import 使用取消标记，避免 Strict Mode 或 HMR 留下孤立 Canvas。同一页面最多存在一个 Canvas。测试诊断属性由 GameBridge 的低频状态转换事件更新，只暴露人物坐标、移动状态和选中 plant id，不包含正文或附件，产品逻辑不依赖这些属性。
 
 ---
 
@@ -824,7 +876,10 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 
 ### 移动失败
 
-- 直接打开详情，不让寻路成为门槛。
+- 普通地面失败显示轻量状态，不打开详情；
+- 植物目标失败时发出带 plant id 的 `MOVEMENT_FAILED`；
+- React 仍调用正常 viewed 记录并直接打开共用详情；
+- 目标植物已删除或映射失效时不打开其他内容。
 
 ### 本地存储失败
 
@@ -857,11 +912,18 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 1. 选择伙伴；
 2. 创建文字碎片；
 3. 出现幼苗；
-4. 切换卡片模式；
-5. 打开并补充；
-6. 植物成长；
-7. 刷新后数据存在；
-8. 导出并恢复。
+4. 点击地面后人物移动；
+5. 连续点击采用最后目标；
+6. 点击植物并在到达后打开正确详情；
+7. 可访问植物列表直接打开同一详情；
+8. 水池阻止移动；
+9. 模式切换后仍只有一个 Canvas；
+10. 删除后植物同步消失；
+11. 切换卡片模式；
+12. 打开并补充；
+13. 植物成长；
+14. 刷新后数据存在；
+15. 导出并恢复。
 
 真实 AI 在自动测试中使用 Mock，避免不稳定和费用。
 

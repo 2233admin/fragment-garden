@@ -53,6 +53,59 @@ afterEach(async () => {
 });
 
 describe("createLocalFragment", () => {
+  it("derives a title when the optional title is omitted", async () => {
+    const result = await createLocalFragment(
+      {
+        rawText: "\n  自动   生成标题  \n不会使用第二行",
+      },
+      {
+        database,
+        createId: createIdSequence(["fragment-title", "plant-title", "event-title"]),
+        now: () => TEST_DATE,
+      },
+    );
+
+    expect(result.fragment.title).toBe("自动 生成标题");
+    expect(result.fragment.rawText).toBe("\n  自动   生成标题  \n不会使用第二行");
+  });
+
+  it("preserves a manually supplied non-empty title", async () => {
+    const result = await createLocalFragment(
+      {
+        title: "  用户标题  ",
+        rawText: "正文第一行",
+      },
+      {
+        database,
+        createId: createIdSequence([
+          "fragment-manual-title",
+          "plant-manual-title",
+          "event-manual-title",
+        ]),
+        now: () => TEST_DATE,
+      },
+    );
+
+    expect(result.fragment.title).toBe("用户标题");
+  });
+
+  it("rejects whitespace-only text without writing records", async () => {
+    await expect(
+      createLocalFragment(
+        { rawText: " \n\t " },
+        {
+          database,
+          createId: createIdSequence(["fragment-empty", "plant-empty", "event-empty"]),
+          now: () => TEST_DATE,
+        },
+      ),
+    ).rejects.toThrow("cannot be empty");
+
+    await expect(database.fragments.count()).resolves.toBe(0);
+    await expect(database.plants.count()).resolves.toBe(0);
+    await expect(database.fragmentEvents.count()).resolves.toBe(0);
+  });
+
   it("atomically creates a text fragment, seedling plant, and created event", async () => {
     const result = await createLocalFragment(
       {

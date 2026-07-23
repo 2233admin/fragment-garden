@@ -33,12 +33,13 @@ describe("calculateGrowthScore", () => {
     },
   );
 
-  it("does not score created, viewed, reviewed, or completed events", () => {
+  it("does not score created, viewed, reviewed, completed, or deleted events", () => {
     const events = [
       createEvent("created", "2026-07-23T08:00:00.000Z"),
       createEvent("viewed", "2026-07-23T09:00:00.000Z"),
       createEvent("reviewed", "2026-07-23T10:00:00.000Z"),
       createEvent("completed", "2026-07-23T11:00:00.000Z"),
+      createEvent("deleted", "2026-07-23T12:00:00.000Z"),
     ];
 
     expect(calculateGrowthScore(events)).toBe(0);

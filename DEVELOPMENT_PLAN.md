@@ -197,7 +197,8 @@ test: cover text fragment user flow
 - BootScene 和 GardenScene；
 - 固定地图配置；
 - 36 个植物槽位；
-- 简单人物、伙伴和植物占位图形；
+- 简单静态人物和植物占位图形；
+- 仅预留伙伴位置，不渲染猫或狗；
 - React 与 Phaser 的 GameBridge；
 - 从 Dexie 生成 PlantViewModel；
 - 花园失败时显示卡片模式入口。
@@ -208,7 +209,7 @@ test: cover text fragment user flow
 - 已有碎片在正确槽位显示为幼苗；
 - 新建碎片后，无需刷新即可增加植物；
 - 刷新后植物仍在相同槽位；
-- 猫或狗形象可根据设置切换；
+- 人物只在出生点静态显示，不支持移动或场景点击；
 - Phaser 失败不影响卡片模式。
 
 ## 建议 commits

@@ -55,10 +55,10 @@ MVP 阶段锁定 Phaser 3.90.0，不升级到 Phaser 4，不混用不同版本 A
 │
 ├── Phaser 花园
 │   ├── 固定地图
-│   ├── 人物鼠标移动
+│   ├── 人物静态占位（阶段 3）
 │   ├── 植物显示
-│   ├── 猫/狗外观
-│   └── 场景交互
+│   ├── 人物鼠标移动与场景交互（阶段 4）
+│   └── 猫/狗外观（阶段 6）
 │
 ├── Domain
 │   ├── 成长规则
@@ -499,6 +499,8 @@ completionStatus = completed
 
 ## 8. 固定地图
 
+阶段 3 使用代码配置的 `960 × 640` 固定逻辑地图，不引入 Tiled 或第三方美术素材。配置集中在 `game/config/garden-map.ts`，包含草地、纵向道路、小水池、玩家出生点、预留伙伴位置、可行走区域、障碍区域和 36 个植物槽位。
+
 地图配置：
 
 ```ts
@@ -507,16 +509,19 @@ type GardenMapConfig = {
   height: number;
   playerSpawn: { x: number; y: number };
   companionPosition: { x: number; y: number };
+  grassAreas: Rectangle[];
+  roadArea: Rectangle;
+  pondArea: Rectangle;
   walkableAreas: Rectangle[];
-  obstacles: Rectangle[];
-  plantSlots: PlantSlot[];
+  obstacleAreas: Rectangle[];
+  plantSlots: PlantSlotConfig[];
 };
 ```
 
 植物槽：
 
 ```ts
-type PlantSlot = {
+type PlantSlotConfig = {
   id: string;
   x: number;
   y: number;
@@ -527,6 +532,10 @@ type PlantSlot = {
 
 第一版建议预留 36 个槽位。
 
+当前 36 个槽位直接复用领域层的 `slot-01` 至 `slot-36`，每个槽位都有固定显示坐标和为阶段 4 预留的 interaction point。坐标通过单元测试保证完整、唯一、位于地图内、避开道路和水池，并保持最小间距。
+
+阶段 3 只在出生点显示静态人物。`companionPosition` 仅为后续阶段保留，不渲染猫或狗；可行走区域和障碍也只配置，不执行人物移动、碰撞或寻路。
+
 槽位满时：
 
 - 碎片仍成功保存；
@@ -534,26 +543,51 @@ type PlantSlot = {
 - 卡片模式仍可用；
 - 不因地图容量丢失内容。
 
+### 8.1 花园显示数据
+
+Phaser 只接收为显示准备的 `PlantViewModel`：
+
+```ts
+type PlantViewModel = {
+  plantId: string;
+  fragmentId: string;
+  slotId: string;
+  title: string;
+  speciesId: PlantSpeciesId | null;
+  stage: PlantStage;
+  vitality: PlantVitality;
+  completionStatus: FragmentCompletionStatus;
+};
+```
+
+React 通过花园查询服务在一个只读事务中批量读取 Fragment 和 Plant，再调用纯函数组装快照。deleted、archived、孤立 Plant 和 `slotId = null` 的植物不会发送给 Phaser；未放置植物只进入 `unplacedPlantCount`。输出按 `slotId` 和 `plantId` 稳定排序，不包含 `rawText`、事件历史或附件。
+
 ---
 
 ## 9. GameBridge
 
-### 9.1 React → Phaser
+### 9.1 阶段 3 已实现：React → Phaser
 
 ```ts
 type ReactToGameEvent =
   | { type: "LOAD_GARDEN"; plants: PlantViewModel[] }
   | { type: "ADD_PLANT"; plant: PlantViewModel }
   | { type: "UPDATE_PLANT"; plant: PlantViewModel }
-  | { type: "REMOVE_PLANT"; plantId: string }
-  | { type: "FOCUS_PLANT"; plantId: string }
-  | { type: "SET_COMPANION"; companion: "cat" | "dog" };
+  | { type: "REMOVE_PLANT"; plantId: string };
 ```
 
-### 9.2 Phaser → React
+每个 `GardenCanvas` 创建独立 Bridge 实例。React 的 live query 初次和后续变化都发送完整 `LOAD_GARDEN`；`GardenScene` 按 `plantId` 做确定性新增、更新和移除。Bridge 不访问 Dexie 或 React state，场景关闭时取消订阅，组件清理时销毁实例。
+
+Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡片模式时，React Activity 保留卡片工作区状态并清理 Phaser effect；返回花园时用最新快照重建单个 Game 和 Canvas。异步 import 使用取消标记，避免 Strict Mode 或 HMR 留下孤立 Canvas。
+
+### 9.2 后续阶段预留，尚未实现
 
 ```ts
-type GameToReactEvent =
+type FutureReactToGameEvent =
+  | { type: "FOCUS_PLANT"; plantId: string }
+  | { type: "SET_COMPANION"; companion: "cat" | "dog" };
+
+type FutureGameToReactEvent =
   | { type: "PLANT_CLICKED"; plantId: string }
   | { type: "PLAYER_REACHED_PLANT"; plantId: string }
   | { type: "COMPANION_CLICKED" }
@@ -570,6 +604,8 @@ type GameToReactEvent =
 → React 查询 Dexie
 → 打开 Fragment Drawer
 ```
+
+以上点击、移动和伙伴事件不属于阶段 3。
 
 ---
 
@@ -782,7 +818,9 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 ### Phaser 失败
 
 - 自动保留卡片模式；
-- 提供重新加载花园。
+- 提供重新加载花园；
+- 动态 import、初始化或场景更新失败时销毁半初始化实例，不留下空白 Canvas；
+- 花园数据摘要和本地碎片不被修改。
 
 ### 移动失败
 

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { Fragment, Plant } from "../../../domain";
 import { FragmentGardenDatabase } from "../../../data/db";
+import { FRAGMENT_GARDEN_DATABASE_VERSION, FRAGMENT_GARDEN_SCHEMA_V1 } from "../../../data/schema";
 
 const databaseInstances: FragmentGardenDatabase[] = [];
 
@@ -64,12 +65,12 @@ afterEach(async () => {
 });
 
 describe("FragmentGardenDatabase", () => {
-  it("opens Schema V1 with all tables and required indexes", async () => {
+  it("opens the current schema with all tables and required indexes", async () => {
     const database = createTestDatabase();
 
     await database.open();
 
-    expect(database.verno).toBe(1);
+    expect(database.verno).toBe(FRAGMENT_GARDEN_DATABASE_VERSION);
     expect(database.tables.map((table) => table.name).sort()).toEqual(
       [
         "attachments",
@@ -107,6 +108,45 @@ describe("FragmentGardenDatabase", () => {
       expect.arrayContaining(["fragmentId", "shownAt"]),
     );
     expect(database.chatMessages.schema.indexes.map((index) => index.name)).toContain("createdAt");
+  });
+
+  it("upgrades V1 data without loss and releases retired fragment slots", async () => {
+    const databaseName = `fragment-garden-v1-upgrade-${crypto.randomUUID()}`;
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(1).stores(FRAGMENT_GARDEN_SCHEMA_V1);
+    await legacyDatabase.open();
+
+    const activeFragment = createFragment("active-fragment");
+    const archivedFragment = createFragment("archived-fragment");
+    archivedFragment.lifecycleStatus = "archived";
+    const deletedFragment = createFragment("deleted-fragment");
+    deletedFragment.lifecycleStatus = "deleted";
+    await legacyDatabase
+      .table<Fragment>("fragments")
+      .bulkAdd([activeFragment, archivedFragment, deletedFragment]);
+    await legacyDatabase
+      .table<Plant>("plants")
+      .bulkAdd([
+        createPlant("active-plant", activeFragment.id, "slot-01"),
+        createPlant("archived-plant", archivedFragment.id, "slot-02"),
+        createPlant("deleted-plant", deletedFragment.id, "slot-03"),
+      ]);
+    legacyDatabase.close();
+
+    const upgradedDatabase = createTestDatabase(databaseName);
+    await upgradedDatabase.open();
+
+    expect(upgradedDatabase.verno).toBe(FRAGMENT_GARDEN_DATABASE_VERSION);
+    await expect(upgradedDatabase.fragments.count()).resolves.toBe(3);
+    await expect(upgradedDatabase.plants.get("active-plant")).resolves.toMatchObject({
+      slotId: "slot-01",
+    });
+    await expect(upgradedDatabase.plants.get("archived-plant")).resolves.toMatchObject({
+      slotId: null,
+    });
+    await expect(upgradedDatabase.plants.get("deleted-plant")).resolves.toMatchObject({
+      slotId: null,
+    });
   });
 
   it("persists data after close and reopening the same database name", async () => {

@@ -12,6 +12,7 @@ import {
   createStageTwoEvent,
   createStageTwoFragment,
   createStageTwoPlant,
+  createIdSequence,
 } from "./stage-two-fixtures";
 
 let database: FragmentGardenDatabase;
@@ -46,7 +47,11 @@ describe("updateFragmentContent", () => {
         title: "  修改后的标题  ",
         rawText: "  保留正文格式\n以及换行  ",
       },
-      { database, now: () => STAGE_TWO_TEST_DATE },
+      {
+        database,
+        createId: createIdSequence(["restored-event"]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
     );
 
     expect(result.fragment).toMatchObject({
@@ -62,7 +67,32 @@ describe("updateFragmentContent", () => {
       growthScore: 2,
       updatedAt: STAGE_TWO_TEST_TIMESTAMP,
     });
-    await expect(database.fragmentEvents.toArray()).resolves.toEqual([existingEvent]);
+    expect(result.restoredEvent).toMatchObject({
+      id: "restored-event",
+      type: "restored",
+      payload: { reason: "content_updated" },
+    });
+    await expect(database.fragmentEvents.count()).resolves.toBe(2);
+  });
+
+  it("edits archived content without implicitly restoring its garden slot", async () => {
+    const fragment = createStageTwoFragment({ lifecycleStatus: "archived" });
+    const plant = createStageTwoPlant({ slotId: null });
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+
+    const result = await updateFragmentContent(
+      {
+        fragmentId: fragment.id,
+        title: "封存后的标题",
+        rawText: "封存后仍可编辑",
+      },
+      { database, now: () => STAGE_TWO_TEST_DATE },
+    );
+
+    expect(result.fragment.lifecycleStatus).toBe("archived");
+    expect(result.plant.slotId).toBeNull();
+    expect(result.restoredEvent).toBeNull();
   });
 
   it("derives a replacement title when the submitted title is blank", async () => {

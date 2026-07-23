@@ -73,6 +73,7 @@ describe("listFragmentCardViewModels", () => {
         completionStatus: visibleFragment.completionStatus,
         plantStage: "growing",
         growthScore: 1,
+        isPlacedInGarden: true,
       },
     ]);
   });
@@ -127,7 +128,115 @@ describe("getFragmentDetailViewModel", () => {
           occurredAt: "2026-07-24T09:00:00.000Z",
         },
       ],
+      completion: null,
+      history: [
+        {
+          id: "event-a",
+          label: "补充了一段新内容",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+        },
+        {
+          id: "event-b",
+          label: "补充了一段新内容",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+        },
+      ],
+      sourceFragment: null,
+      childFragments: [],
     });
+  });
+
+  it("returns completion and confirmed grows-from relationships without exposing payload records", async () => {
+    const parent = createStageTwoFragment({
+      id: "parent-fragment",
+      title: "来源想法",
+    });
+    const child = createStageTwoFragment({
+      id: "child-fragment",
+      title: "长出的想法",
+      parentFragmentId: parent.id,
+      completionStatus: "completed",
+      completedAt: "2026-07-25T09:00:00.000Z",
+    });
+    await database.fragments.bulkAdd([parent, child]);
+    await database.plants.bulkAdd([
+      createStageTwoPlant({ id: "parent-plant", fragmentId: parent.id }),
+      createStageTwoPlant({ id: "child-plant", fragmentId: child.id }),
+    ]);
+    await database.relations.add({
+      id: "relation-1",
+      sourceFragmentId: child.id,
+      targetFragmentId: parent.id,
+      relationType: "grows_from",
+      status: "confirmed",
+      similarityScore: null,
+      explanation: null,
+      createdAt: "2026-07-24T09:00:00.000Z",
+      confirmedAt: "2026-07-24T09:00:00.000Z",
+    });
+    await database.fragmentEvents.bulkAdd([
+      createStageTwoEvent("child_fragment_created", {
+        id: "child-created",
+        fragmentId: parent.id,
+        payload: { childFragmentId: child.id },
+      }),
+      createStageTwoEvent("completed", {
+        id: "completed",
+        fragmentId: child.id,
+        payload: { outcome: "成为了一个可执行方案" },
+        occurredAt: "2026-07-25T09:00:00.000Z",
+      }),
+      createStageTwoEvent("reviewed", {
+        id: "invalid-review",
+        fragmentId: child.id,
+        payload: { decision: "unexpected" },
+      }),
+    ]);
+
+    const parentDetail = await getFragmentDetailViewModel(parent.id, database);
+    const childDetail = await getFragmentDetailViewModel(child.id, database);
+
+    expect(parentDetail?.childFragments).toEqual([{ id: child.id, title: child.title }]);
+    expect(parentDetail?.history).toContainEqual({
+      id: "child-created",
+      label: "它发展出了一个新想法",
+      occurredAt: "2026-07-23T08:30:00.000Z",
+    });
+    expect(childDetail?.sourceFragment).toEqual({ id: parent.id, title: parent.title });
+    expect(childDetail?.completion).toEqual({
+      outcome: "成为了一个可执行方案",
+      occurredAt: "2026-07-25T09:00:00.000Z",
+    });
+    expect(childDetail?.history).toEqual([
+      {
+        id: "completed",
+        label: "这株植物已经永久盛开",
+        occurredAt: "2026-07-25T09:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("falls back to completedAt when a historical completion payload is malformed", async () => {
+    const fragment = createStageTwoFragment({
+      completionStatus: "completed",
+      completedAt: "2026-07-25T09:00:00.000Z",
+    });
+    await database.fragments.add(fragment);
+    await database.plants.add(createStageTwoPlant());
+    await database.fragmentEvents.add(
+      createStageTwoEvent("completed", {
+        payload: { outcome: 42 },
+        occurredAt: fragment.completedAt ?? undefined,
+      }),
+    );
+
+    const detail = await getFragmentDetailViewModel(fragment.id, database);
+
+    expect(detail?.completion).toEqual({
+      outcome: null,
+      occurredAt: fragment.completedAt,
+    });
+    expect(detail?.history).toEqual([]);
   });
 
   it("returns undefined when the fragment does not exist", async () => {

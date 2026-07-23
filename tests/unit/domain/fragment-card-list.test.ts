@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { filterAndSortFragmentCards, type SearchableFragmentCard } from "../../../domain";
+import {
+  filterAndSortFragmentCards,
+  filterFragmentCardsByStatus,
+  type SearchableFragmentCard,
+} from "../../../domain";
 
 const CARDS: readonly SearchableFragmentCard[] = [
   {
@@ -77,5 +81,41 @@ describe("filterAndSortFragmentCards", () => {
     filterAndSortFragmentCards(source, "", "created_asc");
 
     expect(source.map((card) => card.id)).toEqual(originalOrder);
+  });
+});
+
+describe("filterFragmentCardsByStatus", () => {
+  const statusCards = [
+    { id: "active", lifecycleStatus: "active", completionStatus: "open" },
+    { id: "dormant", lifecycleStatus: "dormant", completionStatus: "open" },
+    { id: "completed", lifecycleStatus: "active", completionStatus: "completed" },
+    {
+      id: "archived-completed",
+      lifecycleStatus: "archived",
+      completionStatus: "completed",
+    },
+    { id: "archived", lifecycleStatus: "archived", completionStatus: "open" },
+    { id: "deleted", lifecycleStatus: "deleted", completionStatus: "open" },
+  ] as const;
+
+  it.each([
+    ["current", ["active", "dormant", "completed"]],
+    ["dormant", ["dormant"]],
+    ["completed", ["completed"]],
+    ["archived", ["archived-completed", "archived"]],
+  ] as const)(
+    "applies the %s filter without collapsing lifecycle and completion",
+    (filter, ids) => {
+      expect(filterFragmentCardsByStatus(statusCards, filter).map((card) => card.id)).toEqual(ids);
+    },
+  );
+
+  it("never exposes deleted cards and does not mutate the source", () => {
+    const source = [...statusCards];
+
+    expect(
+      filterFragmentCardsByStatus(source, "archived").some((card) => card.id === "deleted"),
+    ).toBe(false);
+    expect(source.map((card) => card.id)).toEqual(statusCards.map((card) => card.id));
   });
 });

@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 describe("softDeleteFragment", () => {
-  it("marks the fragment deleted, records history, and leaves its plant unchanged", async () => {
+  it("marks the fragment deleted, records history, and releases its plant slot", async () => {
     const fragment = createStageTwoFragment();
     const plant = createStageTwoPlant({
       stage: "growing",
@@ -61,8 +61,60 @@ describe("softDeleteFragment", () => {
       occurredAt: STAGE_TWO_TEST_TIMESTAMP,
       ruleVersion: 1,
     });
-    await expect(database.plants.get(plant.id)).resolves.toEqual(plant);
+    await expect(database.plants.get(plant.id)).resolves.toEqual({
+      ...plant,
+      slotId: null,
+      updatedAt: STAGE_TWO_TEST_TIMESTAMP,
+    });
     await expect(listFragmentCardViewModels(database)).resolves.toEqual([]);
+  });
+
+  it("records no-longer-needed only after the final delete choice", async () => {
+    const fragment = createStageTwoFragment();
+    const plant = createStageTwoPlant();
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+
+    const result = await softDeleteFragment(
+      {
+        fragmentId: fragment.id,
+        reviewDecision: "no_longer_needed",
+      },
+      {
+        database,
+        createId: createIdSequence(["deleted-event", "reviewed-event"]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    expect(result.reviewedEvent).toMatchObject({
+      type: "reviewed",
+      payload: { decision: "no_longer_needed" },
+    });
+    await expect(database.fragmentEvents.count()).resolves.toBe(2);
+  });
+
+  it("updates the plant timestamp when deleting an already-unplaced fragment", async () => {
+    const fragment = createStageTwoFragment();
+    const plant = createStageTwoPlant({ slotId: null });
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+
+    const result = await softDeleteFragment(
+      { fragmentId: fragment.id },
+      {
+        database,
+        createId: createIdSequence(["deleted-event"]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    expect(result.plant).toEqual({
+      ...plant,
+      slotId: null,
+      updatedAt: STAGE_TWO_TEST_TIMESTAMP,
+    });
+    await expect(database.plants.get(plant.id)).resolves.toEqual(result.plant);
   });
 
   it("rolls back the fragment update when the deleted event write fails", async () => {

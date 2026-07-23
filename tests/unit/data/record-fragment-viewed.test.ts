@@ -43,7 +43,7 @@ describe("recordFragmentViewed", () => {
       { fragmentId: fragment.id },
       {
         database,
-        createId: createIdSequence(["viewed-event"]),
+        createId: createIdSequence(["viewed-event", "restored-event"]),
         now: () => STAGE_TWO_TEST_DATE,
       },
     );
@@ -67,7 +67,15 @@ describe("recordFragmentViewed", () => {
       occurredAt: STAGE_TWO_TEST_TIMESTAMP,
       ruleVersion: 1,
     });
-    await expect(database.fragmentEvents.toArray()).resolves.toEqual([result.viewedEvent]);
+    expect(result.restoredEvent).toEqual({
+      id: "restored-event",
+      fragmentId: fragment.id,
+      type: "restored",
+      payload: { reason: "viewed" },
+      occurredAt: STAGE_TWO_TEST_TIMESTAMP,
+      ruleVersion: 1,
+    });
+    await expect(database.fragmentEvents.count()).resolves.toBe(2);
   });
 
   it("does not change plant growth when viewing an active fragment", async () => {
@@ -89,6 +97,7 @@ describe("recordFragmentViewed", () => {
     );
 
     expect(result.plant).toEqual(plant);
+    expect(result.restoredEvent).toBeNull();
   });
 
   it("rolls back fragment and plant restoration when the event write fails", async () => {
@@ -106,7 +115,7 @@ describe("recordFragmentViewed", () => {
         { fragmentId: fragment.id },
         {
           database,
-          createId: createIdSequence([existingEvent.id]),
+          createId: createIdSequence([existingEvent.id, "restored-event"]),
           now: () => STAGE_TWO_TEST_DATE,
         },
       ),

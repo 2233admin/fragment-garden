@@ -41,7 +41,7 @@ describe("addTextSupplement", () => {
       { fragmentId: fragment.id, text: "  新的补充  " },
       {
         database,
-        createId: createIdSequence(["text-added-event"]),
+        createId: createIdSequence(["text-added-event", "restored-event"]),
         now: () => STAGE_TWO_TEST_DATE,
       },
     );
@@ -65,6 +65,11 @@ describe("addTextSupplement", () => {
       growthScore: 1,
       stage: "growing",
       updatedAt: STAGE_TWO_TEST_TIMESTAMP,
+    });
+    expect(result.restoredEvent).toMatchObject({
+      id: "restored-event",
+      type: "restored",
+      payload: { reason: "content_updated" },
     });
   });
 
@@ -162,7 +167,7 @@ describe("addTextSupplement", () => {
         { fragmentId: fragment.id, text: "应当整体回滚" },
         {
           database,
-          createId: createIdSequence([existingEvent.id]),
+          createId: createIdSequence([existingEvent.id, "restored-event"]),
           now: () => STAGE_TWO_TEST_DATE,
         },
       ),
@@ -171,5 +176,66 @@ describe("addTextSupplement", () => {
     await expect(database.fragments.get(fragment.id)).resolves.toEqual(fragment);
     await expect(database.plants.get(plant.id)).resolves.toEqual(plant);
     await expect(database.fragmentEvents.toArray()).resolves.toEqual([existingEvent]);
+  });
+
+  it("keeps completed content permanently blooming after another supplement", async () => {
+    const fragment = createStageTwoFragment({
+      completionStatus: "completed",
+      completedAt: "2026-07-23T09:00:00.000Z",
+    });
+    const plant = createStageTwoPlant({
+      stage: "permanent_bloom",
+      growthScore: 1,
+    });
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+    await database.fragmentEvents.bulkAdd([
+      createStageTwoEvent("completed", {
+        id: "completed-event",
+        payload: { outcome: null },
+      }),
+      createStageTwoEvent("text_added", {
+        id: "previous-text",
+        payload: { text: "前一天的补充" },
+        occurredAt: "2026-07-23T08:00:00.000Z",
+      }),
+    ]);
+
+    const result = await addTextSupplement(
+      { fragmentId: fragment.id, text: "完成后的补充" },
+      {
+        database,
+        createId: createIdSequence(["completed-text-event"]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    expect(result.fragment.completionStatus).toBe("completed");
+    expect(result.plant.stage).toBe("permanent_bloom");
+    expect(result.plant.growthScore).toBe(2);
+    expect(result.restoredEvent).toBeNull();
+    await expect(database.fragmentEvents.where("type").equals("completed").count()).resolves.toBe(
+      1,
+    );
+  });
+
+  it("allows an archived fragment to be supplemented without returning it to the garden", async () => {
+    const fragment = createStageTwoFragment({ lifecycleStatus: "archived" });
+    const plant = createStageTwoPlant({ slotId: null, vitality: "active" });
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+
+    const result = await addTextSupplement(
+      { fragmentId: fragment.id, text: "封存后的补充" },
+      {
+        database,
+        createId: createIdSequence(["archived-text-event"]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    expect(result.fragment.lifecycleStatus).toBe("archived");
+    expect(result.plant.slotId).toBeNull();
+    expect(result.plant.growthScore).toBe(1);
   });
 });

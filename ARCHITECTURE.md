@@ -168,9 +168,12 @@ Domain 不依赖 React、Phaser 或 Dexie。
 负责组织多个模块完成用例，例如：
 
 - 创建碎片；
+- 批量应用休眠状态；
+- 复盘、封存、恢复和软删除；
+- 标记完成；
+- 从父碎片原子创建新想法及关系；
 - 后台 AI 分析；
 - 相似候选生成；
-- 完成与成长；
 - 备份恢复。
 
 ### 4.6 Route Handlers
@@ -327,6 +330,7 @@ type Attachment = {
 type FragmentEventType =
   | "created"
   | "viewed"
+  | "dormant"
   | "reviewed"
   | "text_added"
   | "link_added"
@@ -345,6 +349,35 @@ type TextAddedEventPayload = {
   text: string;
 };
 
+type FragmentReviewDecision =
+  | "still_interested"
+  | "not_now"
+  | "no_longer_needed";
+
+type ReviewedEventPayload = {
+  decision: FragmentReviewDecision;
+};
+
+type CompletedEventPayload = {
+  outcome: string | null;
+};
+
+type ChildFragmentCreatedEventPayload = {
+  childFragmentId: string;
+};
+
+type ArchivedEventPayload = {
+  previousSlotId: string | null;
+};
+
+type RestoredEventPayload = {
+  reason:
+    | "viewed"
+    | "reviewed"
+    | "manual_restore"
+    | "content_updated";
+};
+
 type FragmentEvent = {
   id: string;
   fragmentId: string;
@@ -355,7 +388,9 @@ type FragmentEvent = {
 };
 ```
 
-`text_added` 事件的 `payload` 必须符合 `TextAddedEventPayload`。读取历史数据时先进行运行时校验，不允许产品界面直接假设任意 `Record` 一定包含 `text`。
+`text_added`、`reviewed`、`completed`、`child_fragment_created`、`archived` 和 `restored` 的 payload 都通过统一 Zod Schema 校验。`completed.outcome` trim 后为空时保存为 `null`，长度上限为 300 个字符。读取旧事件时使用安全解析；非法 payload 只跳过对应历史展示，不能让整个详情崩溃。产品界面不得直接假设任意 `Record` 一定包含某个字段。
+
+`dormant`、`reviewed`、`archived`、`restored`、`deleted` 和 `completed` 不增加成长分；完成由 `completionStatus` 决定永久盛开，而不是通过给成长分写入特殊大值。
 
 ### 6.5 Plant
 
@@ -444,6 +479,17 @@ type ChatMessage = {
 };
 ```
 
+### 6.10 数据库版本 2
+
+阶段 5 首次启用显式历史数据迁移。V2 不增加表或索引，只修复阶段 2 以来可能遗留的退休植物槽位：
+
+```text
+Fragment.lifecycleStatus = archived 或 deleted
+→ 对应 Plant.slotId = null
+```
+
+迁移不物理删除 Fragment、Plant 或 Event，也不修改原始内容、成长分和完成状态。新产生的封存与软删除由各自 Service 在同一事务内立即释放槽位；V2 只负责修复升级前已经存在的数据。
+
 ---
 
 ## 7. 成长状态机
@@ -482,20 +528,110 @@ type ChatMessage = {
 completionStatus = completed
 → 不进入休眠
 
-当前时间 - lastInteractedAt >= 3 天
+生命周期为 active
++ completionStatus = open
++ 当前时间 - lastInteractedAt >= 72 小时
 → lifecycleStatus = dormant
 → vitality = dormant
+→ 写入 dormant Event
 ```
 
-再次互动：
+`shouldFragmentBeDormant` 仍是纯 Domain 判定，不读写数据库。阶段 5 通过显式的 `applyDormancyTransitions({ now })` Service 把判定结果持久化：一次事务批量处理所有符合条件的 Fragment 和 Plant，更新 `updatedAt`，保留原 `lastInteractedAt`，并为每条转换写入一次 `dormant` Event。已经 dormant、archived、deleted 或 completed 的内容不会重复处理。
+
+客户端在以下时机请求同步：
+
+1. `/garden` 工作区首次挂载；
+2. 浏览器窗口重新获得 `focus`；
+3. 页面从 hidden 变为 visible。
+
+调用层生成并传入同一个 ISO `now`。客户端用运行锁防止 `focus` 与 `visibilitychange` 重入；Service 本身也通过状态条件保持幂等。这里不使用 `setInterval`、Worker、服务端任务或每分钟轮询。
+
+所有 `useLiveQuery` 和 Query Service 保持只读，不在查询函数中触发休眠写入。事务完成后，Dexie live query 负责把卡片、详情和花园更新为持久化后的状态。同步失败只显示非阻塞提示，不删除或隐藏原内容。
+
+### 7.4 生命周期与完成状态
+
+`lifecycleStatus` 和 `completionStatus` 是两个独立维度：
+
+| lifecycleStatus | open | completed | 主花园 |
+|---|---|---|---|
+| active | 合法 | 合法 | 有槽位时显示 |
+| dormant | 合法 | 不合法 | 有槽位时以休眠活力显示 |
+| archived | 合法 | 合法 | 不显示 |
+| deleted | 可保留 | 可保留 | 不显示 |
+
+`completed + archived` 是合法组合。完成决定植物为 `permanent_bloom`，封存决定它不进入主花园；完成不得把 archived 内容重新放回花园。完成内容永不进入 dormant，但仍可查看、编辑、补充、封存、恢复或发展成新想法。
+
+archived 只能通过“恢复到花园”显式变回 active。查看、编辑、添加补充、标记完成或发展新想法都会更新相应内容和历史，但必须保持父 Fragment 为 archived、Plant 的 `slotId = null`。封存内容不展示普通复盘操作，避免“仍然感兴趣”被误解为自动恢复。
+
+### 7.5 轻量复盘
+
+复盘决策只通过 `reviewFragment` 或最终确认的封存/删除事务写入：
+
+- `still_interested`：写 `reviewed`；dormant 内容恢复 active，并写 `restored { reason: "reviewed" }`；不增加成长分；
+- `not_now`：仅适用于未完成、未封存、未删除的内容；立即进入 dormant 并在从 active 转换时写 `dormant`，不等待 72 小时；
+- `no_longer_needed`：打开封存/删除二次选择时不写库，只有用户最终确认后，才与 `archived` 或 `deleted` Event 在同一事务写入。
+
+完成内容不提供 `not_now`，因为永久盛开内容不能休眠。查看 dormant 内容时，`recordFragmentViewed` 在同一事务写入 `viewed` 和 `restored { reason: "viewed" }`，恢复 Fragment 与 Plant；active 或 archived 内容只记录查看，不重复写 `restored`。
+
+### 7.6 封存、恢复与软删除
+
+封存和删除都会释放固定槽位，但保留 Plant 记录：
 
 ```text
-打开详情 / 复盘判断 / 补充内容 / 改变状态
-→ lifecycleStatus = active
-→ vitality = active
+archive
+→ lifecycleStatus = archived
+→ archived { previousSlotId }
+→ Plant.slotId = null
+→ Plant.vitality = active
+
+soft delete
+→ lifecycleStatus = deleted
+→ Plant.slotId = null
+→ Fragment、Plant 和事件仍保留
 ```
 
-休眠采用读取时计算，不依赖后台定时任务。
+重复封存不重复写 `archived` Event。恢复只接受 archived 内容，重新扫描当前占用槽并分配第一个空闲槽；满槽时 Fragment 仍恢复为 active，`slotId = null`，卡片明确提示内容已恢复但暂未放置。恢复不强制使用 `previousSlotId`，并写入 `restored { reason: "manual_restore" }`。
+
+### 7.7 标记完成
+
+`completeFragment` 在同一事务写入经过校验的 `completed { outcome }`，设置 `completionStatus = completed`、`completedAt`、Plant `stage = permanent_bloom` 和 `vitality = active`。未封存内容保持或恢复 active；已封存内容继续 archived 且 `slotId = null`。
+
+完成不修改基于事件计算的 `growthScore`，也不自动封存。完成后仍允许编辑和保存 `text_added`，成长分继续按同类事件每日一次的规则重算，但 `resolvePlantStage` 始终返回 `permanent_bloom`，且不会重复写 `completed` Event。本阶段不提供撤销完成。
+
+### 7.8 发展成新想法
+
+`createChildFragmentFromParent` 在包含 fragments、plants、fragmentEvents 和 relations 的单一事务中：
+
+1. 创建 active/open 的文字子 Fragment、独立 seedling Plant 和 `created` Event；
+2. 为父 Fragment 写入 `child_fragment_created { childFragmentId }`，更新互动时间并重算成长分和阶段；
+3. 创建 confirmed 的 `grows_from` 关系。
+
+关系方向固定为：
+
+```text
+sourceFragmentId = 子 Fragment
+targetFragmentId = 父 Fragment
+relationType = grows_from
+```
+
+即 `child (source) grows_from parent (target)`。父 Fragment 不自动完成；completed 父仍保持 completed。dormant 父恢复 active 时使用 `restored { reason: "content_updated" }`。archived 父也允许派生 active 子内容，但父自身继续 archived，父 Plant 保持 `slotId = null`；其成长分和阶段仍可更新。deleted 父不允许派生。
+
+子 Plant 使用当前第一个空闲槽；满槽时以 `slotId = null` 创建，整个新想法仍成功保存。
+
+### 7.9 卡片、详情与花园投影
+
+卡片状态筛选定义为：
+
+- `current`：所有非 archived、非 deleted 内容，包含 active、dormant 和 completed；
+- `dormant`：`lifecycleStatus = dormant`；
+- `completed`：`completionStatus = completed` 且 lifecycle 不是 archived/deleted；
+- `archived`：`lifecycleStatus = archived`，包含 `completed + archived`。
+
+搜索与排序在状态筛选后继续生效。卡片分别展示生命周期标签和完成标记，不把两个维度压成单一状态。deleted 不进入普通 UI。
+
+详情查询安全解析完成结果、文字补充和父子关系：父详情展示发展出的新想法，子详情展示“生长自”的父标题，非法旧 payload 只跳过对应历史项。
+
+花园继续复用 `PlantViewModel` 和完整 `LOAD_GARDEN` diff：休眠改变 vitality，查看或复盘恢复 active，完成改变 stage，封存/删除移除植物，显式恢复或创建新想法时重新出现。Phaser 不参与任何生命周期计算或数据库写入。
 
 ---
 

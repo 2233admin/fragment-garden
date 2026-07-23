@@ -267,7 +267,10 @@ test: cover typed GameBridge events
 
 ---
 
-# 9. 阶段 5：成长、休眠、完成与新想法
+# 9. 阶段 5：成长、休眠、完成与新想法（已完成）
+
+阶段 5 的本地生命周期闭环已完成；阶段 6 尚未开始。完成本阶段的本地提交后，以
+`m2-garden-loop` 标记这一里程碑。
 
 ## 目标
 
@@ -275,34 +278,67 @@ test: cover typed GameBridge events
 
 ## 范围
 
-- 成长分和阶段更新；
-- 同类事件同一天只计一次；
-- 三天休眠；
-- 再次互动恢复；
-- 封存与恢复；
-- 标记完成并永久盛开；
-- “它最后变成了什么”可选说明；
-- “让它长成一个新想法”；
-- `grows_from` 关系；
-- 花园和卡片状态同步。
+- 成长分和阶段继续由 Domain 事件规则计算，同类成长事件同一天只计一次；
+- 增加 `dormant` Event，并为 `reviewed`、`completed`、`child_fragment_created`、`archived` 和 `restored` 定义统一、可校验的 payload；
+- 在 `/garden` 客户端挂载、窗口 `focus` 和页面重新 visible 时，显式调用 Service 持久化三天休眠转换；
+- 休眠同步使用同一个 ISO `now`、运行锁和幂等事务；卡片、详情与花园查询保持只读；
+- 提供“仍然感兴趣”“暂时放一放”和“已不需要”的轻量复盘，其中封存或删除必须二次确认；
+- 封存和软删除释放植物槽位但保留 Plant；恢复时分配第一个空闲槽，满槽时允许以 `slotId = null` 恢复；
+- 数据库升级到 V2，仅修复历史 archived/deleted Fragment 对应 Plant 遗留的 `slotId`，不新增表或索引；
+- 将生命周期与完成状态作为独立维度，允许 `completed + archived`；
+- 标记完成时可记录“它最后变成了什么”，植物永久盛开且不再休眠；
+- 完成后仍可编辑和补充；封存后的查看、编辑、补充、完成和发展新想法都不得隐式恢复父内容；
+- “让它长成一个新想法”在单一事务中创建独立 Fragment、Plant、Event 和 confirmed `grows_from` 关系；
+- `grows_from` 固定表示 `child (source) grows_from parent (target)`；
+- archived 父内容可以派生活跃子内容，但父内容保持 archived 且父 Plant 保持 `slotId = null`；
+- 卡片筛选、详情历史和花园投影同步生命周期、完成状态与关系变化。
+
+## 状态与筛选边界
+
+- `current`：所有非 archived、非 deleted 内容，包含 active、dormant 和 completed；
+- `dormant`：仅 `lifecycleStatus = dormant`；
+- `completed`：`completionStatus = completed` 且 lifecycle 不是 archived/deleted；
+- `archived`：所有 `lifecycleStatus = archived` 内容，包含 `completed + archived`；
+- completed 内容保持永久盛开、允许继续补充且永不休眠；
+- archived 只能通过显式“恢复到花园”变回 active；
+- 恢复时即使没有空闲槽位，内容恢复也应成功，卡片模式必须仍可访问；
+- archived parent 派生 child 时只恢复和放置 child，不恢复 parent。
 
 ## 验收
 
 - 补充内容后植物成长；
 - 单日重复同类行为不重复计分；
-- 模拟三天后植物进入休眠；
-- 重新查看后恢复；
-- 完成后永久盛开且不休眠；
-- 新想法拥有独立植物并保留来源；
-- 原始碎片不会被自动完成。
+- 模拟 72 小时后，挂载、focus 或重新 visible 能把符合条件的 active/open 内容持久化为 dormant，并且不会重复写事件；
+- live query 和 Query Service 不产生休眠写入，休眠同步失败不阻止读取原内容；
+- 查看 dormant 内容或选择“仍然感兴趣”后恢复 active；active 和 archived 内容不产生多余 restored Event；
+- “暂时放一放”仅使未完成、未封存内容休眠，完成内容不能进入 dormant；
+- “已不需要”在用户最终确认封存或删除前不写库；
+- 封存和软删除释放槽位，重复封存不重复写事件；
+- archived 内容只有显式恢复才变回 active；恢复选择第一个空闲槽，满槽时以 `slotId = null` 成功恢复；
+- V2 迁移只清理历史 archived/deleted Plant 槽位，不丢失 Fragment、Plant、Event 或完成状态；
+- 完成后永久盛开且不休眠；完成 archived 内容仍保持 archived，完成后继续补充不改变永久盛开；
+- 新想法拥有独立植物并保留正确的 child-to-parent 来源关系；
+- dormant 父内容因发展新想法恢复，archived 父内容则保持 archived/无槽位，同时创建 active 子内容；
+- 原始碎片不会被自动完成，deleted 父内容不能派生新想法；
+- `current`、`dormant`、`completed` 和 `archived` 筛选符合上述定义，deleted 不进入普通 UI；
+- 卡片、详情和花园在状态变化后同步，Phaser 不直接读取 Dexie 或计算生命周期；
+- `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run test`、相关 Playwright E2E 和 `npm run build` 全部通过。
+
+## 完成边界
+
+上述功能、自动化检查和差异审查构成阶段 5 的完成边界；本地提交完成后创建
+`m2-garden-loop` 标签。在明确开始下一阶段前，阶段 6 仍视为未开始；本阶段未提前实现伙伴选择或
+Chatbot 外壳。
 
 ## 建议 commits
 
 ```text
-feat: add plant growth state machine
-feat: add dormancy archive and completion flows
-feat: support growing a new idea
-test: cover fragment lifecycle transitions
+feat: add fragment review and dormancy flows
+feat: add archive and restore lifecycle
+feat: add fragment completion flow
+feat: support growing new ideas
+test: cover fragment lifecycle user flows
+docs: document complete garden lifecycle
 ```
 
 ---

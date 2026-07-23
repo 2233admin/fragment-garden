@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
+
 const RAW_TEXT = "在周末搭一个安静的阅读角\n把窗边整理出来。";
 const GENERATED_TITLE = "在周末搭一个安静的阅读角";
 const SEARCH_TERM = "窗边整理";
@@ -41,6 +43,7 @@ test("completes the text fragment card loop", async ({ context, page }) => {
 
   await test.step("1. 打开页面并进入卡片工作区", async () => {
     await page.goto("/garden");
+    await completeCompanionOnboardingIfNeeded(page);
     await expect(page.getByRole("heading", { name: "碎片花园" })).toBeVisible();
     await page.getByRole("button", { name: "卡片模式", exact: true }).click();
     await expect(page.getByRole("button", { name: "卡片模式", exact: true })).toHaveAttribute(

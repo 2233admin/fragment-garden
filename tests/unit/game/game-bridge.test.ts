@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { CompanionViewModel } from "../../../domain/garden/companion-view-model";
 import type { PlantViewModel } from "../../../domain/garden/plant-view-model";
 import { GameBridge } from "../../../game/bridge/game-bridge";
 import type { GameToReactEvent, ReactToGameEvent } from "../../../game/bridge/game-events";
@@ -15,12 +16,16 @@ const PLANT: PlantViewModel = {
   completionStatus: "open",
 };
 
+const CAT_COMPANION: CompanionViewModel = { type: "cat" };
+
 function assertEventPayloadTypes(bridge: GameBridge): void {
   bridge.publishToGame({ type: "LOAD_GARDEN", plants: [PLANT] });
   bridge.publishToGame({ type: "ADD_PLANT", plant: PLANT });
   bridge.publishToGame({ type: "UPDATE_PLANT", plant: PLANT });
   bridge.publishToGame({ type: "REMOVE_PLANT", plantId: PLANT.plantId });
   bridge.publishToGame({ type: "CANCEL_INTERACTION" });
+  bridge.publishToGame({ type: "SET_COMPANION", companion: CAT_COMPANION });
+  bridge.publishToGame({ type: "SET_COMPANION", companion: null });
   bridge.publishToReact({
     type: "PLAYER_STATE_CHANGED",
     playerX: 496,
@@ -36,6 +41,7 @@ function assertEventPayloadTypes(bridge: GameBridge): void {
     reason: "plant_unavailable",
     targetId: PLANT.plantId,
   });
+  bridge.publishToReact({ type: "COMPANION_CLICKED" });
 
   // @ts-expect-error LOAD_GARDEN requires a plants array.
   bridge.publishToGame({ type: "LOAD_GARDEN" });
@@ -47,6 +53,10 @@ function assertEventPayloadTypes(bridge: GameBridge): void {
   bridge.publishToReact({ type: "MOVEMENT_STARTED", targetType: "companion" });
   // @ts-expect-error Movement failures only use the documented reasons.
   bridge.publishToReact({ type: "MOVEMENT_FAILED", reason: "unknown" });
+  // @ts-expect-error SET_COMPANION accepts only the two documented companion types.
+  bridge.publishToGame({ type: "SET_COMPANION", companion: { type: "fox" } });
+  // @ts-expect-error COMPANION_CLICKED does not carry Settings or companion details.
+  bridge.publishToReact({ type: "COMPANION_CLICKED", companionType: "cat" });
   bridge.publishToReact({
     type: "PLAYER_STATE_CHANGED",
     playerX: 496,
@@ -95,6 +105,19 @@ describe("GameBridge", () => {
     expect(reactListener).toHaveBeenNthCalledWith(1, reachedEvent);
     expect(reactListener).toHaveBeenNthCalledWith(2, failedEvent);
     expect(gameListener).not.toHaveBeenCalled();
+  });
+
+  it("publishes a payload-free companion click and stops after unsubscribe", () => {
+    const bridge = new GameBridge();
+    const listener = vi.fn();
+    const unsubscribe = bridge.subscribeToReact(listener);
+
+    bridge.publishToReact({ type: "COMPANION_CLICKED" });
+    unsubscribe();
+    bridge.publishToReact({ type: "COMPANION_CLICKED" });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith({ type: "COMPANION_CLICKED" });
   });
 
   it("stops delivering either direction after unsubscribe", () => {

@@ -1,5 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
+import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
+
 const FIRST_TITLE = "窗边的小花圃";
 const SECOND_TITLE = "雨天散步清单";
 const SUPPLEMENT_TEXT = "先画出花盆和窗台的位置。";
@@ -48,6 +50,7 @@ test("renders and synchronizes local plants in the fixed garden", async ({ conte
 
   await test.step("1. 默认进入花园并只创建一个 Canvas", async () => {
     await page.goto("/garden");
+    await completeCompanionOnboardingIfNeeded(page);
     await expect(page.getByRole("heading", { name: "碎片花园" })).toBeVisible();
     await expect(page.getByRole("button", { name: "花园模式", exact: true })).toHaveAttribute(
       "aria-pressed",

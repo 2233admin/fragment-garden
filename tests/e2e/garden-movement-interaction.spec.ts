@@ -1,5 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
+import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
+
 const FRAGMENT_TITLE = "沿着小路找到旧灵感";
 const FRAGMENT_TEXT = "让人物走到植物旁边，再重新打开这条碎片。";
 
@@ -103,6 +105,7 @@ test("moves through the fixed garden and opens fragments through plants", async 
 
   await test.step("创建一条文字碎片并进入单 Canvas 花园", async () => {
     await page.goto("/garden");
+    await completeCompanionOnboardingIfNeeded(page);
     await selectMode(page, "卡片模式");
     await createTextFragment(page);
     await selectMode(page, "花园模式");

@@ -1,5 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
+import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
+
 const DORMANT_TITLE = "等待重新发现的想法";
 const COMPLETED_TITLE = "把阅读角真正搭起来";
 const CHILD_TITLE = "阅读角的第一场分享";
@@ -175,6 +177,7 @@ test("persists automatic dormancy and restores through the same plant detail flo
   await clearIndexedDb(context, page);
 
   await page.goto("/garden");
+  await completeCompanionOnboardingIfNeeded(page);
   await selectMode(page, "卡片模式");
   await createTextFragment(page, DORMANT_TITLE, "先把这个想法放在花园里，过几天再回来。");
   await makeFragmentOlderThanDormancyThreshold(page, DORMANT_TITLE);
@@ -216,6 +219,7 @@ test("keeps permanent bloom while growing and opening a related child idea", asy
   await clearIndexedDb(context, page);
 
   await page.goto("/garden");
+  await completeCompanionOnboardingIfNeeded(page);
   await selectMode(page, "卡片模式");
   await createTextFragment(page, COMPLETED_TITLE, "整理窗边，搭一个真的会使用的阅读角。");
   await page.getByRole("button", { name: `打开碎片：${COMPLETED_TITLE}` }).click();
@@ -275,6 +279,7 @@ test("records no-longer-needed only after archive confirmation and restores its 
   await clearIndexedDb(context, page);
 
   await page.goto("/garden");
+  await completeCompanionOnboardingIfNeeded(page);
   await selectMode(page, "卡片模式");
   await createTextFragment(page, ARCHIVED_TITLE, "先收好这份旅行清单，等季节合适时再回来。");
   const originalSlotId = await readFragmentSlot(page, ARCHIVED_TITLE);
@@ -337,6 +342,7 @@ test("keeps review gates and archived completed parent-child state consistent", 
   await clearIndexedDb(context, page);
 
   await page.goto("/garden");
+  await completeCompanionOnboardingIfNeeded(page);
   await selectMode(page, "卡片模式");
   await createTextFragment(
     page,

@@ -14,6 +14,14 @@ export class FragmentRepository {
     return this.database.fragments.toArray();
   }
 
+  listVisibleTextFragments(): Promise<Fragment[]> {
+    return this.database.fragments
+      .where("contentType")
+      .equals("text")
+      .filter((fragment) => fragment.lifecycleStatus !== "deleted")
+      .toArray();
+  }
+
   add(fragment: Fragment): Promise<string> {
     return this.database.fragments.add(fragment);
   }

@@ -8,7 +8,15 @@ export class FragmentEventRepository {
     return this.database.fragmentEvents.add(event);
   }
 
-  listByFragmentId(fragmentId: string): Promise<FragmentEvent[]> {
-    return this.database.fragmentEvents.where("fragmentId").equals(fragmentId).sortBy("occurredAt");
+  async listByFragmentId(fragmentId: string): Promise<FragmentEvent[]> {
+    const events = await this.database.fragmentEvents
+      .where("fragmentId")
+      .equals(fragmentId)
+      .toArray();
+
+    return events.sort((left, right) => {
+      const occurredAtComparison = left.occurredAt.localeCompare(right.occurredAt);
+      return occurredAtComparison === 0 ? left.id.localeCompare(right.id) : occurredAtComparison;
+    });
   }
 }

@@ -336,7 +336,12 @@ type FragmentEventType =
   | "child_fragment_created"
   | "completed"
   | "restored"
-  | "archived";
+  | "archived"
+  | "deleted";
+
+type TextAddedEventPayload = {
+  text: string;
+};
 
 type FragmentEvent = {
   id: string;
@@ -347,6 +352,8 @@ type FragmentEvent = {
   ruleVersion: number;
 };
 ```
+
+`text_added` 事件的 `payload` 必须符合 `TextAddedEventPayload`。读取历史数据时先进行运行时校验，不允许产品界面直接假设任意 `Record` 一定包含 `text`。
 
 ### 6.5 Plant
 

@@ -1,21 +1,22 @@
 import {
   PLANT_SLOT_IDS,
   allocateFirstAvailablePlantSlot,
-  createUuid,
-  toIsoTimestamp,
+  deriveLocalFragmentTitle,
   type Fragment,
   type FragmentEvent,
   type Plant,
 } from "../domain";
-import { FragmentGardenDatabase, fragmentGardenDb } from "../data/db";
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { PlantRepository } from "../data/repositories/plant-repository";
-
-const INITIAL_EVENT_RULE_VERSION = 1;
+import {
+  CURRENT_FRAGMENT_EVENT_RULE_VERSION,
+  type LocalServiceDependencies,
+  resolveLocalServiceDependencies,
+} from "./local-service-dependencies";
 
 export type CreateLocalFragmentInput = {
-  title: string;
+  title?: string;
   rawText: string;
 };
 
@@ -25,19 +26,22 @@ export type CreateLocalFragmentResult = {
   createdEvent: FragmentEvent;
 };
 
-export type CreateLocalFragmentDependencies = {
-  database?: FragmentGardenDatabase;
-  createId?: () => string;
-  now?: () => Date;
-};
+export type CreateLocalFragmentDependencies = LocalServiceDependencies;
 
 export async function createLocalFragment(
   input: CreateLocalFragmentInput,
   dependencies: CreateLocalFragmentDependencies = {},
 ): Promise<CreateLocalFragmentResult> {
-  const database = dependencies.database ?? fragmentGardenDb;
-  const createId = dependencies.createId ?? createUuid;
-  const now = dependencies.now ?? (() => new Date());
+  if (input.rawText.trim().length === 0) {
+    throw new Error("Fragment text cannot be empty");
+  }
+
+  const manualTitle = input.title?.trim();
+  const title =
+    manualTitle === undefined || manualTitle.length === 0
+      ? deriveLocalFragmentTitle(input.rawText)
+      : manualTitle;
+  const { database, createId, timestamp } = resolveLocalServiceDependencies(dependencies);
 
   const fragmentRepository = new FragmentRepository(database);
   const plantRepository = new PlantRepository(database);
@@ -50,12 +54,11 @@ export async function createLocalFragment(
     database.fragmentEvents,
     async () => {
       const occupiedSlotIds = (await plantRepository.list()).map((plant) => plant.slotId);
-      const timestamp = toIsoTimestamp(now());
 
       const fragment: Fragment = {
         id: createId(),
         contentType: "text",
-        title: input.title,
+        title,
         rawText: input.rawText,
         sourceUrl: null,
         summary: null,
@@ -89,7 +92,7 @@ export async function createLocalFragment(
         type: "created",
         payload: null,
         occurredAt: timestamp,
-        ruleVersion: INITIAL_EVENT_RULE_VERSION,
+        ruleVersion: CURRENT_FRAGMENT_EVENT_RULE_VERSION,
       };
 
       await fragmentRepository.add(fragment);

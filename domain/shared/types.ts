@@ -22,7 +22,12 @@ export type FragmentEventType =
   | "child_fragment_created"
   | "completed"
   | "restored"
-  | "archived";
+  | "archived"
+  | "deleted";
+
+export type TextAddedEventPayload = {
+  text: string;
+};
 
 export type PlantSpeciesId =
   "dandelion" | "forget_me_not" | "tulip" | "sunflower" | "lavender" | "small_tree";

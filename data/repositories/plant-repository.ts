@@ -18,6 +18,16 @@ export class PlantRepository {
     return this.database.plants.toArray();
   }
 
+  listByFragmentIds(fragmentIds: readonly string[]): Promise<Plant[]> {
+    const uniqueFragmentIds = [...new Set(fragmentIds)];
+
+    if (uniqueFragmentIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.database.plants.where("fragmentId").anyOf(uniqueFragmentIds).toArray();
+  }
+
   add(plant: Plant): Promise<string> {
     return this.database.plants.add(plant);
   }

@@ -49,14 +49,15 @@
 | 4 | 人物移动与植物交互 | 点击移动并打开植物详情 |
 | 5 | 成长、休眠、完成与新想法 | 植物状态形成完整闭环 |
 | 6 | 伙伴选择与 Chatbot 外壳 | 可选择猫或狗并打开统一聊天面板 |
-| 7 | 链接与 AI 内容分析 | 链接可保存、提取、总结并降级 |
+| 7A | 链接碎片与 GetNoteConnector | 链接先本地保存，再异步读取并可恢复 |
+| 7B | 真实 AI 内容分析 | 受限模型分析与 Chatbot 工具调用 |
 | 8 | 图片与语音 | 图片分析和语音转写可用 |
 | 9 | 相似碎片与花丛 | AI 建议关联，用户确认后建立关系 |
 | 10 | 备份、回归与容错 | 可导入导出，关键流程有自动测试 |
 | 11 | 一周自测与 MVP 收口 | 根据真实使用结果修正产品 |
 
-当前阶段 6 已完成，阶段 7 尚未开始。浏览器数据库仍为 V2；阶段 6 直接复用既有
-Settings、Recommendation 和 ChatMessage 表，没有新增 V3 或迁移。
+当前阶段 7A 已完成，浏览器数据库为 V3，新增 ExternalLinkImport 并迁移 Settings 与 ChatMessage。
+阶段 7B 的真实 AI Chatbot、OpenAI 内容分析、Embedding、相似碎片和花丛尚未开始。
 
 ---
 
@@ -390,7 +391,8 @@ docs: document complete garden lifecycle
 ## 完成边界
 
 阶段 6 已完成本地伙伴选择、GameBridge 伙伴呈现、Chatbot 外壳、单线程消息持久化和确定性旧碎片推荐。
-当前仍没有真实 AI、OpenAI Chat Route、链接读取、图片、语音、Embedding、相似碎片或花丛。
+阶段 6 完成时仍没有真实 AI、OpenAI Chat Route、链接读取、图片、语音、Embedding、相似碎片或花丛；
+其中链接读取随后在阶段 7A 实现，其余能力仍未实现。
 
 ## 建议 commits
 
@@ -402,46 +404,117 @@ feat: add gentle fragment recommendations
 
 ---
 
-# 11. 阶段 7：链接与 AI 内容分析（尚未开始）
+# 11. 阶段 7A：链接碎片与 GetNoteConnector（已完成）
 
 ## 目标
 
-让外部收藏成为可被理解和回看的碎片。
+让表单或伙伴收到的外部链接先成为可靠的本地碎片，再通过受限 GetNoteConnector 异步读取标题、摘要
+和正文；第三方失败不能阻止种植或访问原链接。
 
 ## 范围
 
-- 为 Chatbot 注册输入输出受校验的受限 `import_link` 工具；
-- `import_link` 只能通过 `GetNoteConnector` 访问外部链接能力，不能让回复引擎直接访问网络或数据库；
-- 链接碎片；
-- URL 校验；
-- 安全链接抓取；
-- title、description、OG 和有限正文提取；
-- AI 内容分析；
-- 结构化输出与 Zod 校验；
-- 后台处理状态；
-- 重试；
-- 原始 URL 降级保存；
-- `.env.local` 使用模型配置，不把模型名散落在业务代码中。
+- 数据库升级到 V3，新增 ExternalLinkImport；
+- V2 Settings 自动补 `getNoteDisclosureAcceptedAt = null`；
+- 旧 ChatMessage 自动补 `fragmentId = null`；
+- URL 只允许 HTTP/HTTPS，拒绝 credentials、localhost、home.arpa、私网和明显保留地址；
+- 规范化 URL 并提示重复，用户仍可明确创建副本；
+- 首次读取前展示第三方处理说明并本地保存同意时间；
+- 在单一 Dexie 事务中创建 Fragment、Plant、created Event 和 ExternalLinkImport；
+- 原始 URL 只 trim 后保存，本地创建 Service 不调用网络；
+- 新链接立即显示卡片和植物，满槽仍以 `slotId = null` 保存；
+- 服务端 GetNoteConnector 仅开放 saveLink、getTaskProgress 和 getNoteDetail；
+- `POST /api/link-imports/start` 与 `POST /api/link-imports/progress` 使用 Zod 校验；
+- 客户端管理提交、轮询、刷新恢复、离线暂停、完成写回和失败降级；
+- `LocalCompanionResponseEngine` 只识别并返回 `IMPORT_LINK` Action；
+- 表单和伙伴 Action 执行层共用披露、查重、本地创建和导入 Manager；
+- 卡片与详情复用现有 Fragment 生命周期、成长和编辑能力。
 
-以上均为后续计划。当前没有 `import_link`、`GetNoteConnector`、GETNOTE_API_KEY、链接抓取、OpenAI
-Chatbot 或得到大脑（GetNote）调用；不得把阶段 6 的本地确定性回复描述成真实 AI。
+## 数据与事务
+
+- `externalLinkImports.fragmentId` 是唯一索引，重试更新同一记录；
+- `normalizedUrl` 是非唯一索引，允许用户确认后“再种一棵”；
+- 成功时写入 summary、sourceContent、canonicalUrl、externalNoteId 和截断状态；
+- 用户创建时提供或处理中手动修改的标题和正文不被 GetNote 对应字段覆盖；
+- 标题与正文分别记录用户所有权，只修改正文时仍可采用 GetNote 标题；
+- 链接读取完成不写 `text_added`，不额外增加成长分；
+- 失败时 Fragment、Plant、sourceUrl、手工标题和补充内容全部保留；
+- 软删除在同一事务中停止未完成导入，迟到结果不会更新已删除内容或追加伙伴通知；
+- 完成或失败的伙伴消息携带 fragmentId，并与终态标记同事务写入，刷新后不重复。
+
+## GetNote 安全边界
+
+- Base URL 固定为 `https://openapi.biji.com`；
+- 只调用固定 save、task progress 和 note detail 路径，不实现通用代理、搜索、列表、更新或删除；
+- `GETNOTE_API_KEY` 与 `GETNOTE_CLIENT_ID` 只从服务端环境变量读取；
+- `GETNOTE_LINK_IMPORT_ENABLED=false` 或配置缺失时返回 `service_unavailable`；
+- 所有变量都没有 `NEXT_PUBLIC_` 前缀，Key 不返回客户端、不进入日志；
+- 单次上游请求 30 秒超时，响应体最大 2 MB；
+- Route 请求体最大 8 KB 且只接受 `application/json`，拒绝跨站简单 POST；
+- int64 标识符在 JSON 解析前按字符串保护；
+- title、summary、sourceContent 和 canonicalUrl 经过裁剪与校验；
+- 当前共享 Key 仅适合本地或受保护的少量受控用户，公开部署前必须增加访问控制；
+- GetNote 会创建远端笔记副本，当前不会自动删除，用户不应提交不希望第三方处理的私密链接。
+
+## 轮询与重试
+
+- 默认每 10 秒轮询一次；
+- 从首次开始最多处理 10 分钟，截止时中止活动请求并忽略迟到结果；
+- 单个页面运行时最多同时处理 2 个任务；
+- 同一 fragmentId 在 manager 内只排队一次；多 manager 或标签页使用 Web Locks exclusive lock，
+  不支持 Web Locks 时使用模块级可取消 FIFO mutex；
+- 页面重建后恢复 pending / processing，浏览器恢复在线后继续；
+- prepare 只推进 attempt generation，紧邻真实 start 时才增加 attemptCount；
+- start 尚未取得 taskId 时保持 pending，刷新中断可用剩余 attempt 恢复；
+- poll 与终态写回同时校验 generation 和 taskId，旧任务迟到结果不会覆盖新重试；
+- completed、failed 或世代不匹配时 finalize no-op，且不发送重复 UI 或伙伴通知；
+- 恢复 processing 时遵守 lastPolledAt 的剩余轮询间隔；
+- 组件卸载时取消 timer 和请求；
+- 只有 GetNote 明确返回处理失败时自动重新提交一次，自动流程最多 2 次 attempt；
+- 第二次显式失败、配置、会员、限流、额度、超时、网络或未知错误后停止；
+- 用户可手动重置同一 ExternalLinkImport 并重试，不创建重复 Fragment 或 Plant。
 
 ## 验收
 
-- 普通网页可以生成标题和摘要；
-- 抓取失败时仍生成植物；
-- AI 失败时仍能查看原始 URL；
-- 用户可以手动修改标题和摘要；
-- API Key 不进入客户端；
-- localhost 和私有网络 URL 被拒绝；
-- 响应超时和体积限制生效。
+- 首次同意后才开始 GetNote，同意保存失败时不创建空记录或调用第三方；
+- 合法普通网页、小红书、抖音等分享 URL 能通过本地校验，localhost、私网和危险协议被拒绝；
+- Fragment、Plant、created Event 与 ExternalLinkImport 同时成功或全部回滚；
+- 链接卡片和植物在第三方完成前立即出现；
+- 成功后卡片与共用详情显示标题、来源、摘要、正文和截断状态；
+- pending 详情中的未编辑表单会同步后台写回，已编辑字段不会被迟到结果覆盖；
+- 失败后原链接、Fragment 和 Plant 可继续查看、编辑和重试；
+- 重复链接给出打开已有、再种一棵和取消，不静默创建或阻止；
+- 刷新后任务恢复，终态伙伴消息不重复；
+- 猫狗使用相同 `IMPORT_LINK` 识别与执行流程；
+- 自动化使用 Mock，不访问真实 GetNote。
+
+## 真实验证边界
+
+本阶段已经通过 Mock 覆盖连接器、Route、轮询和降级，但不能据此声称真实 GetNote 账号、会员、额度、
+普通网页、小红书或抖音均已验证。真实测试需由项目拥有者在本机 `.env.local` 配置：
+
+```dotenv
+GETNOTE_API_KEY=...
+GETNOTE_CLIENT_ID=...
+GETNOTE_LINK_IMPORT_ENABLED=true
+```
+
+Key 不得发送到聊天或输出到终端。真实调用可能创建远端笔记，本阶段不自动删除。
+
+## 阶段 7B（尚未开始）
+
+阶段 7B 才接入真实 AI Chatbot、OpenAI 内容分析、模型工具调用、系统 Prompt 和受校验的结构化分析。
+阶段 7A 没有 OpenAI 请求、Embedding、相似碎片、花丛、图片或语音，也不把本地确定性回复描述成
+真实 AI。
 
 ## 建议 commits
 
 ```text
-feat: add safe link preview extraction
-feat: add asynchronous AI content analysis
-test: cover link and AI failure fallbacks
+feat: add link fragment persistence
+feat: add server-only GetNote connector
+feat: add asynchronous link import workflow
+feat: support link imports from companion chat
+test: cover link import and GetNote fallbacks
+docs: document GetNote link import architecture
 ```
 
 ---

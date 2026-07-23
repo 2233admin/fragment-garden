@@ -17,6 +17,9 @@
 3. 用户是否会回看过去保存的内容；
 4. 回看后是否会产生补充、关联、行动或新的想法。
 
+阶段 7A 已完成链接碎片、本地异步导入状态和受限的 GetNoteConnector。阶段 7B 的真实 AI
+Chatbot、OpenAI 内容分析、Embedding 和相似碎片仍未实现。
+
 ## 第一版核心能力
 
 - 支持文字、链接、图片和语音四种碎片输入；
@@ -79,6 +82,32 @@
 8. AI 失败不能阻止创建植物；
 9. 植物状态由确定性规则计算，不由 AI 决定；
 10. 花园交互失败时，卡片模式必须始终可用。
+
+## 链接读取与 GetNote 配置
+
+链接会先在一个本地事务中创建 Fragment、Plant、created Event 和 ExternalLinkImport，卡片与植物
+无需等待第三方即可出现。首次使用前会说明链接内容将由得到大脑（GetNote）处理；只有用户同意后，
+客户端才会启动读取。失败、离线、刷新或服务未配置都不会删除本地 Fragment、Plant 和原始 URL。
+读取期间用户手工修改的标题或正文会分别受到保护，不会被稍后返回的第三方对应字段覆盖。
+
+GetNoteConnector 只在服务端使用固定的 save、progress 和 detail 接口，不提供任意路径代理。配置写入
+本机 `.env.local`：
+
+```dotenv
+GETNOTE_API_KEY=
+GETNOTE_CLIENT_ID=
+GETNOTE_LINK_IMPORT_ENABLED=false
+```
+
+变量都不能使用 `NEXT_PUBLIC_` 前缀。`GETNOTE_API_KEY` 和 `GETNOTE_CLIENT_ID` 不得进入浏览器
+bundle、日志或 Git；`.env.local` 已被忽略。启用时把 `GETNOTE_LINK_IMPORT_ENABLED` 改为 `true`。
+
+当前共享 Key 方案只适用于本地或有访问保护的少量受控用户。项目没有登录或服务端访问控制时，不应把
+链接导入 Route Handlers 公开暴露到互联网。GetNote 会创建远端笔记副本，当前不会自动删除；不要提交
+不希望由第三方处理的私密链接。清空本地数据会移除披露同意状态，但不会删除已经创建的远端副本。
+
+自动化测试使用 Route 和 fetch Mock，不调用真实 GetNote。本阶段的代码通过 Mock 验证不等同于真实
+账号、会员、额度或平台链接已经完成实测；真实验证必须由项目拥有者在本地配置环境变量后手工执行。
 
 ## 项目文档
 

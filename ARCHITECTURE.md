@@ -146,6 +146,7 @@ Phaser 不负责：
 - 三天休眠；
 - 恢复活跃；
 - 推荐旧碎片；
+- 外部 URL 安全判断、规范化和临时标题；
 - 相似度阈值；
 - 植物槽位分配；
 - 状态转换；
@@ -178,6 +179,8 @@ Domain 不依赖 React、Phaser 或 Dexie。
 - 原子保存本地聊天和推荐动作；
 - 创建每日非强制旧碎片推荐；
 - 打开或忽略推荐；
+- 原子创建本地链接碎片并检查重复；
+- 编排 GetNote 提交、轮询、恢复和重试；
 - 后台 AI 分析；
 - 相似候选生成；
 - 备份恢复。
@@ -187,7 +190,7 @@ Domain 不依赖 React、Phaser 或 Dexie。
 负责：
 
 - 隐藏 API Key；
-- 链接抓取；
+- 受限 GetNote 链接读取；
 - AI 调用；
 - 输入输出校验；
 - 超时和错误处理。
@@ -273,6 +276,7 @@ type Settings = {
   companionType: "cat" | "dog" | null;
   lastOpenedAt: string | null;
   lastRecommendationDate: string | null;
+  getNoteDisclosureAcceptedAt: string | null;
   schemaVersion: number;
 };
 ```
@@ -285,6 +289,9 @@ type Settings = {
 - onboarding 完成后不提供更换入口，Service 也拒绝把已选择的猫改成狗或反向修改；
 - 猫和狗只影响外观，不进入回复、推荐或工具逻辑；
 - 统一欢迎语只写一次；Settings 或欢迎语任一写入失败时全部回滚。
+
+阶段 7A 使用 `getNoteDisclosureAcceptedAt` 记录用户首次同意第三方处理的时间。未同意时不启动
+GetNote；保存同意状态失败时不能假装已经同意。清空本地数据会删除该状态。
 
 ### 6.2 Fragment
 
@@ -494,6 +501,7 @@ type Recommendation = {
 ```ts
 type ChatMessage = {
   id: string;
+  fragmentId: string | null;
   role: "user" | "assistant";
   content: string;
   createdAt: string;
@@ -502,8 +510,50 @@ type ChatMessage = {
 
 阶段 6 只有一个本地对话线程，不增加 Conversation 表，不支持新建、切换或清空会话。消息按
 `createdAt`、`id` 稳定排序；发送 Service 在一个事务中保存 user 和 assistant 消息，并使用单调时间保证刷新后的阅读顺序。伙伴回复或推荐写入失败时，整个发送事务回滚，不伪造已保存的回复。
+阶段 7A 的链接完成或失败消息可通过 `fragmentId` 指向同一 Fragment，刷新后仍可打开共用详情；
+普通聊天与旧消息使用 `null`。
 
-### 6.10 数据库版本 2
+### 6.10 ExternalLinkImport
+
+```ts
+type ExternalLinkImport = {
+  id: string;
+  fragmentId: string;
+  provider: "getnote";
+  sourceUrl: string;
+  normalizedUrl: string;
+  canonicalUrl: string | null;
+  sourceContentTruncated: boolean;
+  status: "pending" | "processing" | "completed" | "failed";
+  initiatedBy: "form" | "companion";
+  taskId: string | null;
+  externalNoteId: string | null;
+  providerRequestId: string | null;
+  attemptCount: number;
+  attemptGeneration: number;
+  userProvidedTitle: boolean;
+  userProvidedContent: boolean;
+  errorCode: string | null;
+  errorMessage: string | null;
+  terminalNotificationStatus: "completed" | "failed" | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  lastPolledAt: string | null;
+  completedAt: string | null;
+};
+```
+
+ExternalLinkImport 独立保存第三方任务状态，不把轮询字段塞进 Fragment。`fragmentId` 是唯一索引，
+第一版每个 Fragment 只维护一条 GetNote 导入记录；重试更新同一记录。`normalizedUrl` 是非唯一索引，
+用于提示重复，但用户明确选择“再种一棵”时仍可创建副本。`sourceUrl` 保留用户输入的原始链接（只
+trim 外围空白），`canonicalUrl` 另存第三方返回的安全规范地址。创建时两个 `userProvided*` 标记
+分别记录用户标题和正文的所有权；导入期间只要对应字段被用户实际修改，后续 GetNote 结果就不能覆盖
+该字段。只修改正文不会阻止采用第三方标题，未实际变化的保存也不会错误取得字段所有权。
+`attemptGeneration` 是本地提交世代；所有轮询和终态写回都同时校验 generation 与 `taskId`，旧任务的
+迟到响应因此不能覆盖手动重试或自动重试产生的新任务。
+
+### 6.11 数据库版本 3
 
 阶段 5 首次启用显式历史数据迁移。V2 不增加表或索引，只修复阶段 2 以来可能遗留的退休植物槽位：
 
@@ -514,7 +564,10 @@ Fragment.lifecycleStatus = archived 或 deleted
 
 迁移不物理删除 Fragment、Plant 或 Event，也不修改原始内容、成长分和完成状态。新产生的封存与软删除由各自 Service 在同一事务内立即释放槽位；V2 只负责修复升级前已经存在的数据。
 
-阶段 6 直接复用 V1 已建立的 Settings、Recommendation 和 ChatMessage 表及其现有字段。当前数据库仍为 V2，没有新增 V3、表、索引或迁移。
+阶段 7A 把 Dexie 升级到 V3，新增 `externalLinkImports` 表，并在升级时为旧 Settings 补
+`getNoteDisclosureAcceptedAt = null`、为旧 ChatMessage 补 `fragmentId = null`。V1 到 V3 会依次
+执行 V2 与 V3 迁移；现有 Fragment、Plant、Event、Recommendation 和聊天数据完整保留。
+Settings 内既有 `schemaVersion = 1` 是该记录自身的版本字段，不随 Dexie V3 强制改写。
 
 ---
 
@@ -837,20 +890,27 @@ Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡�
 本地回复引擎是无状态纯 TypeScript：
 
 ```ts
+type CompanionAction =
+  | { type: "RECOMMEND_FRAGMENT" }
+  | { type: "IMPORT_LINK"; url: string };
+
 type CompanionResponse = {
   message: string;
-  action: null | { type: "RECOMMEND_FRAGMENT" };
+  action: CompanionAction | null;
 };
 ```
 
-`LocalCompanionResponseEngine` 只接收用户文本，不接收 `companionType`，不访问 Dexie、Phaser、React、网络或外部模型。当前确定性意图包括使用帮助、真实成长规则、72 小时休眠规则、旧碎片推荐和有界 fallback。对成长规则会明确说明当前主要支持文字补充，不声称链接、图片或语音已经实现。
+`LocalCompanionResponseEngine` 只接收用户文本，不接收 `companionType`，不访问 Dexie、Phaser、React、
+网络或外部模型。阶段 6 建立了使用帮助、真实成长规则、72 小时休眠规则、旧碎片推荐和有界 fallback；
+阶段 7A 只增加确定性的 URL 识别与 `IMPORT_LINK` Action。成长说明会明确当前支持文字补充和链接碎片，
+不声称图片或语音已经实现。
 
-回复引擎只产生 action，应用 Service 负责执行：
+回复引擎只产生 action，应用 Service 或受限 Action 执行层负责执行：
 
 ```text
 用户消息
 → 本地回复引擎生成 message + action
-→ Service 执行可选 RECOMMEND_FRAGMENT
+→ Service 执行可选 RECOMMEND_FRAGMENT，或 Action 层执行受限 IMPORT_LINK
 → user、assistant 与真正展示的 Recommendation 原子写入
 → React 通过 live query 更新消息和推荐卡片
 ```
@@ -988,11 +1048,13 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 }
 ```
 
-该接口属于后续目标，阶段 6 没有实现或调用它。即使未来接入模型，Chatbot 仍只能建议动作，不能直接写数据库。
+该接口仍属于阶段 7B 的后续目标，阶段 7A 没有实现或调用真实模型。即使未来接入模型，Chatbot
+仍只能建议动作，不能直接写数据库。
 
-阶段 7 尚未开始。未来若让 Chatbot 导入链接，只能注册输入输出受校验的受限
-`import_link` 工具，并通过 `GetNoteConnector` 执行；阶段 6 没有注册或执行该工具，也没有
-得到大脑（GetNote）、GETNOTE_API_KEY、链接读取结果或连接器实现。
+阶段 7A 在 `LocalCompanionResponseEngine` 中增加确定性的 URL 意图识别，只返回
+`{ type: "IMPORT_LINK", url }`。回复引擎本身不读 Dexie、不调用 Route，也不访问网络；Action 执行层
+与表单共用披露、查重、`createLocalLinkFragment` 和 ExternalLinkImportManager。猫狗继续使用同一
+Action 与文案。OpenAI Chat、模型工具调用和系统 Prompt 属于阶段 7B，尚未实现。
 
 ---
 
@@ -1022,23 +1084,106 @@ MAX_SIMILAR_RESULTS = 3;
 
 ---
 
-## 13. 链接提取
+## 13. 链接导入与 GetNoteConnector
 
-`POST /api/link-preview`
+### 13.1 本地优先流程
 
-流程：
+阶段 7A 不等待第三方成功才种植物：
 
-1. 校验 URL；
-2. 仅允许 HTTP/HTTPS；
-3. 拒绝 localhost 和内网地址；
-4. 设置 8 秒超时；
-5. 最大响应体 2 MB；
-6. 获取 HTML；
-7. 使用 Cheerio 提取 title、description、OG 信息和有限正文；
-8. AI 生成摘要；
-9. 失败时返回可保存的原始 URL。
+```text
+首次第三方处理说明并获得同意
+→ 校验与规范化 URL
+→ 单一 Dexie 事务创建 Fragment + Plant + created Event + ExternalLinkImport
+→ 卡片和植物立即出现
+→ 提交 GetNote
+→ 轮询并写回，或保留本地内容并显示失败
+```
 
-服务端不得执行页面脚本，也不得下载外部资源。
+`createLocalLinkFragment` 只进行本地写入，不调用 fetch。链接 Fragment 初始为
+`contentType = link`、`analysisStatus = pending`，Plant 使用第一个空闲槽，满槽时以
+`slotId = null` 成功保存。GetNote 成功后在事务中写入标题、摘要、提取正文和导入终态；如果用户
+提供或处理中手工修改过标题或正文，不用第三方对应字段覆盖。标题和正文分别判断，因此用户只补正文
+时仍可采用第三方标题。读取完成本身不新增成长事件或成长分。
+
+URL 只允许 HTTP/HTTPS，拒绝 credentials、localhost、`home.arpa`、单标签本地主机、私有或明显
+保留的 IPv4/IPv6（含 IPv4 嵌入和隧道形式），长度上限为 2048。规范化只删除 fragment、默认端口、
+无意义尾斜杠和明确的
+`utm_*`、`fbclid`、`gclid`，保留未知及平台分享参数。重复链接在事务内再次检查；用户可打开已有
+碎片、明确再种一棵或取消，`normalizedUrl` 因此不能是唯一索引。
+
+表单与伙伴 `IMPORT_LINK` Action 共用以上披露、查重、本地创建和异步导入流程，不维护两套业务规则。
+回复引擎只识别 Action，不直接访问 Dexie、Route Handler 或 GetNote。
+
+### 13.2 服务端连接器
+
+浏览器只访问两个固定 Route Handlers：
+
+- `POST /api/link-imports/start`
+- `POST /api/link-imports/progress`
+
+服务端 `server-only` GetNoteConnector 的 Base URL 固定为 `https://openapi.biji.com`，只开放三项能力：
+
+- `POST /open/api/v1/resource/note/save`
+- `POST /open/api/v1/resource/note/task/progress`
+- `GET /open/api/v1/resource/note/detail?id=...`
+
+连接器不是通用代理，不支持搜索、列表、更新、删除、知识库、标签或任意 path。鉴权只从服务端环境
+读取 `GETNOTE_API_KEY` 与 `GETNOTE_CLIENT_ID`，分别放入 `Authorization` 与 `X-Client-ID`；
+`GETNOTE_LINK_IMPORT_ENABLED` 不为 `true` 或配置不完整时返回 `service_unavailable`。这些变量没有
+`NEXT_PUBLIC_` 前缀，也不会返回客户端。
+
+每次上游请求使用 30 秒 AbortController 超时，响应体限制为 2 MB；Route 请求体限制为 8 KB，且只
+接受 `application/json`，避免跨站页面通过简单 POST 借用本机共享 Key。
+输入、输出和上游响应均经过 Zod 校验。`id`、`note_id`、`parent_id`、`follow_id` 和 `live_id` 在
+JSON.parse 前按字符串保护，避免 int64 精度丢失。客户端只收到裁剪后的 title、summary、
+sourceContent、canonicalUrl、externalNoteId、truncated 与 requestId，不收到鉴权信息或完整上游对象。
+
+### 13.3 轮询、恢复与失败
+
+ExternalLinkImportManager 使用可取消的递归 `setTimeout`，不用永久 `setInterval`：
+
+- 默认每 10 秒轮询；
+- 从第一次开始最多处理 10 分钟，截止时中止活动请求并忽略迟到结果；
+- 单个页面运行时最多同时处理 2 个任务；
+- 同一 fragmentId 在单个 manager 内只排队一次，并通过以数据库名和 fragmentId 命名的浏览器
+  Web Lock 在多个 manager 或标签页之间保持互斥；
+- 页面重建时恢复 `pending` / `processing`，浏览器重新在线时继续；
+- 组件卸载时取消定时器与请求。
+
+浏览器支持 Web Locks 时使用 origin 范围的 exclusive lock；不支持时使用模块级可取消 FIFO mutex，
+至少保证同一 JavaScript 运行时内的多个 manager 互斥。取得锁后必须重新读取 IndexedDB，已终止的任务
+直接退出。等待锁的 manager 被销毁时会从队列移除，不会遗留活动任务。
+
+准备提交只推进 `attemptGeneration`，紧邻实际 `start` 请求时才增加 `attemptCount` 并记录
+`startedAt`；在取得 GetNote `taskId` 前保持 `pending`，保存 `taskId` 后才进入 `processing`。因此刷新
+或 HMR 中断 start 请求后，可以使用剩余的第二次 attempt 恢复，而不会把
+`processing + taskId = null` 误判成不可恢复终态。刷新恢复既遵守 `lastPolledAt` 的剩余间隔，也不会
+让同一 manager 的正常轮询重复等待。
+
+轮询、完成和失败都携带 `{ attemptGeneration, taskId }` 身份。若记录已经 completed、failed，或身份
+与当前记录不一致，事务返回 `didFinalize = false` 且不修改 Fragment、导入记录或伙伴消息；manager
+也只在 `didFinalize = true` 时发送 UI 终态事件。
+
+只有 GetNote 明确返回 `provider_processing_failed` 时才自动重新提交一次，因此一次自动流程最多
+2 次 attempt；网络、配置、会员、限流、额度、超时和未知错误不会无限快速重试。第二次显式失败后停止。
+用户点击“重新读取”会显式重置同一 ExternalLinkImport，再开始新的手动流程，不创建重复 Fragment
+或 Plant。
+
+任何失败都会保留 Fragment、Plant、原始 URL 和手工内容，并把 Fragment 与 ExternalLinkImport
+在同一事务中标记为 failed。完成与失败伙伴消息和终态标记也在同一事务中写入，避免刷新后重复通知。
+`Fragment.sourceUrl` 保留用户最初输入；安全 canonical URL 单独保存在 ExternalLinkImport。
+软删除会在删除事务内把尚未完成的 ExternalLinkImport 标为 failed；恢复或在线事件不会再首次发送
+该 URL，迟到结果也不能覆盖已删除内容或生成伙伴通知。
+
+### 13.4 部署与验证边界
+
+当前共享 API Key 只适用于本地或有访问保护的少量受控用户。没有登录和服务端访问控制时，不能把
+上述 Route Handlers 公开暴露到互联网。链接内容会由 GetNote 处理并在账号中创建远端笔记副本；
+当前不会自动删除远端副本。
+
+普通自动化测试全部使用 Mock，不访问真实 GetNote。代码与 Mock 流程通过不代表真实账号会员、额度、
+普通网页、小红书或抖音链接已经实测成功；真实 Key 验证必须在项目拥有者本地配置后单独执行，且不能
+把 Key 输出到终端、日志或聊天。
 
 ---
 
@@ -1080,8 +1225,10 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 
 ### 链接失败
 
-- 保存原始 URL；
-- 允许手动补充。
+- 保留已经本地保存的 Fragment、Plant、原始 URL 和手工内容；
+- 明确区分本地保存失败与 GetNote 读取失败；
+- 保存安全错误码与用户可读消息，不保存 Key、请求头或上游堆栈；
+- 提供手动重试、打开原链接和手动补充。
 
 ### Phaser 失败
 
@@ -1117,6 +1264,10 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 - 完成后不休眠；
 - 每日同类事件去重；
 - 槽位分配；
+- URL 安全校验、规范化与重复检测；
+- V2 到 V3 迁移和 ExternalLinkImport 事务回滚；
+- GetNote 固定客户端、int64、超时、错误映射与响应裁剪；
+- 轮询间隔、并发、恢复、自动/手动重试和终态通知防重；
 - 余弦相似度；
 - 推荐去重；
 - 备份校验。
@@ -1139,9 +1290,13 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 12. 打开并补充；
 13. 植物成长；
 14. 刷新后数据存在；
-15. 导出并恢复。
+15. 链接本地先保存后异步完成；
+16. 链接失败、自动重试一次和手动重试；
+17. 伙伴 `IMPORT_LINK` 复用同一详情且通知不重复；
+18. 导出并恢复。
 
-真实 AI 在自动测试中使用 Mock，避免不稳定和费用。
+GetNote 和未来真实 AI 在自动测试中使用 Mock，避免创建远端笔记、依赖真实账号、产生费用或引入
+平台波动。
 
 ---
 
@@ -1153,7 +1308,7 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 4. 鼠标移动与植物交互；
 5. 成长、休眠、完成和新想法；
 6. 猫狗选择与 Chatbot 外壳；
-7. 链接提取与内容分析；
+7. 7A GetNote 链接导入；7B 真实 AI 内容分析；
 8. 图片与语音；
 9. 相似碎片与花丛；
 10. 导入导出与完整回归测试。

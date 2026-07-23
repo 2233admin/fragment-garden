@@ -373,7 +373,7 @@ type Plant = {
 
   vitality: "active" | "dormant";
   growthScore: number;
-  slotId: string;
+  slotId: string | null;
 
   createdAt: string;
   updatedAt: string;

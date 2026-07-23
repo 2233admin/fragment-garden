@@ -9,11 +9,9 @@ import {
   type FragmentCardSort,
   type FragmentCardViewModel,
 } from "@/data/queries/fragment-card-query";
-import { recordFragmentViewed } from "@/services/record-fragment-viewed";
 
 import { CreateTextFragmentDialog } from "./CreateTextFragmentDialog";
 import { EmptyFragmentState } from "./EmptyFragmentState";
-import { FragmentDetailDialog } from "./FragmentDetailDialog";
 import { FragmentList } from "./FragmentList";
 import { FragmentSearchBar } from "./FragmentSearchBar";
 
@@ -24,21 +22,22 @@ const LOADING_CARD_STATE: CardQueryState = { status: "loading" };
 
 type FragmentWorkspaceProps = {
   layout?: "page" | "embedded";
+  onOpenFragment: (fragmentId: string, triggerElement: HTMLButtonElement) => void;
+  openingFragmentId: string | null;
 };
 
-export function FragmentWorkspace({ layout = "page" }: FragmentWorkspaceProps) {
+export function FragmentWorkspace({
+  layout = "page",
+  onOpenFragment,
+  openingFragmentId,
+}: FragmentWorkspaceProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sort, setSort] = useState<FragmentCardSort>("created_desc");
   const [queryAttempt, setQueryAttempt] = useState(0);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [selectedFragmentId, setSelectedFragmentId] = useState<string | null>(null);
-  const [openingFragmentId, setOpeningFragmentId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const seedButtonRef = useRef<HTMLButtonElement>(null);
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const openingLockRef = useRef<string | null>(null);
 
   const cardState: CardQueryState = useLiveQuery(
     async (): Promise<CardQueryState> => {
@@ -72,7 +71,6 @@ export function FragmentWorkspace({ layout = "page" }: FragmentWorkspaceProps) {
 
   function openCreateDialog(triggerElement: HTMLButtonElement): void {
     createTriggerRef.current = triggerElement;
-    setActionError(null);
     setFeedback(null);
     setIsCreateOpen(true);
   }
@@ -80,42 +78,6 @@ export function FragmentWorkspace({ layout = "page" }: FragmentWorkspaceProps) {
   function closeCreateDialog(): void {
     setIsCreateOpen(false);
     restoreFocus(createTriggerRef.current);
-  }
-
-  async function openFragment(
-    fragmentId: string,
-    triggerElement: HTMLButtonElement,
-  ): Promise<void> {
-    if (openingLockRef.current !== null) {
-      return;
-    }
-
-    openingLockRef.current = fragmentId;
-    detailTriggerRef.current = triggerElement;
-    setOpeningFragmentId(fragmentId);
-    setActionError(null);
-    setFeedback(null);
-
-    try {
-      await recordFragmentViewed({ fragmentId });
-      setSelectedFragmentId(fragmentId);
-    } catch {
-      setActionError("详情打开失败，没有写入查看记录，也没有修改本地内容。请重试。");
-    } finally {
-      openingLockRef.current = null;
-      setOpeningFragmentId(null);
-    }
-  }
-
-  function closeDetailDialog(): void {
-    setSelectedFragmentId(null);
-    restoreFocus(detailTriggerRef.current);
-  }
-
-  function handleDeleted(message: string): void {
-    setSelectedFragmentId(null);
-    setFeedback(message);
-    restoreFocus(detailTriggerRef.current);
   }
 
   const WorkspaceRoot = layout === "page" ? "main" : "div";
@@ -190,16 +152,6 @@ export function FragmentWorkspace({ layout = "page" }: FragmentWorkspaceProps) {
             {feedback}
           </div>
 
-          {actionError !== null ? (
-            <p
-              aria-live="assertive"
-              className="mb-5 rounded-xl bg-garden-danger-soft px-4 py-3 text-sm leading-6 text-garden-danger"
-              role="alert"
-            >
-              {actionError}
-            </p>
-          ) : null}
-
           {cardState.status === "loading" ? (
             <section
               aria-live="polite"
@@ -257,7 +209,7 @@ export function FragmentWorkspace({ layout = "page" }: FragmentWorkspaceProps) {
           {visibleCards.length > 0 ? (
             <FragmentList
               fragments={visibleCards}
-              onOpen={(fragmentId, triggerElement) => void openFragment(fragmentId, triggerElement)}
+              onOpen={onOpenFragment}
               openingFragmentId={openingFragmentId}
             />
           ) : null}
@@ -269,14 +221,6 @@ export function FragmentWorkspace({ layout = "page" }: FragmentWorkspaceProps) {
         onClose={closeCreateDialog}
         onCreated={(title) => setFeedback(`“${title}”已保存，并出现在卡片列表中。`)}
       />
-
-      {selectedFragmentId !== null ? (
-        <FragmentDetailDialog
-          fragmentId={selectedFragmentId}
-          onClose={closeDetailDialog}
-          onDeleted={handleDeleted}
-        />
-      ) : null}
     </WorkspaceRoot>
   );
 }

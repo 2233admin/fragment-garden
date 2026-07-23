@@ -3,6 +3,8 @@ import type { GardenPlantSnapshot, PlantStage, PlantVitality } from "@/domain";
 import { PLANT_STAGE_LABELS } from "../fragments/fragment-presenters";
 
 type GardenAccessibilitySummaryProps = {
+  onOpenPlant: (plantId: string, triggerElement: HTMLButtonElement) => void;
+  openingPlantId: string | null;
   snapshot: GardenPlantSnapshot;
 };
 
@@ -19,7 +21,11 @@ const STAGE_ORDER: readonly PlantStage[] = [
   "permanent_bloom",
 ];
 
-export function GardenAccessibilitySummary({ snapshot }: GardenAccessibilitySummaryProps) {
+export function GardenAccessibilitySummary({
+  onOpenPlant,
+  openingPlantId,
+  snapshot,
+}: GardenAccessibilitySummaryProps) {
   const stageCounts = new Map<PlantStage, number>();
 
   for (const plant of snapshot.plants) {
@@ -72,6 +78,37 @@ export function GardenAccessibilitySummary({ snapshot }: GardenAccessibilitySumm
           </li>
         ))}
       </ul>
+
+      {snapshot.plants.length > 0 ? (
+        <details className="mt-4 border-t border-garden-line pt-3">
+          <summary className="cursor-pointer text-sm font-semibold text-garden-accent focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-garden-accent">
+            用列表直接打开植物
+          </summary>
+          <ul aria-label="可直接打开的花园植物" className="mt-3 grid gap-2 sm:grid-cols-2">
+            {snapshot.plants.map((plant) => {
+              const isOpening = openingPlantId === plant.plantId;
+
+              return (
+                <li key={plant.plantId}>
+                  <button
+                    aria-busy={isOpening}
+                    aria-label={`打开“${plant.title}”`}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-garden-line bg-garden-soft/60 px-3 py-2 text-left text-sm text-garden-ink hover:border-garden-accent disabled:cursor-wait disabled:opacity-65"
+                    disabled={openingPlantId !== null}
+                    onClick={(event) => onOpenPlant(plant.plantId, event.currentTarget)}
+                    type="button"
+                  >
+                    <span className="truncate">{plant.title}</span>
+                    <span className="shrink-0 text-xs text-garden-muted">
+                      {isOpening ? "正在打开" : PLANT_STAGE_LABELS[plant.stage]}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      ) : null}
     </section>
   );
 }

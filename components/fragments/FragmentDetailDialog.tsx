@@ -76,7 +76,7 @@ export function FragmentDetailDialog({
       deletionLockRef.current = false;
       setPendingAction(null);
       setIsDeleteConfirmOpen(false);
-      onDeleted("碎片已从卡片列表移除。");
+      onDeleted("碎片已移除，本地内容仍按软删除规则保留。");
     } catch {
       deletionLockRef.current = false;
       setPendingAction(null);
@@ -184,11 +184,9 @@ export function FragmentDetailDialog({
               />
 
               <section className="rounded-2xl border border-garden-danger/25 bg-garden-danger-soft/55 p-5">
-                <h3 className="font-display text-xl font-semibold text-garden-danger">
-                  从卡片列表移除
-                </h3>
+                <h3 className="font-display text-xl font-semibold text-garden-danger">移除碎片</h3>
                 <p className="mt-2 text-sm leading-6 text-garden-muted">
-                  这是软删除。对应植物和本地记录会保留，但碎片不再出现在默认列表。
+                  这是软删除。对应植物和本地记录会保留，但碎片不再出现在默认视图。
                 </p>
                 <button
                   className="mt-4 rounded-full border border-garden-danger px-5 py-2.5 text-sm font-semibold text-garden-danger hover:bg-garden-danger-soft disabled:opacity-50"
@@ -209,7 +207,7 @@ export function FragmentDetailDialog({
 
       <ConfirmDialog
         confirmLabel="确认删除"
-        description="确认后，这条内容不会再出现在卡片列表中。对应植物不会被物理删除。"
+        description="确认后，这条内容不会再出现在默认视图中。对应植物不会被物理删除。"
         errorMessage={deleteError}
         isOpen={isDeleteConfirmOpen}
         isPending={pendingAction === "delete"}

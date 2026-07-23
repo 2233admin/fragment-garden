@@ -1,8 +1,12 @@
 "use client";
 
+import type { Ref } from "react";
+
 export type GardenMode = "garden" | "cards";
 
 type GardenModeToggleProps = {
+  cardButtonRef?: Ref<HTMLButtonElement>;
+  gardenButtonRef?: Ref<HTMLButtonElement>;
   mode: GardenMode;
   onModeChange: (mode: GardenMode) => void;
 };
@@ -12,7 +16,12 @@ const MODE_LABELS: Readonly<Record<GardenMode, string>> = {
   cards: "卡片模式",
 };
 
-export function GardenModeToggle({ mode, onModeChange }: GardenModeToggleProps) {
+export function GardenModeToggle({
+  cardButtonRef,
+  gardenButtonRef,
+  mode,
+  onModeChange,
+}: GardenModeToggleProps) {
   return (
     <div>
       <nav
@@ -26,6 +35,7 @@ export function GardenModeToggle({ mode, onModeChange }: GardenModeToggleProps) 
             className="rounded-full px-5 py-2.5 text-sm font-semibold text-garden-muted hover:text-garden-ink aria-pressed:bg-garden-accent aria-pressed:text-white"
             key={candidateMode}
             onClick={() => onModeChange(candidateMode)}
+            ref={candidateMode === "garden" ? gardenButtonRef : cardButtonRef}
             type="button"
           >
             {MODE_LABELS[candidateMode]}

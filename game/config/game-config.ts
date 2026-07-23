@@ -32,4 +32,9 @@ export const GARDEN_RENDER_COLORS = Object.freeze({
   playerClothing: 0x486b67,
   playerSkin: 0xe5bea0,
   playerOutline: 0x294842,
+  movementTarget: 0xf0c55e,
+  movementFailure: 0xb75d52,
+  selection: 0xf0c55e,
+  hedge: 0x557b59,
+  hedgeShade: 0x3f6548,
 });

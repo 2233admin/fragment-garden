@@ -29,6 +29,19 @@ export class GardenMapRenderer {
     graphics.fillStyle(GARDEN_RENDER_COLORS.path, 1);
     graphics.fillRoundedRect(road.x, road.y, road.width, road.height, 24);
 
+    for (const obstacle of this.config.decorativeObstacleAreas) {
+      graphics.fillStyle(GARDEN_RENDER_COLORS.hedgeShade, 0.9);
+      graphics.fillRoundedRect(
+        obstacle.x - 4,
+        obstacle.y - 4,
+        obstacle.width + 8,
+        obstacle.height + 8,
+        18,
+      );
+      graphics.fillStyle(GARDEN_RENDER_COLORS.hedge, 1);
+      graphics.fillRoundedRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height, 16);
+    }
+
     for (const slot of this.config.plantSlots) {
       graphics.fillStyle(GARDEN_RENDER_COLORS.soil, 0.72);
       graphics.fillEllipse(slot.x, slot.y + 1, 48, 19);

@@ -11,7 +11,7 @@ import {
   type FragmentCardViewModel,
 } from "@/data/queries/fragment-card-query";
 
-import { CreateTextFragmentDialog } from "./CreateTextFragmentDialog";
+import { CreateFragmentDialog } from "./CreateFragmentDialog";
 import { EmptyFragmentState } from "./EmptyFragmentState";
 import { FragmentList } from "./FragmentList";
 import { FragmentSearchBar } from "./FragmentSearchBar";
@@ -33,12 +33,16 @@ type FragmentWorkspaceProps = {
   layout?: "page" | "embedded";
   onOpenFragment: (fragmentId: string, triggerElement: HTMLButtonElement) => void;
   openingFragmentId: string | null;
+  onRetryLinkImport?: (fragmentId: string) => Promise<void>;
+  onStartLinkImport?: (fragmentId: string) => void;
 };
 
 export function FragmentWorkspace({
   layout = "page",
   onOpenFragment,
   openingFragmentId,
+  onRetryLinkImport,
+  onStartLinkImport,
 }: FragmentWorkspaceProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sort, setSort] = useState<FragmentCardSort>("created_desc");
@@ -108,7 +112,7 @@ export function FragmentWorkspace({
               卡片模式
             </p>
             <WorkspaceHeading className="mt-2 font-display text-4xl leading-tight font-semibold tracking-tight text-garden-ink sm:text-5xl">
-              {layout === "page" ? "碎片花园" : "文字碎片"}
+              {layout === "page" ? "碎片花园" : "我的碎片"}
             </WorkspaceHeading>
             <p className="mt-3 max-w-xl text-sm leading-6 text-garden-muted sm:text-base">
               把暂时不处理、但也不想忘记的内容种下来。所有内容先保存在当前浏览器中。
@@ -132,7 +136,7 @@ export function FragmentWorkspace({
                 className="font-display text-2xl font-semibold text-garden-ink"
                 id="fragment-collection-title"
               >
-                我的文字碎片
+                我的碎片
               </CollectionHeading>
               <p className="mt-1 text-sm text-garden-muted">
                 {cardState.status === "ready"
@@ -235,15 +239,29 @@ export function FragmentWorkspace({
               fragments={visibleCards}
               onOpen={onOpenFragment}
               openingFragmentId={openingFragmentId}
+              onRetryLinkImport={onRetryLinkImport}
             />
           ) : null}
         </section>
       </div>
 
-      <CreateTextFragmentDialog
+      <CreateFragmentDialog
         isOpen={isCreateOpen}
         onClose={closeCreateDialog}
-        onCreated={(title) => setFeedback(`“${title}”已保存，并出现在卡片列表中。`)}
+        onCreated={(notice) => {
+          if (notice.contentType !== "link") {
+            setFeedback(`“${notice.title}”已保存，并出现在卡片列表中。`);
+            return;
+          }
+
+          setFeedback(
+            notice.linkImportStarted
+              ? `“${notice.title}”链接已经种下，正在读取内容。`
+              : `“${notice.title}”链接已保存到本地。读取暂时未启动，刷新页面后会继续恢复。`,
+          );
+        }}
+        onOpenExistingFragment={onOpenFragment}
+        onStartLinkImport={onStartLinkImport}
       />
     </WorkspaceRoot>
   );

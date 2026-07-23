@@ -7,6 +7,7 @@ import { CompanionExperience } from "@/components/companion/CompanionExperience"
 import { FragmentDetailDialog } from "@/components/fragments/FragmentDetailDialog";
 import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
 import { useDormancySync } from "@/components/fragments/useDormancySync";
+import { useExternalLinkImportRuntime } from "@/components/link-imports/useExternalLinkImportRuntime";
 import type { GardenPlantSnapshot } from "@/domain";
 import type { CompanionViewModel } from "@/domain/garden/companion-view-model";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
@@ -54,6 +55,17 @@ export function GardenWorkspace() {
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const gardenModeButtonRef = useRef<HTMLButtonElement>(null);
   const cardModeButtonRef = useRef<HTMLButtonElement>(null);
+  const handleLinkImportEvent = useCallback(
+    (event: Readonly<{ type: "completed" | "failed"; message: string }>): void => {
+      setInteractionFeedback({
+        kind: event.type === "failed" ? "error" : "status",
+        message: event.message,
+      });
+    },
+    [],
+  );
+  const { retryExternalLinkImport, startExternalLinkImport } =
+    useExternalLinkImportRuntime(handleLinkImportEvent);
   const handleCompanionTypeChange = useCallback(
     (companionType: CompanionViewModel["type"] | null): void => {
       setCompanion((current) => {
@@ -382,6 +394,8 @@ export function GardenWorkspace() {
               onOpenFragment={(fragmentId, triggerElement) => {
                 void openFragment(fragmentId, { triggerElement });
               }}
+              onRetryLinkImport={retryExternalLinkImport}
+              onStartLinkImport={startExternalLinkImport}
               openingFragmentId={openingFragmentId}
             />
           </section>
@@ -400,6 +414,7 @@ export function GardenWorkspace() {
               triggerElement: null,
             })
           }
+          onRetryLinkImport={retryExternalLinkImport}
         />
       ) : null}
     </main>

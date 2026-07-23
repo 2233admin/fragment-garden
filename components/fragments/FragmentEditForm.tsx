@@ -1,12 +1,14 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import type { FragmentContentType } from "@/domain";
 import { updateFragmentContent } from "@/services/update-fragment-content";
 
 import { AsyncButton } from "../shared/AsyncButton";
 
 type FragmentEditFormProps = {
+  contentType: FragmentContentType;
   fragmentId: string;
   initialRawText: string;
   initialTitle: string;
@@ -16,6 +18,7 @@ type FragmentEditFormProps = {
 };
 
 export function FragmentEditForm({
+  contentType,
   fragmentId,
   initialRawText,
   initialTitle,
@@ -28,6 +31,26 @@ export function FragmentEditForm({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const submissionLockRef = useRef(false);
+  const previousFragmentIdRef = useRef(fragmentId);
+  const isTitleDirtyRef = useRef(false);
+  const isRawTextDirtyRef = useRef(false);
+
+  useEffect(() => {
+    const didFragmentChange = previousFragmentIdRef.current !== fragmentId;
+
+    if (didFragmentChange) {
+      previousFragmentIdRef.current = fragmentId;
+      isTitleDirtyRef.current = false;
+      isRawTextDirtyRef.current = false;
+    }
+
+    if (!isTitleDirtyRef.current) {
+      setTitle(initialTitle);
+    }
+    if (!isRawTextDirtyRef.current) {
+      setRawText(initialRawText);
+    }
+  }, [fragmentId, initialRawText, initialTitle]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -36,7 +59,7 @@ export function FragmentEditForm({
       return;
     }
 
-    if (rawText.trim().length === 0) {
+    if (contentType !== "link" && rawText.trim().length === 0) {
       setErrorMessage("原始内容不能为空，修改尚未保存。请填写内容后重试。");
       return;
     }
@@ -47,15 +70,26 @@ export function FragmentEditForm({
     onPendingChange(true);
 
     try {
+      const editedFields = {
+        title: isTitleDirtyRef.current,
+        rawText: isRawTextDirtyRef.current,
+      };
       const result = await updateFragmentContent({
         fragmentId,
         rawText,
         title,
+        editedFields,
       });
 
+      isTitleDirtyRef.current = false;
+      isRawTextDirtyRef.current = false;
       setTitle(result.fragment.title);
       setRawText(result.fragment.rawText ?? "");
-      onSaved("标题和原始内容已保存。");
+      onSaved(
+        contentType === "link"
+          ? "链接标题和正文已保存，不会自动重新读取。"
+          : "标题和原始内容已保存。",
+      );
     } catch {
       setErrorMessage("修改保存失败，本地原文没有被替换。你的输入仍在，可以重试。");
     } finally {
@@ -66,10 +100,16 @@ export function FragmentEditForm({
   }
 
   return (
-    <form className="rounded-2xl border border-garden-line bg-white p-5" onSubmit={handleSubmit}>
+    <form
+      className="rounded-2xl border border-garden-line bg-white p-5"
+      id={`edit-fragment-${fragmentId}`}
+      onSubmit={handleSubmit}
+    >
       <h3 className="font-display text-xl font-semibold text-garden-ink">编辑原始内容</h3>
       <p className="mt-1 text-xs leading-5 text-garden-muted">
-        编辑不会增加成长分，也不会成为一条补充记录。
+        {contentType === "link"
+          ? "手动编辑会保留为你的内容，不会自动重新读取链接，也不会增加成长分。"
+          : "编辑不会增加成长分，也不会成为一条补充记录。"}
       </p>
 
       <div className="mt-5">
@@ -83,7 +123,10 @@ export function FragmentEditForm({
           className="w-full rounded-xl border border-garden-line bg-garden-paper px-4 py-3 text-sm text-garden-ink disabled:opacity-60"
           disabled={isDisabled}
           id={`edit-title-${fragmentId}`}
-          onChange={(event) => setTitle(event.target.value)}
+          onChange={(event) => {
+            isTitleDirtyRef.current = true;
+            setTitle(event.target.value);
+          }}
           type="text"
           value={title}
         />
@@ -94,14 +137,17 @@ export function FragmentEditForm({
           className="mb-2 block text-sm font-semibold text-garden-ink"
           htmlFor={`edit-content-${fragmentId}`}
         >
-          编辑原始内容
+          {contentType === "link" ? "编辑提取正文（可选）" : "编辑原始内容"}
         </label>
         <textarea
           className="min-h-40 w-full resize-y rounded-xl border border-garden-line bg-garden-paper px-4 py-3 text-sm leading-6 text-garden-ink disabled:opacity-60"
           disabled={isDisabled}
           id={`edit-content-${fragmentId}`}
-          onChange={(event) => setRawText(event.target.value)}
-          required
+          onChange={(event) => {
+            isRawTextDirtyRef.current = true;
+            setRawText(event.target.value);
+          }}
+          required={contentType !== "link"}
           value={rawText}
         />
       </div>

@@ -15,6 +15,7 @@ import { CreateChildFragmentDialog } from "./CreateChildFragmentDialog";
 import { FragmentDetailOverview } from "./FragmentDetailOverview";
 import { FragmentDispositionDialog } from "./FragmentDispositionDialog";
 import { FragmentEditForm } from "./FragmentEditForm";
+import { FragmentLinkDetailPanel } from "./FragmentLinkDetailPanel";
 import { FragmentLifecyclePanel } from "./FragmentLifecyclePanel";
 import { TextSupplementForm } from "./TextSupplementForm";
 import { useFragmentDetailActions } from "./useFragmentDetailActions";
@@ -25,6 +26,7 @@ type FragmentDetailDialogProps = {
   onClose: () => void;
   onDeleted: (message: string) => void;
   onOpenRelatedFragment: (fragmentId: string) => Promise<boolean>;
+  onRetryLinkImport?: (fragmentId: string) => Promise<void>;
 };
 
 type DetailQueryState =
@@ -40,6 +42,7 @@ export function FragmentDetailDialog({
   onClose,
   onDeleted,
   onOpenRelatedFragment,
+  onRetryLinkImport,
 }: FragmentDetailDialogProps) {
   const titleId = useId();
   const [queryAttempt, setQueryAttempt] = useState(0);
@@ -159,6 +162,14 @@ export function FragmentDetailDialog({
             <div className="space-y-6" key={detailState.detail.fragment.id}>
               <FragmentDetailOverview detail={detailState.detail} />
 
+              {detailState.detail.fragment.contentType === "link" ? (
+                <FragmentLinkDetailPanel
+                  externalLinkImport={detailState.detail.externalLinkImport}
+                  fragment={detailState.detail.fragment}
+                  onRetryLinkImport={onRetryLinkImport}
+                />
+              ) : null}
+
               <div>
                 <p
                   aria-atomic="true"
@@ -211,6 +222,7 @@ export function FragmentDetailDialog({
               />
 
               <FragmentEditForm
+                contentType={detailState.detail.fragment.contentType}
                 fragmentId={fragmentId}
                 initialRawText={detailState.detail.fragment.rawText ?? ""}
                 initialTitle={detailState.detail.fragment.title}

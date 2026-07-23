@@ -83,12 +83,14 @@ export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) 
         </section>
       ) : null}
 
-      <section>
-        <h3 className="font-display text-xl font-semibold text-garden-ink">原始内容</h3>
-        <p className="mt-3 whitespace-pre-wrap rounded-2xl border border-garden-line bg-white p-5 text-sm leading-7 text-garden-ink">
-          {fragment.rawText}
-        </p>
-      </section>
+      {fragment.contentType !== "link" ? (
+        <section>
+          <h3 className="font-display text-xl font-semibold text-garden-ink">原始内容</h3>
+          <p className="mt-3 whitespace-pre-wrap rounded-2xl border border-garden-line bg-white p-5 text-sm leading-7 text-garden-ink">
+            {fragment.rawText}
+          </p>
+        </section>
+      ) : null}
 
       <section className="rounded-2xl border border-garden-line bg-white p-5">
         <h3 className="font-display text-xl font-semibold text-garden-ink">想法来源与生长</h3>

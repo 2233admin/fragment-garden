@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
+import { filterFragmentCardsByStatus, type FragmentCardFilter } from "@/domain";
 import {
   filterAndSortFragmentCards,
   listFragmentCardViewModels,
@@ -14,11 +15,19 @@ import { CreateTextFragmentDialog } from "./CreateTextFragmentDialog";
 import { EmptyFragmentState } from "./EmptyFragmentState";
 import { FragmentList } from "./FragmentList";
 import { FragmentSearchBar } from "./FragmentSearchBar";
+import { FragmentStatusFilter } from "./FragmentStatusFilter";
 
 type CardQueryState =
   { status: "loading" } | { status: "error" } | { status: "ready"; cards: FragmentCardViewModel[] };
 
 const LOADING_CARD_STATE: CardQueryState = { status: "loading" };
+
+const FILTER_EMPTY_MESSAGES: Readonly<Record<FragmentCardFilter, string>> = {
+  current: "当前没有可显示的碎片。已封存的内容仍可从“已封存”中找到。",
+  dormant: "现在没有正在休眠的碎片。",
+  completed: "现在还没有已完成的碎片。",
+  archived: "现在还没有已封存的碎片。",
+};
 
 type FragmentWorkspaceProps = {
   layout?: "page" | "embedded";
@@ -33,6 +42,7 @@ export function FragmentWorkspace({
 }: FragmentWorkspaceProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sort, setSort] = useState<FragmentCardSort>("created_desc");
+  const [statusFilter, setStatusFilter] = useState<FragmentCardFilter>("current");
   const [queryAttempt, setQueryAttempt] = useState(0);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -54,10 +64,9 @@ export function FragmentWorkspace({
     LOADING_CARD_STATE,
   );
 
-  const visibleCards =
-    cardState.status === "ready"
-      ? filterAndSortFragmentCards(cardState.cards, searchTerm, sort)
-      : [];
+  const statusFilteredCards =
+    cardState.status === "ready" ? filterFragmentCardsByStatus(cardState.cards, statusFilter) : [];
+  const visibleCards = filterAndSortFragmentCards(statusFilteredCards, searchTerm, sort);
 
   function restoreFocus(preferredTarget: HTMLButtonElement | null): void {
     requestAnimationFrame(() => {
@@ -127,14 +136,15 @@ export function FragmentWorkspace({
               </CollectionHeading>
               <p className="mt-1 text-sm text-garden-muted">
                 {cardState.status === "ready"
-                  ? `共 ${cardState.cards.length} 条未删除碎片`
+                  ? `当前筛选 ${statusFilteredCards.length} 条，共 ${cardState.cards.length} 条未删除碎片`
                   : "正在连接本地花园"}
               </p>
             </div>
             <p className="text-xs text-garden-muted">本地保存 · 无需等待 AI</p>
           </div>
 
-          <div className="mt-5">
+          <div className="mt-5 space-y-4">
+            <FragmentStatusFilter onChange={setStatusFilter} value={statusFilter} />
             <FragmentSearchBar
               onSearchTermChange={setSearchTerm}
               onSortChange={setSort}
@@ -192,6 +202,20 @@ export function FragmentWorkspace({
 
           {cardState.status === "ready" &&
           cardState.cards.length > 0 &&
+          statusFilteredCards.length === 0 ? (
+            <section
+              aria-live="polite"
+              className="rounded-2xl border border-dashed border-garden-line bg-garden-paper/75 px-6 py-12 text-center"
+            >
+              <h3 className="font-display text-xl font-semibold">这个筛选里还没有内容</h3>
+              <p className="mt-2 text-sm text-garden-muted">
+                {FILTER_EMPTY_MESSAGES[statusFilter]}
+              </p>
+            </section>
+          ) : null}
+
+          {cardState.status === "ready" &&
+          statusFilteredCards.length > 0 &&
           visibleCards.length === 0 ? (
             <section className="rounded-2xl border border-dashed border-garden-line bg-garden-paper/75 px-6 py-12 text-center">
               <h3 className="font-display text-xl font-semibold">没有找到匹配的碎片</h3>

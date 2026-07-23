@@ -8,7 +8,7 @@ export const COMPLETION_STATUS_LABELS: Readonly<Record<FragmentCompletionStatus,
 export const LIFECYCLE_STATUS_LABELS: Readonly<Record<FragmentLifecycleStatus, string>> = {
   active: "活跃",
   dormant: "休眠",
-  archived: "封存",
+  archived: "已封存",
   deleted: "已删除",
 };
 

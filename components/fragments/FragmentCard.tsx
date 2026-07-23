@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 import type { FragmentCardViewModel } from "@/data/queries/fragment-card-query";
 
 import {
@@ -17,18 +19,28 @@ type FragmentCardProps = {
 const GROWTH_TRACK_STEPS = [0, 1, 2, 3] as const;
 
 export function FragmentCard({ fragment, isOpening, onOpen }: FragmentCardProps) {
+  const statusDescriptionId = useId();
   const growthStep = resolveGrowthStep(fragment.plantStage);
   const stageLabel = PLANT_STAGE_LABELS[fragment.plantStage];
 
   return (
     <li>
       <button
+        aria-describedby={statusDescriptionId}
         aria-label={`打开碎片：${fragment.title}`}
         className="group flex min-h-72 w-full flex-col rounded-2xl border border-garden-line bg-garden-paper p-5 text-left shadow-[0_14px_36px_rgba(24,55,43,0.07)] transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-garden-accent/45 hover:shadow-[0_18px_40px_rgba(24,55,43,0.1)] disabled:translate-y-0 disabled:opacity-65"
         disabled={isOpening}
         onClick={(event) => onOpen(fragment.id, event.currentTarget)}
         type="button"
       >
+        <span className="sr-only" id={statusDescriptionId}>
+          生命周期状态：{LIFECYCLE_STATUS_LABELS[fragment.lifecycleStatus]}。完成状态：
+          {COMPLETION_STATUS_LABELS[fragment.completionStatus]}。成长阶段：{stageLabel}
+          。成长分：{fragment.growthScore}。
+          {fragment.lifecycleStatus !== "archived" && fragment.isPlacedInGarden === false
+            ? "花园位置已满，暂未放置植物。"
+            : ""}
+        </span>
         <span className="flex w-full items-start justify-between gap-4">
           <span
             aria-level={2}
@@ -37,8 +49,15 @@ export function FragmentCard({ fragment, isOpening, onOpen }: FragmentCardProps)
           >
             {fragment.title}
           </span>
-          <span className="shrink-0 rounded-full bg-garden-soft px-2.5 py-1 text-xs font-semibold text-garden-accent-strong">
-            {LIFECYCLE_STATUS_LABELS[fragment.lifecycleStatus]}
+          <span className="flex shrink-0 flex-wrap justify-end gap-2">
+            <span className="rounded-full bg-garden-soft px-2.5 py-1 text-xs font-semibold text-garden-accent-strong">
+              {LIFECYCLE_STATUS_LABELS[fragment.lifecycleStatus]}
+            </span>
+            {fragment.completionStatus === "completed" ? (
+              <span className="rounded-full bg-garden-accent/15 px-2.5 py-1 text-xs font-semibold text-garden-accent-strong">
+                {COMPLETION_STATUS_LABELS.completed}
+              </span>
+            ) : null}
           </span>
         </span>
 
@@ -62,6 +81,12 @@ export function FragmentCard({ fragment, isOpening, onOpen }: FragmentCardProps)
             ))}
           </span>
         </span>
+
+        {fragment.lifecycleStatus !== "archived" && fragment.isPlacedInGarden === false ? (
+          <span className="mt-3 block rounded-xl border border-garden-line bg-garden-soft/65 px-3.5 py-3 text-xs leading-5 text-garden-muted">
+            花园位置已满，内容仍可在卡片模式使用，暂未放置植物。
+          </span>
+        ) : null}
 
         <span className="mt-auto block w-full pt-5 text-xs leading-5 text-garden-muted">
           <span className="block">

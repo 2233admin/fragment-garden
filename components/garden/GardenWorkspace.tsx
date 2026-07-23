@@ -5,6 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 import { FragmentDetailDialog } from "@/components/fragments/FragmentDetailDialog";
 import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
+import { useDormancySync } from "@/components/fragments/useDormancySync";
 import type { GardenPlantSnapshot } from "@/domain";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
 import { queryGardenPlantSnapshot } from "@/services/garden-query-service";
@@ -27,6 +28,7 @@ type InteractionFeedback = Readonly<{
 
 type OpenFragmentOptions = Readonly<{
   plantId?: string;
+  replaceSelected?: boolean;
   successMessage?: string;
   triggerElement: HTMLButtonElement | null;
 }>;
@@ -43,9 +45,12 @@ export function GardenWorkspace() {
   const [interactionFeedback, setInteractionFeedback] = useState<InteractionFeedback | null>(null);
   const selectedFragmentIdRef = useRef<string | null>(null);
   const openingLockRef = useRef<string | null>(null);
+  const openRequestGenerationRef = useRef(0);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const gardenModeButtonRef = useRef<HTMLButtonElement>(null);
   const cardModeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useDormancySync({ onFeedback: setInteractionFeedback });
 
   const gardenState: GardenQueryState = useLiveQuery(
     async (): Promise<GardenQueryState> => {
@@ -82,14 +87,21 @@ export function GardenWorkspace() {
 
   async function openFragment(
     fragmentId: string,
-    { plantId, successMessage, triggerElement }: OpenFragmentOptions,
-  ): Promise<void> {
-    if (openingLockRef.current !== null || selectedFragmentIdRef.current !== null) {
-      return;
+    { plantId, replaceSelected = false, successMessage, triggerElement }: OpenFragmentOptions,
+  ): Promise<boolean> {
+    if (
+      openingLockRef.current !== null ||
+      (selectedFragmentIdRef.current !== null && !replaceSelected)
+    ) {
+      return false;
     }
 
+    const requestGeneration = openRequestGenerationRef.current + 1;
+    openRequestGenerationRef.current = requestGeneration;
     openingLockRef.current = fragmentId;
-    detailTriggerRef.current = triggerElement;
+    if (!replaceSelected) {
+      detailTriggerRef.current = triggerElement;
+    }
     setOpeningFragmentId(fragmentId);
     setOpeningPlantId(plantId ?? null);
     setInteractionFeedback({
@@ -99,20 +111,33 @@ export function GardenWorkspace() {
 
     try {
       await recordFragmentViewed({ fragmentId });
+
+      if (openRequestGenerationRef.current !== requestGeneration) {
+        return false;
+      }
+
       selectedFragmentIdRef.current = fragmentId;
       setSelectedFragmentId(fragmentId);
       setInteractionFeedback(
         successMessage === undefined ? null : { kind: "status", message: successMessage },
       );
+      return true;
     } catch {
+      if (openRequestGenerationRef.current !== requestGeneration) {
+        return false;
+      }
+
       setInteractionFeedback({
         kind: "error",
         message: "详情打开失败，没有写入查看记录，也没有修改本地内容。请重试。",
       });
+      return false;
     } finally {
-      openingLockRef.current = null;
-      setOpeningFragmentId(null);
-      setOpeningPlantId(null);
+      if (openRequestGenerationRef.current === requestGeneration) {
+        openingLockRef.current = null;
+        setOpeningFragmentId(null);
+        setOpeningPlantId(null);
+      }
     }
   }
 
@@ -180,12 +205,20 @@ export function GardenWorkspace() {
   }
 
   function closeDetailDialog(): void {
+    openRequestGenerationRef.current += 1;
+    openingLockRef.current = null;
+    setOpeningFragmentId(null);
+    setOpeningPlantId(null);
     selectedFragmentIdRef.current = null;
     setSelectedFragmentId(null);
     restoreDetailFocus();
   }
 
   function handleDeleted(): void {
+    openRequestGenerationRef.current += 1;
+    openingLockRef.current = null;
+    setOpeningFragmentId(null);
+    setOpeningPlantId(null);
     selectedFragmentIdRef.current = null;
     setSelectedFragmentId(null);
     setInteractionFeedback({
@@ -300,6 +333,12 @@ export function GardenWorkspace() {
           key={selectedFragmentId}
           onClose={closeDetailDialog}
           onDeleted={handleDeleted}
+          onOpenRelatedFragment={(fragmentId) =>
+            openFragment(fragmentId, {
+              replaceSelected: true,
+              triggerElement: null,
+            })
+          }
         />
       ) : null}
     </main>

@@ -12,7 +12,8 @@ type FragmentDetailOverviewProps = {
 };
 
 export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) {
-  const { fragment, plant, textSupplements } = detail;
+  const { childFragments, completion, fragment, history, plant, sourceFragment, textSupplements } =
+    detail;
 
   return (
     <div className="space-y-5">
@@ -39,9 +40,13 @@ export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) 
           <dt className="text-xs font-semibold tracking-wide text-garden-muted uppercase">
             内容状态
           </dt>
-          <dd className="mt-1 text-garden-ink">
-            {LIFECYCLE_STATUS_LABELS[fragment.lifecycleStatus]} ·{" "}
-            {COMPLETION_STATUS_LABELS[fragment.completionStatus]}
+          <dd className="mt-2 flex flex-wrap gap-2 text-garden-ink">
+            <span className="rounded-full border border-garden-line bg-white px-2.5 py-1 text-xs font-semibold">
+              {LIFECYCLE_STATUS_LABELS[fragment.lifecycleStatus]}
+            </span>
+            <span className="rounded-full border border-garden-line bg-white px-2.5 py-1 text-xs font-semibold">
+              {COMPLETION_STATUS_LABELS[fragment.completionStatus]}
+            </span>
           </dd>
         </div>
         <div>
@@ -49,17 +54,71 @@ export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) 
             植物成长
           </dt>
           <dd className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-garden-ink">
-            <span>成长阶段：{PLANT_STAGE_LABELS[plant.stage]}</span>
+            <span>
+              成长阶段：
+              <strong className="font-normal">{PLANT_STAGE_LABELS[plant.stage]}</strong>
+            </span>
             <span>成长分：{plant.growthScore}</span>
+            {plant.slotId === null && fragment.lifecycleStatus !== "archived" ? (
+              <span className="w-full text-garden-muted">花园位置已满，植物暂未放置</span>
+            ) : null}
           </dd>
         </div>
       </dl>
+
+      {fragment.completionStatus === "completed" ? (
+        <section className="rounded-2xl border border-garden-accent/25 bg-garden-soft/45 p-5">
+          <h3 className="font-display text-xl font-semibold text-garden-ink">完成结果</h3>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-garden-ink">
+            {completion?.outcome ?? "这次完成没有填写结果说明。"}
+          </p>
+          {completion !== null ? (
+            <p className="mt-2 text-xs text-garden-muted">
+              完成于{" "}
+              <time dateTime={completion.occurredAt}>
+                {formatFragmentTimestamp(completion.occurredAt)}
+              </time>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section>
         <h3 className="font-display text-xl font-semibold text-garden-ink">原始内容</h3>
         <p className="mt-3 whitespace-pre-wrap rounded-2xl border border-garden-line bg-white p-5 text-sm leading-7 text-garden-ink">
           {fragment.rawText}
         </p>
+      </section>
+
+      <section className="rounded-2xl border border-garden-line bg-white p-5">
+        <h3 className="font-display text-xl font-semibold text-garden-ink">想法来源与生长</h3>
+        <dl className="mt-4 space-y-4 text-sm">
+          <div>
+            <dt className="font-semibold text-garden-muted">生长自</dt>
+            <dd className="mt-1 text-garden-ink">
+              {sourceFragment === null ? "这是一个独立种下的想法。" : sourceFragment.title}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-garden-muted">发展出的新想法</dt>
+            <dd className="mt-2">
+              {childFragments.length === 0 ? (
+                <span className="text-garden-muted">还没有发展出新的想法。</span>
+              ) : (
+                <ul className="flex flex-wrap gap-2">
+                  {childFragments.map((childFragment) => (
+                    <li
+                      className="rounded-full border border-garden-line bg-garden-canvas/55 px-3 py-1.5 text-garden-ink"
+                      key={childFragment.id}
+                    >
+                      {childFragment.title}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section>
@@ -88,6 +147,33 @@ export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) 
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-garden-ink">
                   {supplement.text}
                 </p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section>
+        <div className="flex items-baseline justify-between gap-4">
+          <h3 className="font-display text-xl font-semibold text-garden-ink">成长与状态记录</h3>
+          <span className="text-xs text-garden-muted">{history.length} 条</span>
+        </div>
+
+        {history.length === 0 ? (
+          <p className="mt-3 rounded-2xl border border-dashed border-garden-line px-4 py-5 text-sm text-garden-muted">
+            还没有可显示的成长记录。
+          </p>
+        ) : (
+          <ol className="mt-3 space-y-2">
+            {[...history].reverse().map((item) => (
+              <li
+                className="flex flex-col gap-1 rounded-xl border border-garden-line bg-garden-canvas/45 px-4 py-3 text-sm sm:flex-row sm:items-baseline sm:justify-between"
+                key={item.id}
+              >
+                <span className="font-semibold text-garden-ink">{item.label}</span>
+                <time className="shrink-0 text-xs text-garden-muted" dateTime={item.occurredAt}>
+                  {formatFragmentTimestamp(item.occurredAt)}
+                </time>
               </li>
             ))}
           </ol>

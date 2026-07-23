@@ -7,18 +7,24 @@ import {
   getFragmentDetailViewModel,
   type FragmentDetailViewModel,
 } from "@/data/queries/fragment-detail-query";
-import { softDeleteFragment } from "@/services/soft-delete-fragment";
 
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { ModalDialog } from "../shared/ModalDialog";
+import { CompleteFragmentDialog } from "./CompleteFragmentDialog";
+import { CreateChildFragmentDialog } from "./CreateChildFragmentDialog";
 import { FragmentDetailOverview } from "./FragmentDetailOverview";
+import { FragmentDispositionDialog } from "./FragmentDispositionDialog";
 import { FragmentEditForm } from "./FragmentEditForm";
+import { FragmentLifecyclePanel } from "./FragmentLifecyclePanel";
 import { TextSupplementForm } from "./TextSupplementForm";
+import { useFragmentDetailActions } from "./useFragmentDetailActions";
+import { useFragmentDispositionActions } from "./useFragmentDispositionActions";
 
 type FragmentDetailDialogProps = {
   fragmentId: string;
   onClose: () => void;
   onDeleted: (message: string) => void;
+  onOpenRelatedFragment: (fragmentId: string) => Promise<boolean>;
 };
 
 type DetailQueryState =
@@ -27,22 +33,17 @@ type DetailQueryState =
   | { status: "missing" }
   | { status: "ready"; detail: FragmentDetailViewModel };
 
-type PendingAction = "edit" | "supplement" | "delete" | null;
-
 const LOADING_DETAIL_STATE: DetailQueryState = { status: "loading" };
 
 export function FragmentDetailDialog({
   fragmentId,
   onClose,
   onDeleted,
+  onOpenRelatedFragment,
 }: FragmentDetailDialogProps) {
   const titleId = useId();
   const [queryAttempt, setQueryAttempt] = useState(0);
-  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const deletionLockRef = useRef(false);
+  const stableFocusRef = useRef<HTMLParagraphElement>(null);
 
   const detailState: DetailQueryState = useLiveQuery(
     async (): Promise<DetailQueryState> => {
@@ -58,31 +59,31 @@ export function FragmentDetailDialog({
     LOADING_DETAIL_STATE,
   );
 
-  const isBusy = pendingAction !== null;
+  function requestStableFocus(): void {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        stableFocusRef.current?.focus();
+      });
+    });
+  }
+
+  const actions = useFragmentDetailActions({
+    fragmentId,
+    onOpenRelatedFragment,
+    onRequestStableFocus: requestStableFocus,
+  });
+  const disposition = useFragmentDispositionActions({
+    fragmentId,
+    onArchived: (message) => {
+      actions.setFeedback({ kind: "status", message });
+      actions.closeOverlay();
+      requestStableFocus();
+    },
+    onDeleted,
+  });
+  const isBusy = actions.isBusy || disposition.isBusy;
   const dialogTitle =
     detailState.status === "ready" ? detailState.detail.fragment.title : "碎片详情";
-
-  async function handleDelete(): Promise<void> {
-    if (pendingAction !== null || deletionLockRef.current) {
-      return;
-    }
-
-    deletionLockRef.current = true;
-    setPendingAction("delete");
-    setDeleteError(null);
-
-    try {
-      await softDeleteFragment({ fragmentId });
-      deletionLockRef.current = false;
-      setPendingAction(null);
-      setIsDeleteConfirmOpen(false);
-      onDeleted("碎片已移除，本地内容仍按软删除规则保留。");
-    } catch {
-      deletionLockRef.current = false;
-      setPendingAction(null);
-      setDeleteError("删除失败，碎片仍保留在本地并继续显示。你可以重试。");
-    }
-  }
 
   return (
     <>
@@ -158,20 +159,55 @@ export function FragmentDetailDialog({
             <div className="space-y-6" key={detailState.detail.fragment.id}>
               <FragmentDetailOverview detail={detailState.detail} />
 
-              <p
-                aria-atomic="true"
-                aria-live="polite"
-                className="min-h-6 text-sm font-semibold text-garden-accent"
-                role="status"
-              >
-                {feedback}
-              </p>
+              <div>
+                <p
+                  aria-atomic="true"
+                  aria-live={actions.feedback?.kind === "error" ? "assertive" : "polite"}
+                  className={`min-h-6 text-sm font-semibold ${
+                    actions.feedback?.kind === "error" ? "text-garden-danger" : "text-garden-accent"
+                  }`}
+                  ref={stableFocusRef}
+                  role={actions.feedback?.kind === "error" ? "alert" : "status"}
+                  tabIndex={-1}
+                >
+                  {actions.feedback?.message}
+                </p>
+
+                {actions.createdChild !== null ? (
+                  <button
+                    aria-busy={actions.isOpeningRelated}
+                    className="mt-2 rounded-full border border-garden-accent px-4 py-2 text-sm font-semibold text-garden-accent hover:bg-garden-soft disabled:opacity-60"
+                    disabled={isBusy}
+                    onClick={() => void actions.openCreatedChild()}
+                    type="button"
+                  >
+                    {actions.isOpeningRelated ? "正在打开新想法…" : "打开新想法"}
+                  </button>
+                ) : null}
+              </div>
+
+              <FragmentLifecyclePanel
+                completionStatus={detailState.detail.fragment.completionStatus}
+                isDisabled={isBusy}
+                lifecycleStatus={detailState.detail.fragment.lifecycleStatus}
+                onCreateChild={() => actions.openOverlay("create_child")}
+                onOpenCompletion={() => actions.openOverlay("completion")}
+                onOpenDisposition={() => {
+                  disposition.clearErrors();
+                  actions.openOverlay("disposition");
+                }}
+                onRestore={() => void actions.restore()}
+                onReview={(decision) => void actions.review(decision)}
+                pendingAction={actions.lifecyclePendingAction}
+              />
 
               <TextSupplementForm
                 fragmentId={fragmentId}
                 isDisabled={isBusy}
-                onPendingChange={(isPending) => setPendingAction(isPending ? "supplement" : null)}
-                onSaved={setFeedback}
+                onPendingChange={(isPending) =>
+                  actions.handleFormPendingChange("supplement", isPending)
+                }
+                onSaved={(message) => actions.setFeedback({ kind: "status", message })}
               />
 
               <FragmentEditForm
@@ -179,8 +215,8 @@ export function FragmentDetailDialog({
                 initialRawText={detailState.detail.fragment.rawText ?? ""}
                 initialTitle={detailState.detail.fragment.title}
                 isDisabled={isBusy}
-                onPendingChange={(isPending) => setPendingAction(isPending ? "edit" : null)}
-                onSaved={setFeedback}
+                onPendingChange={(isPending) => actions.handleFormPendingChange("edit", isPending)}
+                onSaved={(message) => actions.setFeedback({ kind: "status", message })}
               />
 
               <section className="rounded-2xl border border-garden-danger/25 bg-garden-danger-soft/55 p-5">
@@ -192,8 +228,8 @@ export function FragmentDetailDialog({
                   className="mt-4 rounded-full border border-garden-danger px-5 py-2.5 text-sm font-semibold text-garden-danger hover:bg-garden-danger-soft disabled:opacity-50"
                   disabled={isBusy}
                   onClick={() => {
-                    setDeleteError(null);
-                    setIsDeleteConfirmOpen(true);
+                    disposition.clearErrors();
+                    actions.openOverlay("delete_confirm");
                   }}
                   type="button"
                 >
@@ -205,19 +241,41 @@ export function FragmentDetailDialog({
         </div>
       </ModalDialog>
 
+      <FragmentDispositionDialog
+        errorMessage={disposition.dispositionError}
+        isOpen={actions.activeOverlay === "disposition"}
+        onArchive={() => void disposition.archiveFromDisposition()}
+        onCancel={() => {
+          disposition.clearErrors();
+          actions.closeOverlay();
+        }}
+        onDelete={() => void disposition.deleteFragment("no_longer_needed")}
+        pendingAction={disposition.dispositionPendingAction}
+      />
+
+      <CompleteFragmentDialog
+        isOpen={actions.activeOverlay === "completion"}
+        onClose={actions.closeOverlay}
+        onComplete={actions.complete}
+      />
+
+      <CreateChildFragmentDialog
+        isOpen={actions.activeOverlay === "create_child"}
+        onClose={actions.closeOverlay}
+        onCreate={actions.createChild}
+      />
+
       <ConfirmDialog
         confirmLabel="确认删除"
-        description="确认后，这条内容不会再出现在默认视图中。对应植物不会被物理删除。"
-        errorMessage={deleteError}
-        isOpen={isDeleteConfirmOpen}
-        isPending={pendingAction === "delete"}
+        description="确认后，这条内容不会再出现在默认视图中。对应植物不会被物理删除，但会释放花园位置。"
+        errorMessage={disposition.deleteError}
+        isOpen={actions.activeOverlay === "delete_confirm"}
+        isPending={disposition.isDirectDeletePending}
         onCancel={() => {
-          if (pendingAction !== "delete") {
-            setDeleteError(null);
-            setIsDeleteConfirmOpen(false);
-          }
+          disposition.clearErrors();
+          actions.closeOverlay();
         }}
-        onConfirm={() => void handleDelete()}
+        onConfirm={() => void disposition.deleteFragment()}
         pendingLabel="正在删除…"
         title="确认删除碎片"
       />

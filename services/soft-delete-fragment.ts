@@ -1,4 +1,5 @@
 import type { Fragment, FragmentEvent, Plant } from "../domain";
+import { ExternalLinkImportRepository } from "../data/repositories/external-link-import-repository";
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { PlantRepository } from "../data/repositories/plant-repository";
@@ -38,16 +39,16 @@ export async function softDeleteFragment(
   const fragmentRepository = new FragmentRepository(database);
   const plantRepository = new PlantRepository(database);
   const fragmentEventRepository = new FragmentEventRepository(database);
+  const externalLinkImportRepository = new ExternalLinkImportRepository(database);
 
   return database.transaction(
     "rw",
-    database.fragments,
-    database.plants,
-    database.fragmentEvents,
+    [database.fragments, database.plants, database.fragmentEvents, database.externalLinkImports],
     async () => {
-      const [fragment, plant] = await Promise.all([
+      const [fragment, plant, externalLinkImport] = await Promise.all([
         fragmentRepository.getById(input.fragmentId),
         plantRepository.getByFragmentId(input.fragmentId),
+        externalLinkImportRepository.getByFragmentId(input.fragmentId),
       ]);
 
       if (fragment === undefined) {
@@ -56,6 +57,21 @@ export async function softDeleteFragment(
 
       if (plant === undefined) {
         throw new Error(`Plant for fragment ${input.fragmentId} was not found`);
+      }
+
+      if (
+        externalLinkImport !== undefined &&
+        (externalLinkImport.status === "pending" || externalLinkImport.status === "processing")
+      ) {
+        requireRecordUpdated(
+          await externalLinkImportRepository.update(externalLinkImport.id, {
+            status: "failed",
+            errorCode: "fragment_deleted",
+            errorMessage: "链接碎片已删除，读取任务已经停止。",
+            updatedAt: timestamp,
+          }),
+          "External link import",
+        );
       }
 
       if (fragment.lifecycleStatus === "deleted") {

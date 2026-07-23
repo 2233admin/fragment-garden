@@ -43,6 +43,7 @@ describe("companion onboarding", () => {
       companionType: null,
       lastOpenedAt: null,
       lastRecommendationDate: null,
+      getNoteDisclosureAcceptedAt: null,
       schemaVersion: 1,
     });
     await expect(database.settings.count()).resolves.toBe(0);

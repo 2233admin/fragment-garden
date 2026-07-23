@@ -66,6 +66,10 @@ export type FragmentRelationStatus = "suggested" | "confirmed" | "ignored";
 
 export type RecommendationReason = "dormant" | "not_reviewed" | "related_to_recent";
 export type ChatMessageRole = "user" | "assistant";
+export type LinkImportProvider = "getnote";
+export type LinkImportStatus = "pending" | "processing" | "completed" | "failed";
+export type LinkImportInitiator = "form" | "companion";
+export type LinkImportTerminalNotificationStatus = "completed" | "failed";
 
 export type Settings = {
   id: SettingsId;
@@ -73,6 +77,7 @@ export type Settings = {
   companionType: CompanionType | null;
   lastOpenedAt: string | null;
   lastRecommendationDate: string | null;
+  getNoteDisclosureAcceptedAt: string | null;
   schemaVersion: number;
 };
 
@@ -166,7 +171,42 @@ export type Recommendation = {
 
 export type ChatMessage = {
   id: string;
+  fragmentId: string | null;
   role: ChatMessageRole;
   content: string;
   createdAt: string;
+};
+
+export type ExternalLinkImport = {
+  id: string;
+  fragmentId: string;
+  provider: LinkImportProvider;
+
+  sourceUrl: string;
+  normalizedUrl: string;
+  canonicalUrl: string | null;
+  sourceContentTruncated: boolean;
+
+  status: LinkImportStatus;
+  initiatedBy: LinkImportInitiator;
+
+  taskId: string | null;
+  externalNoteId: string | null;
+  providerRequestId: string | null;
+
+  attemptCount: number;
+  attemptGeneration: number;
+  userProvidedTitle: boolean;
+  userProvidedContent: boolean;
+
+  errorCode: string | null;
+  errorMessage: string | null;
+
+  terminalNotificationStatus: LinkImportTerminalNotificationStatus | null;
+
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  lastPolledAt: string | null;
+  completedAt: string | null;
 };

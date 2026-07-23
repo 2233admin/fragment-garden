@@ -9,6 +9,7 @@ export function createDefaultSettings(): Settings {
     companionType: null,
     lastOpenedAt: null,
     lastRecommendationDate: null,
+    getNoteDisclosureAcceptedAt: null,
     schemaVersion: 1,
   };
 }

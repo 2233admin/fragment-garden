@@ -180,6 +180,7 @@ async function seedFragments(
           companionType: "cat",
           lastOpenedAt: null,
           lastRecommendationDate: localDate,
+          getNoteDisclosureAcceptedAt: null,
           schemaVersion: 1,
         });
       }

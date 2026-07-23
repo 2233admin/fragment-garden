@@ -37,6 +37,7 @@ function selectedSettings(overrides: Partial<Settings> = {}): Settings {
     companionType: "cat",
     lastOpenedAt: null,
     lastRecommendationDate: null,
+    getNoteDisclosureAcceptedAt: null,
     schemaVersion: 1,
     ...overrides,
   };

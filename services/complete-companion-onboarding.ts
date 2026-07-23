@@ -66,6 +66,7 @@ export async function completeCompanionOnboarding(
       ? null
       : {
           id: createId(),
+          fragmentId: null,
           role: "assistant",
           content: COMPANION_WELCOME_MESSAGE,
           createdAt: timestamp,

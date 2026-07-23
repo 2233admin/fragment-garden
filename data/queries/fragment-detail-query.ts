@@ -1,4 +1,4 @@
-import type { Fragment, Plant } from "../../domain";
+import type { ExternalLinkImport, Fragment, Plant } from "../../domain";
 import {
   safelyParseArchivedEventPayload,
   safelyParseChildFragmentCreatedEventPayload,
@@ -8,6 +8,7 @@ import {
   safelyParseTextAddedEventPayload,
 } from "../../validation/fragment-event-payload";
 import { FragmentGardenDatabase, fragmentGardenDb } from "../db";
+import { ExternalLinkImportRepository } from "../repositories/external-link-import-repository";
 import { FragmentEventRepository } from "../repositories/fragment-event-repository";
 import { FragmentRelationRepository } from "../repositories/fragment-relation-repository";
 import { FragmentRepository } from "../repositories/fragment-repository";
@@ -38,6 +39,7 @@ export type FragmentHistoryItemViewModel = {
 export type FragmentDetailViewModel = {
   fragment: Fragment;
   plant: Plant;
+  externalLinkImport: ExternalLinkImport | null;
   textSupplements: TextSupplementViewModel[];
   completion: FragmentCompletionViewModel | null;
   history: FragmentHistoryItemViewModel[];
@@ -85,23 +87,29 @@ export function getFragmentDetailViewModel(
 ): Promise<FragmentDetailViewModel | undefined> {
   const fragmentRepository = new FragmentRepository(database);
   const plantRepository = new PlantRepository(database);
+  const externalLinkImportRepository = new ExternalLinkImportRepository(database);
   const fragmentEventRepository = new FragmentEventRepository(database);
   const fragmentRelationRepository = new FragmentRelationRepository(database);
 
   return database.transaction(
     "r",
-    database.fragments,
-    database.plants,
-    database.fragmentEvents,
-    database.relations,
+    [
+      database.fragments,
+      database.plants,
+      database.fragmentEvents,
+      database.relations,
+      database.externalLinkImports,
+    ],
     async () => {
-      const [fragment, plant, events, sourceRelations, childRelations] = await Promise.all([
-        fragmentRepository.getById(fragmentId),
-        plantRepository.getByFragmentId(fragmentId),
-        fragmentEventRepository.listByFragmentId(fragmentId),
-        fragmentRelationRepository.listBySourceFragmentId(fragmentId),
-        fragmentRelationRepository.listByTargetFragmentId(fragmentId),
-      ]);
+      const [fragment, plant, externalLinkImport, events, sourceRelations, childRelations] =
+        await Promise.all([
+          fragmentRepository.getById(fragmentId),
+          plantRepository.getByFragmentId(fragmentId),
+          externalLinkImportRepository.getByFragmentId(fragmentId),
+          fragmentEventRepository.listByFragmentId(fragmentId),
+          fragmentRelationRepository.listBySourceFragmentId(fragmentId),
+          fragmentRelationRepository.listByTargetFragmentId(fragmentId),
+        ]);
 
       if (fragment === undefined) {
         return undefined;
@@ -233,6 +241,7 @@ export function getFragmentDetailViewModel(
       return {
         fragment,
         plant,
+        externalLinkImport: externalLinkImport ?? null,
         textSupplements,
         completion,
         history,

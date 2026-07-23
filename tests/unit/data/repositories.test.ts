@@ -140,6 +140,7 @@ describe("SettingsRepository", () => {
       companionType: null,
       lastOpenedAt: null,
       lastRecommendationDate: null,
+      getNoteDisclosureAcceptedAt: null,
       schemaVersion: 1,
     };
 

@@ -4,6 +4,7 @@ import type {
   Attachment,
   ChatMessage,
   Cluster,
+  ExternalLinkImport,
   Fragment,
   FragmentEvent,
   FragmentRelation,
@@ -28,6 +29,7 @@ export class FragmentGardenDatabase extends Dexie {
   clusters!: Table<Cluster, string>;
   recommendations!: Table<Recommendation, string>;
   chatMessages!: Table<ChatMessage, string>;
+  externalLinkImports!: Table<ExternalLinkImport, string>;
 
   constructor(databaseName = FRAGMENT_GARDEN_DATABASE_NAME) {
     super(databaseName);

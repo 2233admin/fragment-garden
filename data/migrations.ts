@@ -1,8 +1,12 @@
 import type Dexie from "dexie";
 import type { Transaction } from "dexie";
 
-import type { Fragment, Plant } from "../domain";
-import { FRAGMENT_GARDEN_DATABASE_VERSION_V2 } from "./schema";
+import type { ChatMessage, Fragment, Plant, Settings } from "../domain";
+import {
+  FRAGMENT_GARDEN_DATABASE_VERSION_V2,
+  FRAGMENT_GARDEN_DATABASE_VERSION_V3,
+  FRAGMENT_GARDEN_SCHEMA_V3,
+} from "./schema";
 
 type MigrationRegistrar = (database: Dexie) => void;
 
@@ -31,7 +35,43 @@ const registerVersion2: MigrationRegistrar = (database) => {
     .upgrade(releaseRetiredFragmentPlantSlots);
 };
 
-const DATABASE_MIGRATIONS: readonly MigrationRegistrar[] = [registerVersion2];
+type Version2Settings = Omit<Settings, "getNoteDisclosureAcceptedAt"> & {
+  getNoteDisclosureAcceptedAt?: string | null;
+};
+
+type Version2ChatMessage = Omit<ChatMessage, "fragmentId"> & {
+  fragmentId?: string | null;
+};
+
+async function addVersion3RecordFields(transaction: Transaction): Promise<void> {
+  await Promise.all([
+    transaction
+      .table<Version2Settings, string>("settings")
+      .toCollection()
+      .modify((settings) => {
+        if (settings.getNoteDisclosureAcceptedAt === undefined) {
+          settings.getNoteDisclosureAcceptedAt = null;
+        }
+      }),
+    transaction
+      .table<Version2ChatMessage, string>("chatMessages")
+      .toCollection()
+      .modify((message) => {
+        if (message.fragmentId === undefined) {
+          message.fragmentId = null;
+        }
+      }),
+  ]);
+}
+
+const registerVersion3: MigrationRegistrar = (database) => {
+  database
+    .version(FRAGMENT_GARDEN_DATABASE_VERSION_V3)
+    .stores(FRAGMENT_GARDEN_SCHEMA_V3)
+    .upgrade(addVersion3RecordFields);
+};
+
+const DATABASE_MIGRATIONS: readonly MigrationRegistrar[] = [registerVersion2, registerVersion3];
 
 /**
  * Version 1 is the initial schema. Later versions are registered in order and

@@ -7,6 +7,7 @@ export type SearchableFragmentCard = {
   id: string;
   title: string;
   rawText: string | null;
+  searchText?: string;
   createdAt: string;
   lastInteractedAt: string;
 };
@@ -59,7 +60,12 @@ export function filterAndSortFragmentCards<T extends SearchableFragmentCard>(
       : cards.filter((card) => {
           const title = card.title.toLowerCase();
           const rawText = (card.rawText ?? "").toLowerCase();
-          return title.includes(normalizedSearchTerm) || rawText.includes(normalizedSearchTerm);
+          const searchText = (card.searchText ?? "").toLowerCase();
+          return (
+            title.includes(normalizedSearchTerm) ||
+            rawText.includes(normalizedSearchTerm) ||
+            searchText.includes(normalizedSearchTerm)
+          );
         });
 
   return filteredCards.sort((left, right) => {

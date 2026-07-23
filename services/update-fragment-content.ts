@@ -1,4 +1,5 @@
 import { deriveLocalFragmentTitle, type Fragment, type FragmentEvent, type Plant } from "../domain";
+import { ExternalLinkImportRepository } from "../data/repositories/external-link-import-repository";
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { PlantRepository } from "../data/repositories/plant-repository";
@@ -15,6 +16,10 @@ export type UpdateFragmentContentInput = {
   fragmentId: string;
   title?: string;
   rawText: string;
+  editedFields?: Readonly<{
+    title: boolean;
+    rawText: boolean;
+  }>;
 };
 
 export type UpdateFragmentContentResult = {
@@ -27,26 +32,16 @@ export async function updateFragmentContent(
   input: UpdateFragmentContentInput,
   dependencies: LocalServiceDependencies = {},
 ): Promise<UpdateFragmentContentResult> {
-  if (input.rawText.trim().length === 0) {
-    throw new Error("Fragment text cannot be empty");
-  }
-
-  const manualTitle = input.title?.trim();
-  const title =
-    manualTitle === undefined || manualTitle.length === 0
-      ? deriveLocalFragmentTitle(input.rawText)
-      : manualTitle;
   const restoredPayload = parseRestoredEventPayload({ reason: "content_updated" });
   const { database, createId, timestamp } = resolveLocalServiceDependencies(dependencies);
   const fragmentRepository = new FragmentRepository(database);
   const plantRepository = new PlantRepository(database);
   const fragmentEventRepository = new FragmentEventRepository(database);
+  const externalLinkImportRepository = new ExternalLinkImportRepository(database);
 
   return database.transaction(
     "rw",
-    database.fragments,
-    database.plants,
-    database.fragmentEvents,
+    [database.fragments, database.plants, database.fragmentEvents, database.externalLinkImports],
     async () => {
       const [fragment, plant] = await Promise.all([
         fragmentRepository.getById(input.fragmentId),
@@ -63,6 +58,21 @@ export async function updateFragmentContent(
 
       requireFragmentCanInteract(fragment);
 
+      const editedFields = input.editedFields ?? { title: true, rawText: true };
+      const submittedRawText = input.rawText.trim().length === 0 ? null : input.rawText;
+      const rawText = editedFields.rawText ? submittedRawText : fragment.rawText;
+      if (fragment.contentType !== "link" && rawText === null) {
+        throw new Error("Fragment text cannot be empty");
+      }
+
+      const manualTitle = input.title?.trim();
+      const title = editedFields.title
+        ? manualTitle === undefined || manualTitle.length === 0
+          ? fragment.contentType === "link" && rawText === null
+            ? fragment.title
+            : deriveLocalFragmentTitle(rawText ?? "")
+          : manualTitle
+        : fragment.title;
       const wasDormant = fragment.lifecycleStatus === "dormant";
       const isArchived = fragment.lifecycleStatus === "archived";
       const stage = fragment.completionStatus === "completed" ? "permanent_bloom" : plant.stage;
@@ -72,7 +82,7 @@ export async function updateFragmentContent(
       const updatedFragment: Fragment = {
         ...fragment,
         title,
-        rawText: input.rawText,
+        rawText,
         lifecycleStatus: isArchived ? "archived" : "active",
         updatedAt: timestamp,
         lastInteractedAt: timestamp,
@@ -100,7 +110,7 @@ export async function updateFragmentContent(
       requireRecordUpdated(
         await fragmentRepository.update(fragment.id, {
           title,
-          rawText: input.rawText,
+          rawText,
           lifecycleStatus: updatedFragment.lifecycleStatus,
           updatedAt: timestamp,
           lastInteractedAt: timestamp,
@@ -122,6 +132,28 @@ export async function updateFragmentContent(
 
       if (restoredEvent !== null) {
         await fragmentEventRepository.add(restoredEvent);
+      }
+
+      if (fragment.contentType === "link") {
+        const externalLinkImport = await externalLinkImportRepository.getByFragmentId(fragment.id);
+
+        if (externalLinkImport !== undefined) {
+          const userProvidedTitle =
+            externalLinkImport.userProvidedTitle ||
+            (editedFields.title && title !== fragment.title);
+          const userProvidedContent =
+            externalLinkImport.userProvidedContent ||
+            (editedFields.rawText && rawText !== fragment.rawText);
+
+          requireRecordUpdated(
+            await externalLinkImportRepository.update(externalLinkImport.id, {
+              userProvidedTitle,
+              userProvidedContent,
+              updatedAt: timestamp,
+            }),
+            "ExternalLinkImport",
+          );
+        }
       }
 
       return {

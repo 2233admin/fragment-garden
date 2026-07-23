@@ -81,12 +81,14 @@ export async function sendCompanionMessage(
       const assistantTimestamp = new Date(userTimestampValue + 1).toISOString();
       const userMessage: ChatMessage = {
         id: createId(),
+        fragmentId: null,
         role: "user",
         content,
         createdAt: userTimestamp,
       };
       const assistantMessage: ChatMessage = {
         id: createId(),
+        fragmentId: null,
         role: "assistant",
         content: assistantContent,
         createdAt: assistantTimestamp,

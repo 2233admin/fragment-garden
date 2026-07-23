@@ -1,1 +1,84 @@
 @import "tailwindcss";
+
+@theme {
+  --color-garden-canvas: #e7efea;
+  --color-garden-paper: #fbfdfb;
+  --color-garden-ink: #18372b;
+  --color-garden-muted: #64766d;
+  --color-garden-line: #c9d7cf;
+  --color-garden-soft: #d9e8df;
+  --color-garden-accent: #245d45;
+  --color-garden-accent-strong: #174834;
+  --color-garden-danger: #8b3a34;
+  --color-garden-danger-soft: #f4e4e2;
+  --font-sans:
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Songti SC", "STSong", "Noto Serif CJK SC", ui-serif, serif;
+}
+
+:root {
+  color-scheme: light;
+  background: var(--color-garden-canvas);
+  color: var(--color-garden-ink);
+  font-family: var(--font-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0) 18rem),
+    var(--color-garden-canvas);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+select {
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(36, 93, 69, 0.36);
+  outline-offset: 3px;
+}
+
+dialog {
+  color: var(--color-garden-ink);
+}
+
+dialog::backdrop {
+  background: rgba(17, 42, 32, 0.54);
+  backdrop-filter: blur(2px);
+}
+
+::selection {
+  background: var(--color-garden-soft);
+  color: var(--color-garden-accent-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

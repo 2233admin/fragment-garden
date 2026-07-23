@@ -39,10 +39,14 @@ test("completes the text fragment card loop", async ({ context, page }) => {
   });
   await cdpSession.detach();
 
-  await test.step("1. 打开卡片工作区", async () => {
+  await test.step("1. 打开页面并进入卡片工作区", async () => {
     await page.goto("/garden");
     await expect(page.getByRole("heading", { name: "碎片花园" })).toBeVisible();
-    await expect(page.getByText("卡片模式", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "卡片模式", exact: true }).click();
+    await expect(page.getByRole("button", { name: "卡片模式", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   await test.step("2. 显示空状态", async () => {
@@ -73,6 +77,7 @@ test("completes the text fragment card loop", async ({ context, page }) => {
   await test.step("7. 刷新页面", async () => {
     await page.reload();
     await expect(page.getByRole("heading", { name: "碎片花园" })).toBeVisible();
+    await page.getByRole("button", { name: "卡片模式", exact: true }).click();
   });
 
   await test.step("8. 刷新后卡片仍然存在", async () => {

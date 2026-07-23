@@ -1,5 +1,5 @@
-import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
+import { GardenWorkspace } from "@/components/garden/GardenWorkspace";
 
 export default function GardenPage() {
-  return <FragmentWorkspace />;
+  return <GardenWorkspace />;
 }

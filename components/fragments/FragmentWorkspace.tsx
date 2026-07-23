@@ -22,7 +22,11 @@ type CardQueryState =
 
 const LOADING_CARD_STATE: CardQueryState = { status: "loading" };
 
-export function FragmentWorkspace() {
+type FragmentWorkspaceProps = {
+  layout?: "page" | "embedded";
+};
+
+export function FragmentWorkspace({ layout = "page" }: FragmentWorkspaceProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sort, setSort] = useState<FragmentCardSort>("created_desc");
   const [queryAttempt, setQueryAttempt] = useState(0);
@@ -114,17 +118,27 @@ export function FragmentWorkspace() {
     restoreFocus(detailTriggerRef.current);
   }
 
+  const WorkspaceRoot = layout === "page" ? "main" : "div";
+  const WorkspaceHeading = layout === "page" ? "h1" : "h2";
+  const CollectionHeading = layout === "page" ? "h2" : "h3";
+
   return (
-    <main className="min-h-screen px-5 py-8 text-garden-ink sm:px-8 lg:px-12 lg:py-10">
+    <WorkspaceRoot
+      className={
+        layout === "page"
+          ? "min-h-screen px-5 py-8 text-garden-ink sm:px-8 lg:px-12 lg:py-10"
+          : "pt-7 pb-12 text-garden-ink"
+      }
+    >
       <div className="mx-auto max-w-7xl">
         <header className="flex flex-col gap-6 border-b border-garden-line pb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold tracking-[0.2em] text-garden-accent uppercase">
               卡片模式
             </p>
-            <h1 className="mt-2 font-display text-4xl leading-tight font-semibold tracking-tight text-garden-ink sm:text-5xl">
-              碎片花园
-            </h1>
+            <WorkspaceHeading className="mt-2 font-display text-4xl leading-tight font-semibold tracking-tight text-garden-ink sm:text-5xl">
+              {layout === "page" ? "碎片花园" : "文字碎片"}
+            </WorkspaceHeading>
             <p className="mt-3 max-w-xl text-sm leading-6 text-garden-muted sm:text-base">
               把暂时不处理、但也不想忘记的内容种下来。所有内容先保存在当前浏览器中。
             </p>
@@ -143,12 +157,12 @@ export function FragmentWorkspace() {
         <section className="mt-8" aria-labelledby="fragment-collection-title">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h2
+              <CollectionHeading
                 className="font-display text-2xl font-semibold text-garden-ink"
                 id="fragment-collection-title"
               >
                 我的文字碎片
-              </h2>
+              </CollectionHeading>
               <p className="mt-1 text-sm text-garden-muted">
                 {cardState.status === "ready"
                   ? `共 ${cardState.cards.length} 条未删除碎片`
@@ -263,6 +277,6 @@ export function FragmentWorkspace() {
           onDeleted={handleDeleted}
         />
       ) : null}
-    </main>
+    </WorkspaceRoot>
   );
 }

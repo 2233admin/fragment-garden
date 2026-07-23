@@ -2,6 +2,7 @@ import type { Fragment, FragmentEvent, Plant } from "../domain";
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { PlantRepository } from "../data/repositories/plant-repository";
+import { parseRestoredEventPayload } from "../validation/fragment-event-payload";
 import {
   CURRENT_FRAGMENT_EVENT_RULE_VERSION,
   type LocalServiceDependencies,
@@ -18,12 +19,14 @@ export type RecordFragmentViewedResult = {
   fragment: Fragment;
   plant: Plant;
   viewedEvent: FragmentEvent;
+  restoredEvent: FragmentEvent | null;
 };
 
 export async function recordFragmentViewed(
   input: RecordFragmentViewedInput,
   dependencies: LocalServiceDependencies = {},
 ): Promise<RecordFragmentViewedResult> {
+  const restoredPayload = parseRestoredEventPayload({ reason: "viewed" });
   const { database, createId, timestamp } = resolveLocalServiceDependencies(dependencies);
   const fragmentRepository = new FragmentRepository(database);
   const plantRepository = new PlantRepository(database);
@@ -50,17 +53,27 @@ export async function recordFragmentViewed(
 
       requireFragmentCanInteract(fragment);
 
+      const wasDormant = fragment.lifecycleStatus === "dormant";
+      const isArchived = fragment.lifecycleStatus === "archived";
       const updatedFragment: Fragment = {
         ...fragment,
-        lifecycleStatus:
-          fragment.lifecycleStatus === "dormant" ? "active" : fragment.lifecycleStatus,
+        lifecycleStatus: isArchived ? "archived" : "active",
         updatedAt: timestamp,
         lastInteractedAt: timestamp,
       };
-      const updatedPlant: Plant =
-        plant.vitality === "dormant"
-          ? { ...plant, vitality: "active", updatedAt: timestamp }
-          : plant;
+      const stage = fragment.completionStatus === "completed" ? "permanent_bloom" : plant.stage;
+      const slotId = isArchived ? null : plant.slotId;
+      const shouldUpdatePlant =
+        plant.vitality !== "active" || plant.stage !== stage || plant.slotId !== slotId;
+      const updatedPlant: Plant = shouldUpdatePlant
+        ? {
+            ...plant,
+            stage,
+            vitality: "active",
+            slotId,
+            updatedAt: timestamp,
+          }
+        : plant;
       const viewedEvent: FragmentEvent = {
         id: createId(),
         fragmentId: fragment.id,
@@ -69,6 +82,16 @@ export async function recordFragmentViewed(
         occurredAt: timestamp,
         ruleVersion: CURRENT_FRAGMENT_EVENT_RULE_VERSION,
       };
+      const restoredEvent: FragmentEvent | null = wasDormant
+        ? {
+            id: createId(),
+            fragmentId: fragment.id,
+            type: "restored",
+            payload: restoredPayload,
+            occurredAt: timestamp,
+            ruleVersion: CURRENT_FRAGMENT_EVENT_RULE_VERSION,
+          }
+        : null;
 
       requireRecordUpdated(
         await fragmentRepository.update(fragment.id, {
@@ -82,7 +105,9 @@ export async function recordFragmentViewed(
       if (updatedPlant !== plant) {
         requireRecordUpdated(
           await plantRepository.update(plant.id, {
+            stage,
             vitality: "active",
+            slotId,
             updatedAt: timestamp,
           }),
           "Plant",
@@ -90,8 +115,16 @@ export async function recordFragmentViewed(
       }
 
       await fragmentEventRepository.add(viewedEvent);
+      if (restoredEvent !== null) {
+        await fragmentEventRepository.add(restoredEvent);
+      }
 
-      return { fragment: updatedFragment, plant: updatedPlant, viewedEvent };
+      return {
+        fragment: updatedFragment,
+        plant: updatedPlant,
+        viewedEvent,
+        restoredEvent,
+      };
     },
   );
 }

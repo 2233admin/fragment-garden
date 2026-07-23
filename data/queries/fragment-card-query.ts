@@ -1,5 +1,10 @@
 import type { FragmentCompletionStatus, FragmentLifecycleStatus, PlantStage } from "../../domain";
-export { filterAndSortFragmentCards, type FragmentCardSort } from "../../domain";
+export {
+  filterAndSortFragmentCards,
+  filterFragmentCardsByStatus,
+  type FragmentCardFilter,
+  type FragmentCardSort,
+} from "../../domain";
 import { FragmentGardenDatabase, fragmentGardenDb } from "../db";
 import { FragmentRepository } from "../repositories/fragment-repository";
 import { PlantRepository } from "../repositories/plant-repository";
@@ -18,6 +23,7 @@ export type FragmentCardViewModel = {
   completionStatus: FragmentCompletionStatus;
   plantStage: PlantStage;
   growthScore: number;
+  isPlacedInGarden: boolean;
 };
 
 function deriveFragmentExcerpt(rawText: string): string {
@@ -65,6 +71,7 @@ export function listFragmentCardViewModels(
         completionStatus: fragment.completionStatus,
         plantStage: plant.stage,
         growthScore: plant.growthScore,
+        isPlacedInGarden: plant.slotId !== null,
       };
     });
   });

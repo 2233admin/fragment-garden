@@ -1,4 +1,7 @@
+import type { FragmentCompletionStatus, FragmentLifecycleStatus } from "../shared/types";
+
 export type FragmentCardSort = "created_desc" | "created_asc" | "interacted_desc";
+export type FragmentCardFilter = "current" | "dormant" | "completed" | "archived";
 
 export type SearchableFragmentCard = {
   id: string;
@@ -6,6 +9,11 @@ export type SearchableFragmentCard = {
   rawText: string | null;
   createdAt: string;
   lastInteractedAt: string;
+};
+
+export type FilterableFragmentCard = {
+  lifecycleStatus: FragmentLifecycleStatus;
+  completionStatus: FragmentCompletionStatus;
 };
 
 function compareIds(leftId: string, rightId: string): number {
@@ -70,5 +78,27 @@ export function filterAndSortFragmentCards<T extends SearchableFragmentCard>(
     }
 
     return primaryComparison === 0 ? compareIds(left.id, right.id) : primaryComparison;
+  });
+}
+
+export function filterFragmentCardsByStatus<T extends FilterableFragmentCard>(
+  cards: readonly T[],
+  filter: FragmentCardFilter,
+): T[] {
+  return cards.filter((card) => {
+    if (card.lifecycleStatus === "deleted") {
+      return false;
+    }
+
+    switch (filter) {
+      case "current":
+        return card.lifecycleStatus !== "archived";
+      case "dormant":
+        return card.lifecycleStatus === "dormant";
+      case "completed":
+        return card.completionStatus === "completed" && card.lifecycleStatus !== "archived";
+      case "archived":
+        return card.lifecycleStatus === "archived";
+    }
   });
 }

@@ -8,7 +8,10 @@ import {
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { PlantRepository } from "../data/repositories/plant-repository";
-import { parseTextAddedEventPayload } from "../validation/fragment-event-payload";
+import {
+  parseRestoredEventPayload,
+  parseTextAddedEventPayload,
+} from "../validation/fragment-event-payload";
 import {
   CURRENT_FRAGMENT_EVENT_RULE_VERSION,
   type LocalServiceDependencies,
@@ -26,6 +29,7 @@ export type AddTextSupplementResult = {
   fragment: Fragment;
   plant: Plant;
   textAddedEvent: FragmentEvent;
+  restoredEvent: FragmentEvent | null;
 };
 
 export async function addTextSupplement(
@@ -33,6 +37,7 @@ export async function addTextSupplement(
   dependencies: LocalServiceDependencies = {},
 ): Promise<AddTextSupplementResult> {
   const payload = parseTextAddedEventPayload({ text: input.text });
+  const restoredPayload = parseRestoredEventPayload({ reason: "content_updated" });
   const { database, createId, timestamp } = resolveLocalServiceDependencies(dependencies);
   const fragmentRepository = new FragmentRepository(database);
   const plantRepository = new PlantRepository(database);
@@ -60,6 +65,8 @@ export async function addTextSupplement(
 
       requireFragmentCanInteract(fragment);
 
+      const wasDormant = fragment.lifecycleStatus === "dormant";
+      const isArchived = fragment.lifecycleStatus === "archived";
       const textAddedEvent: FragmentEvent = {
         id: createId(),
         fragmentId: fragment.id,
@@ -68,12 +75,25 @@ export async function addTextSupplement(
         occurredAt: timestamp,
         ruleVersion: CURRENT_FRAGMENT_EVENT_RULE_VERSION,
       };
-      const eventsAfterAddition = [...existingEvents, textAddedEvent];
+      const restoredEvent: FragmentEvent | null = wasDormant
+        ? {
+            id: createId(),
+            fragmentId: fragment.id,
+            type: "restored",
+            payload: restoredPayload,
+            occurredAt: timestamp,
+            ruleVersion: CURRENT_FRAGMENT_EVENT_RULE_VERSION,
+          }
+        : null;
+      const eventsAfterAddition =
+        restoredEvent === null
+          ? [...existingEvents, textAddedEvent]
+          : [...existingEvents, textAddedEvent, restoredEvent];
       const growthScore = calculateGrowthScore(eventsAfterAddition);
       const stage = resolvePlantStage(eventsAfterAddition, fragment.completionStatus);
       const updatedFragment: Fragment = {
         ...fragment,
-        lifecycleStatus: "active",
+        lifecycleStatus: isArchived ? "archived" : "active",
         updatedAt: timestamp,
         lastInteractedAt: timestamp,
       };
@@ -82,12 +102,13 @@ export async function addTextSupplement(
         stage,
         vitality: "active",
         growthScore,
+        slotId: isArchived ? null : plant.slotId,
         updatedAt: timestamp,
       };
 
       requireRecordUpdated(
         await fragmentRepository.update(fragment.id, {
-          lifecycleStatus: "active",
+          lifecycleStatus: updatedFragment.lifecycleStatus,
           updatedAt: timestamp,
           lastInteractedAt: timestamp,
         }),
@@ -98,16 +119,21 @@ export async function addTextSupplement(
           stage,
           vitality: "active",
           growthScore,
+          slotId: updatedPlant.slotId,
           updatedAt: timestamp,
         }),
         "Plant",
       );
       await fragmentEventRepository.add(textAddedEvent);
+      if (restoredEvent !== null) {
+        await fragmentEventRepository.add(restoredEvent);
+      }
 
       return {
         fragment: updatedFragment,
         plant: updatedPlant,
         textAddedEvent,
+        restoredEvent,
       };
     },
   );

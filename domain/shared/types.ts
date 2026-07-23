@@ -11,6 +11,7 @@ export type AttachmentKind = "image" | "audio";
 export type FragmentEventType =
   | "created"
   | "viewed"
+  | "dormant"
   | "reviewed"
   | "text_added"
   | "link_added"
@@ -27,6 +28,30 @@ export type FragmentEventType =
 
 export type TextAddedEventPayload = {
   text: string;
+};
+
+export type FragmentReviewDecision = "still_interested" | "not_now" | "no_longer_needed";
+
+export type ReviewedEventPayload = {
+  decision: FragmentReviewDecision;
+};
+
+export type CompletedEventPayload = {
+  outcome: string | null;
+};
+
+export type ChildFragmentCreatedEventPayload = {
+  childFragmentId: string;
+};
+
+export type ArchivedEventPayload = {
+  previousSlotId: string | null;
+};
+
+export type FragmentRestoredReason = "viewed" | "reviewed" | "manual_restore" | "content_updated";
+
+export type RestoredEventPayload = {
+  reason: FragmentRestoredReason;
 };
 
 export type PlantSpeciesId =

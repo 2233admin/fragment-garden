@@ -3,9 +3,13 @@ import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { Fragment, Plant } from "../../../domain";
+import type { ChatMessage, ExternalLinkImport, Fragment, Plant, Settings } from "../../../domain";
 import { FragmentGardenDatabase } from "../../../data/db";
-import { FRAGMENT_GARDEN_DATABASE_VERSION, FRAGMENT_GARDEN_SCHEMA_V1 } from "../../../data/schema";
+import {
+  FRAGMENT_GARDEN_DATABASE_VERSION,
+  FRAGMENT_GARDEN_DATABASE_VERSION_V2,
+  FRAGMENT_GARDEN_SCHEMA_V1,
+} from "../../../data/schema";
 
 const databaseInstances: FragmentGardenDatabase[] = [];
 
@@ -76,6 +80,7 @@ describe("FragmentGardenDatabase", () => {
         "attachments",
         "chatMessages",
         "clusters",
+        "externalLinkImports",
         "fragmentEvents",
         "fragments",
         "plants",
@@ -108,6 +113,24 @@ describe("FragmentGardenDatabase", () => {
       expect.arrayContaining(["fragmentId", "shownAt"]),
     );
     expect(database.chatMessages.schema.indexes.map((index) => index.name)).toContain("createdAt");
+    expect(database.externalLinkImports.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "fragmentId",
+        "normalizedUrl",
+        "status",
+        "taskId",
+        "externalNoteId",
+        "createdAt",
+      ]),
+    );
+    expect(
+      database.externalLinkImports.schema.indexes.find((index) => index.name === "fragmentId")
+        ?.unique,
+    ).toBe(true);
+    expect(
+      database.externalLinkImports.schema.indexes.find((index) => index.name === "normalizedUrl")
+        ?.unique,
+    ).toBe(false);
   });
 
   it("upgrades V1 data without loss and releases retired fragment slots", async () => {
@@ -147,6 +170,86 @@ describe("FragmentGardenDatabase", () => {
     await expect(upgradedDatabase.plants.get("deleted-plant")).resolves.toMatchObject({
       slotId: null,
     });
+  });
+
+  it("upgrades V2 settings and chat messages while preserving existing records", async () => {
+    const databaseName = `fragment-garden-v2-upgrade-${crypto.randomUUID()}`;
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(FRAGMENT_GARDEN_DATABASE_VERSION_V2).stores(FRAGMENT_GARDEN_SCHEMA_V1);
+    await legacyDatabase.open();
+
+    const legacySettings: Omit<Settings, "getNoteDisclosureAcceptedAt"> = {
+      id: "local-user",
+      onboardingCompleted: true,
+      companionType: "cat",
+      lastOpenedAt: null,
+      lastRecommendationDate: "2026-07-22",
+      schemaVersion: 1,
+    };
+    const legacyMessage: Omit<ChatMessage, "fragmentId"> = {
+      id: "legacy-message",
+      role: "assistant",
+      content: "旧伙伴消息",
+      createdAt: "2026-07-22T00:00:00.000Z",
+    };
+    const fragment = createFragment("v2-fragment");
+    const plant = createPlant("v2-plant", fragment.id, "slot-01");
+
+    await legacyDatabase.table("settings").add(legacySettings);
+    await legacyDatabase.table("chatMessages").add(legacyMessage);
+    await legacyDatabase.table("fragments").add(fragment);
+    await legacyDatabase.table("plants").add(plant);
+    legacyDatabase.close();
+
+    const upgradedDatabase = createTestDatabase(databaseName);
+    await upgradedDatabase.open();
+
+    await expect(upgradedDatabase.settings.get("local-user")).resolves.toEqual({
+      ...legacySettings,
+      getNoteDisclosureAcceptedAt: null,
+    });
+    await expect(upgradedDatabase.chatMessages.get(legacyMessage.id)).resolves.toEqual({
+      ...legacyMessage,
+      fragmentId: null,
+    });
+    await expect(upgradedDatabase.fragments.get(fragment.id)).resolves.toEqual(fragment);
+    await expect(upgradedDatabase.plants.get(plant.id)).resolves.toEqual(plant);
+  });
+
+  it("stores link import task and note identifiers as precision-safe strings", async () => {
+    const database = createTestDatabase();
+    const externalLinkImport: ExternalLinkImport = {
+      id: "external-import",
+      fragmentId: "link-fragment",
+      provider: "getnote",
+      sourceUrl: "https://example.com/article",
+      normalizedUrl: "https://example.com/article",
+      canonicalUrl: "https://example.com/article",
+      sourceContentTruncated: false,
+      status: "completed",
+      initiatedBy: "form",
+      taskId: "90071992547409931234",
+      externalNoteId: "90071992547409939876",
+      providerRequestId: "request-safe-id",
+      attemptCount: 1,
+      attemptGeneration: 1,
+      userProvidedTitle: false,
+      userProvidedContent: false,
+      errorCode: null,
+      errorMessage: null,
+      terminalNotificationStatus: "completed",
+      createdAt: "2026-07-23T00:00:00.000Z",
+      updatedAt: "2026-07-23T00:01:00.000Z",
+      startedAt: "2026-07-23T00:00:10.000Z",
+      lastPolledAt: "2026-07-23T00:01:00.000Z",
+      completedAt: "2026-07-23T00:01:00.000Z",
+    };
+
+    await database.externalLinkImports.add(externalLinkImport);
+
+    await expect(database.externalLinkImports.get(externalLinkImport.id)).resolves.toEqual(
+      externalLinkImport,
+    );
   });
 
   it("persists data after close and reopening the same database name", async () => {

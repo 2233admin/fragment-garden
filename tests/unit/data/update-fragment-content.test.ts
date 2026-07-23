@@ -4,6 +4,7 @@ import Dexie from "dexie";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FragmentGardenDatabase } from "../../../data/db";
+import { createLocalLinkFragment } from "../../../services/create-local-link-fragment";
 import { updateFragmentContent } from "../../../services/update-fragment-content";
 import {
   STAGE_TWO_TEST_DATE,
@@ -128,6 +129,193 @@ describe("updateFragmentContent", () => {
 
     await expect(database.fragments.get(fragment.id)).resolves.toEqual(fragment);
     await expect(database.plants.get(plant.id)).resolves.toEqual(plant);
+  });
+
+  it("allows an empty link body, marks its title as user-provided, and does not restart import", async () => {
+    const created = await createLocalLinkFragment(
+      {
+        sourceUrl: "https://example.com/article",
+        initiatedBy: "form",
+        now: STAGE_TWO_TEST_TIMESTAMP,
+      },
+      {
+        database,
+        createId: createIdSequence([
+          "link-fragment",
+          "link-plant",
+          "link-created-event",
+          "link-import",
+        ]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    if (created.kind !== "created") {
+      throw new Error("Expected the link fragment to be created");
+    }
+
+    const result = await updateFragmentContent(
+      {
+        fragmentId: created.fragment.id,
+        title: "我补上的链接标题",
+        rawText: "",
+      },
+      { database, now: () => STAGE_TWO_TEST_DATE },
+    );
+    const storedImport = await database.externalLinkImports.get(created.externalLinkImport.id);
+
+    expect(result.fragment).toMatchObject({
+      title: "我补上的链接标题",
+      rawText: null,
+      analysisStatus: "pending",
+    });
+    expect(storedImport).toMatchObject({
+      userProvidedTitle: true,
+      userProvidedContent: false,
+      status: "pending",
+      attemptCount: 0,
+      taskId: null,
+    });
+  });
+
+  it("marks only changed link content as user-provided", async () => {
+    const created = await createLocalLinkFragment(
+      {
+        sourceUrl: "https://example.com/manual-content",
+        initiatedBy: "form",
+        now: STAGE_TWO_TEST_TIMESTAMP,
+      },
+      {
+        database,
+        createId: createIdSequence([
+          "manual-content-fragment",
+          "manual-content-plant",
+          "manual-content-event",
+          "manual-content-import",
+        ]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    if (created.kind !== "created") {
+      throw new Error("Expected the link fragment to be created");
+    }
+
+    await updateFragmentContent(
+      {
+        fragmentId: created.fragment.id,
+        title: created.fragment.title,
+        rawText: "用户手动补写的链接正文",
+      },
+      { database, now: () => STAGE_TWO_TEST_DATE },
+    );
+
+    await expect(
+      database.externalLinkImports.get(created.externalLinkImport.id),
+    ).resolves.toMatchObject({
+      userProvidedTitle: false,
+      userProvidedContent: true,
+    });
+  });
+
+  it("preserves a provider title when a stale form edits only the link body", async () => {
+    const created = await createLocalLinkFragment(
+      {
+        sourceUrl: "https://example.com/provider-title",
+        initiatedBy: "form",
+        now: STAGE_TWO_TEST_TIMESTAMP,
+      },
+      {
+        database,
+        createId: createIdSequence([
+          "provider-title-fragment",
+          "provider-title-plant",
+          "provider-title-event",
+          "provider-title-import",
+        ]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    if (created.kind !== "created") {
+      throw new Error("Expected the link fragment to be created");
+    }
+
+    await database.fragments.update(created.fragment.id, {
+      title: "第三方刚写回的标题",
+      rawText: "第三方正文",
+    });
+
+    const result = await updateFragmentContent(
+      {
+        fragmentId: created.fragment.id,
+        title: created.fragment.title,
+        rawText: "用户只修改了正文",
+        editedFields: { title: false, rawText: true },
+      },
+      { database, now: () => STAGE_TWO_TEST_DATE },
+    );
+
+    expect(result.fragment).toMatchObject({
+      title: "第三方刚写回的标题",
+      rawText: "用户只修改了正文",
+    });
+    await expect(
+      database.externalLinkImports.get(created.externalLinkImport.id),
+    ).resolves.toMatchObject({
+      userProvidedTitle: false,
+      userProvidedContent: true,
+    });
+  });
+
+  it("preserves a provider body when a stale form edits only the link title", async () => {
+    const created = await createLocalLinkFragment(
+      {
+        sourceUrl: "https://example.com/provider-content",
+        initiatedBy: "form",
+        now: STAGE_TWO_TEST_TIMESTAMP,
+      },
+      {
+        database,
+        createId: createIdSequence([
+          "provider-content-fragment",
+          "provider-content-plant",
+          "provider-content-event",
+          "provider-content-import",
+        ]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    if (created.kind !== "created") {
+      throw new Error("Expected the link fragment to be created");
+    }
+
+    await database.fragments.update(created.fragment.id, {
+      title: "第三方标题",
+      rawText: "第三方刚写回的正文",
+    });
+
+    const result = await updateFragmentContent(
+      {
+        fragmentId: created.fragment.id,
+        title: "用户只修改了标题",
+        rawText: "",
+        editedFields: { title: true, rawText: false },
+      },
+      { database, now: () => STAGE_TWO_TEST_DATE },
+    );
+
+    expect(result.fragment).toMatchObject({
+      title: "用户只修改了标题",
+      rawText: "第三方刚写回的正文",
+    });
+    await expect(
+      database.externalLinkImports.get(created.externalLinkImport.id),
+    ).resolves.toMatchObject({
+      userProvidedTitle: true,
+      userProvidedContent: false,
+    });
   });
 
   it("rolls back the fragment update when dormant plant restoration fails", async () => {

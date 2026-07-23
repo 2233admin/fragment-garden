@@ -5,6 +5,7 @@ import {
   COMPANION_FALLBACK_RESPONSE,
   COMPANION_GROWTH_RESPONSE,
   COMPANION_HELP_RESPONSE,
+  COMPANION_LINK_IMPORT_RESPONSE,
   LocalCompanionResponseEngine,
 } from "../../../domain/companion/local-response-engine";
 
@@ -30,8 +31,8 @@ describe("LocalCompanionResponseEngine", () => {
         message: COMPANION_GROWTH_RESPONSE,
         action: null,
       });
-      expect(response.message).toContain("当前版本主要支持文字补充");
-      expect(response.message).toContain("链接、图片和语音将在后续版本加入");
+      expect(response.message).toContain("当前版本支持文字补充和链接碎片");
+      expect(response.message).toContain("图片与语音将在后续版本加入");
     },
   );
 
@@ -70,6 +71,39 @@ describe("LocalCompanionResponseEngine", () => {
       message: COMPANION_FALLBACK_RESPONSE,
       action: null,
     });
+  });
+
+  it.each([
+    "https://example.com/Article?Ref=CaseSensitive",
+    "帮我种下这个链接 https://example.com/Article?Ref=CaseSensitive",
+    "保存这个网页 https://example.com/Article?Ref=CaseSensitive",
+    "保存这个链接 https://example.com/Article?Ref=CaseSensitive",
+    "记一个 https://example.com/Article?Ref=CaseSensitive",
+    "记一下 https://example.com/Article?Ref=CaseSensitive",
+  ])("returns the bounded IMPORT_LINK action for %s", (message) => {
+    expect(engine.respond({ message })).toEqual({
+      message: COMPANION_LINK_IMPORT_RESPONSE,
+      action: {
+        type: "IMPORT_LINK",
+        url: "https://example.com/Article?Ref=CaseSensitive",
+      },
+    });
+  });
+
+  it("removes sentence punctuation without changing a case-sensitive URL", () => {
+    expect(
+      engine.respond({ message: "帮我种下这个链接 https://example.com/Path?Key=Value。" }),
+    ).toMatchObject({
+      action: { type: "IMPORT_LINK", url: "https://example.com/Path?Key=Value" },
+    });
+  });
+
+  it.each([
+    "看看这个地址 https://example.com/article",
+    "帮我种下这个链接 http://127.0.0.1/private",
+    "帮我种下这个链接 javascript:alert(1)",
+  ])("does not turn an unsafe or unrelated URL mention into an action for %s", (message) => {
+    expect(engine.respond({ message }).action).toBeNull();
   });
 
   it("does not make a network request", () => {

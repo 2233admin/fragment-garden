@@ -3,6 +3,7 @@ import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { ExternalLinkImport } from "../../../domain";
 import { FragmentGardenDatabase } from "../../../data/db";
 import { listFragmentCardViewModels } from "../../../data/queries/fragment-card-query";
 import { getFragmentDetailViewModel } from "../../../data/queries/fragment-detail-query";
@@ -27,7 +28,7 @@ afterEach(async () => {
 });
 
 describe("listFragmentCardViewModels", () => {
-  it("joins visible text fragments and plants without returning deleted or non-text records", async () => {
+  it("joins visible text and link fragments with plants and import status", async () => {
     const visibleFragment = createStageTwoFragment({
       id: "visible-fragment",
       rawText: "  第一行\n第二行  ",
@@ -39,8 +40,37 @@ describe("listFragmentCardViewModels", () => {
     const linkFragment = createStageTwoFragment({
       id: "link-fragment",
       contentType: "link",
-      sourceUrl: "https://example.com",
+      rawText: null,
+      summary: "已经提取的链接摘要",
+      sourceUrl: "https://www.example.com/article",
+      analysisStatus: "completed",
     });
+    const linkImport: ExternalLinkImport = {
+      id: "link-import",
+      fragmentId: linkFragment.id,
+      provider: "getnote",
+      sourceUrl: linkFragment.sourceUrl ?? "",
+      normalizedUrl: "https://www.example.com/article",
+      canonicalUrl: "https://example.com/article",
+      sourceContentTruncated: false,
+      status: "completed",
+      initiatedBy: "form",
+      taskId: "task-1",
+      externalNoteId: "9007199254740993",
+      providerRequestId: "request-1",
+      attemptCount: 1,
+      attemptGeneration: 1,
+      userProvidedTitle: false,
+      userProvidedContent: false,
+      errorCode: null,
+      errorMessage: null,
+      terminalNotificationStatus: null,
+      createdAt: linkFragment.createdAt,
+      updatedAt: linkFragment.updatedAt,
+      startedAt: linkFragment.createdAt,
+      lastPolledAt: linkFragment.updatedAt,
+      completedAt: linkFragment.updatedAt,
+    };
 
     await database.fragments.bulkAdd([visibleFragment, deletedFragment, linkFragment]);
     await database.plants.bulkAdd([
@@ -59,23 +89,53 @@ describe("listFragmentCardViewModels", () => {
         fragmentId: linkFragment.id,
       }),
     ]);
+    await database.externalLinkImports.add(linkImport);
 
-    await expect(listFragmentCardViewModels(database)).resolves.toEqual([
-      {
-        id: visibleFragment.id,
-        plantId: "visible-plant",
-        title: visibleFragment.title,
-        rawText: visibleFragment.rawText,
-        excerpt: "第一行 第二行",
-        createdAt: visibleFragment.createdAt,
-        lastInteractedAt: visibleFragment.lastInteractedAt,
-        lifecycleStatus: visibleFragment.lifecycleStatus,
-        completionStatus: visibleFragment.completionStatus,
-        plantStage: "growing",
-        growthScore: 1,
-        isPlacedInGarden: true,
-      },
-    ]);
+    const cards = await listFragmentCardViewModels(database);
+
+    expect(cards).toHaveLength(2);
+    expect(cards).toContainEqual({
+      id: visibleFragment.id,
+      plantId: "visible-plant",
+      contentType: "text",
+      title: visibleFragment.title,
+      rawText: visibleFragment.rawText,
+      excerpt: "第一行 第二行",
+      searchText: visibleFragment.rawText,
+      sourceUrl: null,
+      sourceHostname: null,
+      analysisStatus: visibleFragment.analysisStatus,
+      linkImportStatus: null,
+      linkImportErrorMessage: null,
+      createdAt: visibleFragment.createdAt,
+      lastInteractedAt: visibleFragment.lastInteractedAt,
+      lifecycleStatus: visibleFragment.lifecycleStatus,
+      completionStatus: visibleFragment.completionStatus,
+      plantStage: "growing",
+      growthScore: 1,
+      isPlacedInGarden: true,
+    });
+    expect(cards).toContainEqual({
+      id: linkFragment.id,
+      plantId: "link-plant",
+      contentType: "link",
+      title: linkFragment.title,
+      rawText: "",
+      excerpt: linkFragment.summary,
+      searchText: `${linkFragment.summary} ${linkFragment.sourceUrl}`,
+      sourceUrl: linkFragment.sourceUrl,
+      sourceHostname: "example.com",
+      analysisStatus: "completed",
+      linkImportStatus: "completed",
+      linkImportErrorMessage: null,
+      createdAt: linkFragment.createdAt,
+      lastInteractedAt: linkFragment.lastInteractedAt,
+      lifecycleStatus: linkFragment.lifecycleStatus,
+      completionStatus: linkFragment.completionStatus,
+      plantStage: "seedling",
+      growthScore: 0,
+      isPlacedInGarden: true,
+    });
   });
 
   it("reports the broken Fragment-to-Plant invariant instead of hiding content", async () => {
@@ -116,6 +176,7 @@ describe("getFragmentDetailViewModel", () => {
     await expect(getFragmentDetailViewModel(fragment.id, database)).resolves.toEqual({
       fragment,
       plant,
+      externalLinkImport: null,
       textSupplements: [
         {
           id: "event-a",
@@ -144,6 +205,49 @@ describe("getFragmentDetailViewModel", () => {
       sourceFragment: null,
       childFragments: [],
     });
+  });
+
+  it("returns the external import record for a link detail", async () => {
+    const fragment = createStageTwoFragment({
+      contentType: "link",
+      rawText: null,
+      sourceUrl: "https://example.com/article",
+      analysisStatus: "pending",
+    });
+    const plant = createStageTwoPlant();
+    const externalLinkImport: ExternalLinkImport = {
+      id: "link-import",
+      fragmentId: fragment.id,
+      provider: "getnote",
+      sourceUrl: fragment.sourceUrl ?? "",
+      normalizedUrl: fragment.sourceUrl ?? "",
+      canonicalUrl: null,
+      sourceContentTruncated: false,
+      status: "processing",
+      initiatedBy: "form",
+      taskId: "task-1",
+      externalNoteId: null,
+      providerRequestId: "request-1",
+      attemptCount: 1,
+      attemptGeneration: 1,
+      userProvidedTitle: false,
+      userProvidedContent: false,
+      errorCode: null,
+      errorMessage: null,
+      terminalNotificationStatus: null,
+      createdAt: fragment.createdAt,
+      updatedAt: fragment.updatedAt,
+      startedAt: fragment.createdAt,
+      lastPolledAt: fragment.updatedAt,
+      completedAt: null,
+    };
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+    await database.externalLinkImports.add(externalLinkImport);
+
+    const detail = await getFragmentDetailViewModel(fragment.id, database);
+
+    expect(detail?.externalLinkImport).toEqual(externalLinkImport);
   });
 
   it("returns completion and confirmed grows-from relationships without exposing payload records", async () => {

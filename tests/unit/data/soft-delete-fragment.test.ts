@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FragmentGardenDatabase } from "../../../data/db";
 import { listFragmentCardViewModels } from "../../../data/queries/fragment-card-query";
+import { createLocalLinkFragment } from "../../../services/create-local-link-fragment";
 import { softDeleteFragment } from "../../../services/soft-delete-fragment";
 import {
   STAGE_TWO_TEST_DATE,
@@ -115,6 +116,93 @@ describe("softDeleteFragment", () => {
       updatedAt: STAGE_TWO_TEST_TIMESTAMP,
     });
     await expect(database.plants.get(plant.id)).resolves.toEqual(result.plant);
+  });
+
+  it("atomically stops an unfinished link import without creating a companion notification", async () => {
+    const created = await createLocalLinkFragment(
+      {
+        sourceUrl: "https://example.com/delete-before-import",
+        initiatedBy: "companion",
+        now: STAGE_TWO_TEST_TIMESTAMP,
+      },
+      {
+        database,
+        createId: createIdSequence([
+          "link-fragment",
+          "link-plant",
+          "link-created-event",
+          "link-import",
+        ]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+    if (created.kind !== "created") {
+      throw new Error("Expected a new link fragment");
+    }
+
+    await softDeleteFragment(
+      { fragmentId: created.fragment.id },
+      {
+        database,
+        createId: createIdSequence(["link-deleted-event"]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    await expect(
+      database.externalLinkImports.get(created.externalLinkImport.id),
+    ).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "fragment_deleted",
+      errorMessage: "链接碎片已删除，读取任务已经停止。",
+      terminalNotificationStatus: null,
+    });
+    await expect(database.chatMessages.count()).resolves.toBe(0);
+  });
+
+  it("rolls back link-import cancellation when the delete event cannot be saved", async () => {
+    const created = await createLocalLinkFragment(
+      {
+        sourceUrl: "https://example.com/delete-rollback",
+        initiatedBy: "form",
+        now: STAGE_TWO_TEST_TIMESTAMP,
+      },
+      {
+        database,
+        createId: createIdSequence([
+          "rollback-link-fragment",
+          "rollback-link-plant",
+          "rollback-link-created-event",
+          "rollback-link-import",
+        ]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+    if (created.kind !== "created") {
+      throw new Error("Expected a new link fragment");
+    }
+    const collidingEvent = createStageTwoEvent("viewed", {
+      id: "link-delete-event-collision",
+      fragmentId: created.fragment.id,
+    });
+    await database.fragmentEvents.add(collidingEvent);
+
+    await expect(
+      softDeleteFragment(
+        { fragmentId: created.fragment.id },
+        {
+          database,
+          createId: createIdSequence([collidingEvent.id]),
+          now: () => STAGE_TWO_TEST_DATE,
+        },
+      ),
+    ).rejects.toBeDefined();
+
+    await expect(database.fragments.get(created.fragment.id)).resolves.toEqual(created.fragment);
+    await expect(database.plants.get(created.plant.id)).resolves.toEqual(created.plant);
+    await expect(database.externalLinkImports.get(created.externalLinkImport.id)).resolves.toEqual(
+      created.externalLinkImport,
+    );
   });
 
   it("rolls back the fragment update when the deleted event write fails", async () => {

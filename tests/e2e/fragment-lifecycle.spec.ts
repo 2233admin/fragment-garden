@@ -184,7 +184,9 @@ test("persists automatic dormancy and restores through the same plant detail flo
   await page.reload();
 
   await selectMode(page, "卡片模式");
-  const dormantCard = page.getByRole("button", { name: `打开碎片：${DORMANT_TITLE}` });
+  const dormantCard = page
+    .getByRole("button", { name: `打开碎片：${DORMANT_TITLE}` })
+    .locator("xpath=ancestor::article");
   await expect(dormantCard).toContainText("休眠");
   await expect.poll(() => countEvents(page, "dormant")).toBe(1);
 
@@ -391,9 +393,11 @@ test("keeps review gates and archived completed parent-child state consistent", 
   await expect(parentDetail.getByRole("button", { name: "不再需要" })).toHaveCount(0);
   await parentDetail.getByRole("button", { name: "关闭详情" }).click();
 
-  const parentCard = page.getByRole("button", {
-    name: `打开碎片：${ARCHIVED_COMPLETED_PARENT_TITLE}`,
-  });
+  const parentCard = page
+    .getByRole("button", {
+      name: `打开碎片：${ARCHIVED_COMPLETED_PARENT_TITLE}`,
+    })
+    .locator("xpath=ancestor::article");
   await expect(parentCard).toHaveCount(0);
   await page.getByRole("button", { name: "已完成", exact: true }).click();
   await expect(parentCard).toHaveCount(0);
@@ -408,7 +412,11 @@ test("keeps review gates and archived completed parent-child state consistent", 
     "0",
   );
   await selectMode(page, "卡片模式");
-  await parentCard.click();
+  await parentCard
+    .getByRole("button", {
+      name: `打开碎片：${ARCHIVED_COMPLETED_PARENT_TITLE}`,
+    })
+    .click();
 
   parentDetail = page.getByRole("dialog", { name: ARCHIVED_COMPLETED_PARENT_TITLE });
   await parentDetail.getByRole("button", { name: "让它长成一个新想法" }).click();
@@ -425,9 +433,11 @@ test("keeps review gates and archived completed parent-child state consistent", 
   await expect(parentCard).toBeVisible();
   await page.getByRole("button", { name: "当前", exact: true }).click();
   await expect(parentCard).toHaveCount(0);
-  const childCard = page.getByRole("button", {
-    name: `打开碎片：${ARCHIVED_PARENT_CHILD_TITLE}`,
-  });
+  const childCard = page
+    .getByRole("button", {
+      name: `打开碎片：${ARCHIVED_PARENT_CHILD_TITLE}`,
+    })
+    .locator("xpath=ancestor::article");
   await expect(childCard).toBeVisible();
   await expect(childCard).toContainText("活跃");
 
@@ -440,7 +450,11 @@ test("keeps review gates and archived completed parent-child state consistent", 
   await expect(summary.locator('li[data-stage="permanent_bloom"]')).toHaveCount(0);
 
   await selectMode(page, "卡片模式");
-  await childCard.click();
+  await childCard
+    .getByRole("button", {
+      name: `打开碎片：${ARCHIVED_PARENT_CHILD_TITLE}`,
+    })
+    .click();
   const childDetail = page.getByRole("dialog", { name: ARCHIVED_PARENT_CHILD_TITLE });
   await expect(
     childDetail.getByText(ARCHIVED_COMPLETED_PARENT_TITLE, { exact: true }),

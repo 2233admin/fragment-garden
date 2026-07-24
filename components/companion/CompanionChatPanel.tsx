@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 
-import type { ChatMessageRole, CompanionType } from "@/domain";
+import type { ChatMessageRole, ChatMessageStatus, CompanionAiMode, CompanionType } from "@/domain";
 
 import { AsyncButton } from "../shared/AsyncButton";
 import { ModalDialog } from "../shared/ModalDialog";
@@ -19,10 +19,13 @@ export type CompanionMessageView = {
   fragmentId: string | null;
   id: string;
   role: ChatMessageRole;
+  status?: ChatMessageStatus;
+  source?: "local" | "openai" | "tool" | "system";
 };
 
 export type CompanionChatPanelProps = {
   companionType: CompanionType;
+  companionAiMode: CompanionAiMode;
   errorMessage: string | null;
   isLoading: boolean;
   isOpen: boolean;
@@ -34,6 +37,9 @@ export type CompanionChatPanelProps = {
   onOpenLinkedFragment: (fragmentId: string, triggerElement: HTMLButtonElement) => Promise<void>;
   onOpenRecommendation: () => Promise<void>;
   onSend: (content: string) => Promise<void>;
+  onRequestAiMode: () => void;
+  onUseLocalMode: () => Promise<void>;
+  onRetry: () => Promise<void>;
 };
 
 const MESSAGE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
@@ -48,6 +54,7 @@ function formatMessageTime(value: string): string {
 
 export function CompanionChatPanel({
   companionType,
+  companionAiMode,
   errorMessage,
   isLoading,
   isOpen,
@@ -59,6 +66,9 @@ export function CompanionChatPanel({
   onOpenLinkedFragment,
   onOpenRecommendation,
   onSend,
+  onRequestAiMode,
+  onUseLocalMode,
+  onRetry,
 }: CompanionChatPanelProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -124,7 +134,7 @@ export function CompanionChatPanel({
       await onSend(normalizedDraft);
       setDraft("");
     } catch {
-      setLocalErrorMessage("消息没有保存，因此伙伴没有回复。你的输入仍在，可以重试。");
+      setLocalErrorMessage(null);
     } finally {
       submissionLockRef.current = false;
       setIsSending(false);
@@ -182,6 +192,22 @@ export function CompanionChatPanel({
     }
   }
 
+  async function handleRetry(): Promise<void> {
+    try {
+      await onRetry();
+    } catch {
+      setLocalErrorMessage("重试没有完成，消息仍保存在本地。请稍后再试。");
+    }
+  }
+
+  async function handleUseLocalMode(): Promise<void> {
+    try {
+      await onUseLocalMode();
+    } catch {
+      setLocalErrorMessage("基础模式暂时没有完成回复，消息仍保存在本地。请稍后再试。");
+    }
+  }
+
   return (
     <ModalDialog
       className="m-auto flex h-[min(88vh,48rem)] w-[min(94vw,32rem)] flex-col overflow-hidden rounded-3xl border border-garden-line bg-garden-paper p-0 shadow-2xl"
@@ -196,7 +222,7 @@ export function CompanionChatPanel({
           <CompanionMark companionType={companionType} size="medium" />
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.14em] text-garden-accent uppercase">
-              本地花园对话
+              {companionAiMode === "openai" ? "AI 花园对话" : "基础花园对话"}
             </p>
             <h2 className="font-display text-2xl font-semibold text-garden-ink" id={titleId}>
               花园伙伴
@@ -204,6 +230,35 @@ export function CompanionChatPanel({
             <p className="sr-only" id={descriptionId}>
               询问花园使用方法、植物状态，或请伙伴带你重新看看以前种下的内容。
             </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className="rounded-full bg-garden-canvas px-2.5 py-1 text-[0.7rem] font-semibold text-garden-muted"
+              data-testid="companion-mode"
+            >
+              当前：{companionAiMode === "openai" ? "AI 模式" : "基础模式"}
+            </span>
+            {companionAiMode === "openai" ? (
+              <button
+                className="rounded-full border border-garden-line px-3 py-2 text-xs font-semibold text-garden-ink hover:bg-garden-soft disabled:opacity-50"
+                disabled={isBusy}
+                data-testid="companion-use-local"
+                onClick={() => void handleUseLocalMode()}
+                type="button"
+              >
+                基础模式
+              </button>
+            ) : (
+              <button
+                className="rounded-full border border-garden-accent px-3 py-2 text-xs font-semibold text-garden-accent hover:bg-garden-soft disabled:opacity-50"
+                disabled={isBusy}
+                data-testid="companion-request-ai"
+                onClick={onRequestAiMode}
+                type="button"
+              >
+                AI 模式
+              </button>
+            )}
           </div>
         </div>
         <button
@@ -240,7 +295,9 @@ export function CompanionChatPanel({
                   }`}
                 >
                   <p className="sr-only">{isUser ? "你说：" : "花园伙伴说："}</p>
-                  <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+                  <p className="whitespace-pre-wrap text-sm leading-6">
+                    {message.content || (message.status === "pending" ? "正在等待回复…" : "")}
+                  </p>
                   {linkedFragmentId !== null ? (
                     <button
                       className={`mt-3 rounded-full border px-3 py-1.5 text-xs font-semibold disabled:cursor-wait disabled:opacity-60 ${
@@ -256,6 +313,11 @@ export function CompanionChatPanel({
                     >
                       {openingFragmentId === linkedFragmentId ? "正在打开…" : "打开这株植物"}
                     </button>
+                  ) : null}
+                  {message.status === "failed" ? (
+                    <p className="mt-2 text-xs font-semibold text-garden-danger">
+                      这条消息处理失败
+                    </p>
                   ) : null}
                   <time
                     className={`mt-1 block text-right text-[0.68rem] ${
@@ -305,7 +367,27 @@ export function CompanionChatPanel({
           role={displayedErrorMessage === null ? "status" : "alert"}
         >
           {displayedErrorMessage !== null ? (
-            <p className="font-semibold leading-5 text-garden-danger">{displayedErrorMessage}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="font-semibold leading-5 text-garden-danger">{displayedErrorMessage}</p>
+              <button
+                className="rounded-full border border-garden-line px-3 py-1.5 text-xs font-semibold text-garden-ink hover:bg-garden-soft disabled:opacity-50"
+                disabled={isBusy}
+                onClick={() => void handleRetry()}
+                type="button"
+              >
+                重试
+              </button>
+              {companionAiMode === "openai" ? (
+                <button
+                  className="rounded-full border border-garden-line px-3 py-1.5 text-xs font-semibold text-garden-ink hover:bg-garden-soft disabled:opacity-50"
+                  disabled={isBusy}
+                  onClick={() => void handleUseLocalMode()}
+                  type="button"
+                >
+                  使用基础模式
+                </button>
+              ) : null}
+            </div>
           ) : isSending ? (
             <p className="font-semibold leading-5 text-garden-accent">正在保存并准备回复…</p>
           ) : null}

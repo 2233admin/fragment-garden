@@ -8,6 +8,15 @@ export class ChatMessageRepository {
     return this.database.chatMessages.add(message);
   }
 
+  async findByClientRequestId(clientRequestId: string): Promise<ChatMessage | undefined> {
+    const messages = await this.database.chatMessages.toArray();
+    return messages.find((message) => message.clientRequestId === clientRequestId);
+  }
+
+  async updateById(id: string, changes: Partial<ChatMessage>): Promise<number> {
+    return this.database.chatMessages.update(id, changes);
+  }
+
   async list(): Promise<ChatMessage[]> {
     const messages = await this.database.chatMessages.toArray();
 

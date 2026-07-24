@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 import type { CompanionAction } from "@/domain/companion/local-response-engine";
 import { acceptGetNoteDisclosure } from "@/services/accept-getnote-disclosure";
 import { appendAssistantCompanionMessage } from "@/services/append-companion-message";
+import { appendCompanionAssistantMessageOnce } from "@/services/companion-message-persistence";
 import { createLocalLinkFragment } from "@/services/create-local-link-fragment";
 
 export const COMPANION_LINK_SAVED_MESSAGE = "链接已经先种下了，我正在帮你读取内容。";
@@ -15,6 +16,14 @@ type DuplicateLinkState = Readonly<{
   existingFragmentId: string;
   existingTitle: string;
   sourceUrl: string;
+  title: string | null;
+  requestId?: string;
+}>;
+
+type PendingLinkInput = Readonly<{
+  sourceUrl: string;
+  title: string | null;
+  requestId?: string;
 }>;
 
 type UseCompanionLinkImportOptions = Readonly<{
@@ -25,6 +34,7 @@ type UseCompanionLinkImportOptions = Readonly<{
     triggerElement: HTMLButtonElement | null,
   ) => Promise<boolean>;
   onStartLinkImport: (fragmentId: string) => void;
+  onToolFragmentCreated?: (fragment: { id: string; title: string; status: string }) => void;
 }>;
 
 type CompanionLinkImportFlow = Readonly<{
@@ -50,30 +60,52 @@ export function useCompanionLinkImport({
   onChatOpenChange,
   onOpenFragment,
   onStartLinkImport,
+  onToolFragmentCreated,
 }: UseCompanionLinkImportOptions): CompanionLinkImportFlow {
-  const [pendingDisclosureUrl, setPendingDisclosureUrl] = useState<string | null>(null);
+  const [pendingDisclosureLink, setPendingDisclosureLink] = useState<PendingLinkInput | null>(null);
   const [duplicateLink, setDuplicateLink] = useState<DuplicateLinkState | null>(null);
   const [isPending, setIsPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [disclosureErrorMessage, setDisclosureErrorMessage] = useState<string | null>(null);
 
   const createLink = useCallback(
-    async (sourceUrl: string, allowDuplicate: boolean): Promise<void> => {
+    async (
+      sourceUrl: string,
+      allowDuplicate: boolean,
+      title?: string | null,
+      requestId?: string,
+    ): Promise<void> => {
       setErrorMessage(null);
       const result = await createLocalLinkFragment({
         sourceUrl,
+        title: title ?? undefined,
         initiatedBy: "companion",
         allowDuplicate,
         now: now(),
       });
 
       if (result.kind === "duplicate") {
+        onToolFragmentCreated?.({
+          id: result.fragment.id,
+          title: result.fragment.title || "未命名碎片",
+          status: result.fragment.lifecycleStatus,
+        });
         try {
-          await appendAssistantCompanionMessage({
-            content: COMPANION_DUPLICATE_LINK_MESSAGE,
-            fragmentId: result.fragment.id,
-            now: now(),
-          });
+          if (requestId === undefined) {
+            await appendAssistantCompanionMessage({
+              content: COMPANION_DUPLICATE_LINK_MESSAGE,
+              fragmentId: result.fragment.id,
+              now: now(),
+            });
+          } else {
+            await appendCompanionAssistantMessageOnce({
+              content: COMPANION_DUPLICATE_LINK_MESSAGE,
+              fragmentId: result.fragment.id,
+              clientRequestId: `${requestId}:tool`,
+              source: "tool",
+              now: now(),
+            });
+          }
         } catch {
           setErrorMessage("已找到原来的链接碎片，但伙伴提示消息没有保存。");
         }
@@ -81,19 +113,37 @@ export function useCompanionLinkImport({
           existingFragmentId: result.fragment.id,
           existingTitle: result.fragment.title,
           sourceUrl,
+          title: title ?? null,
+          requestId,
         });
-        setPendingDisclosureUrl(null);
+        setPendingDisclosureLink(null);
         onChatOpenChange(false);
         return;
       }
 
+      onToolFragmentCreated?.({
+        id: result.fragment.id,
+        title: result.fragment.title || "未命名碎片",
+        status: result.fragment.lifecycleStatus,
+      });
+
       let statusMessageWasSaved = true;
       try {
-        await appendAssistantCompanionMessage({
-          content: COMPANION_LINK_SAVED_MESSAGE,
-          fragmentId: result.fragment.id,
-          now: now(),
-        });
+        if (requestId === undefined) {
+          await appendAssistantCompanionMessage({
+            content: COMPANION_LINK_SAVED_MESSAGE,
+            fragmentId: result.fragment.id,
+            now: now(),
+          });
+        } else {
+          await appendCompanionAssistantMessageOnce({
+            content: COMPANION_LINK_SAVED_MESSAGE,
+            fragmentId: result.fragment.id,
+            clientRequestId: `${requestId}:tool`,
+            source: "tool",
+            now: now(),
+          });
+        }
       } catch {
         statusMessageWasSaved = false;
       }
@@ -107,11 +157,11 @@ export function useCompanionLinkImport({
         setErrorMessage("链接已保存在本地，但读取任务尚未启动。刷新页面后会继续尝试。");
       }
 
-      setPendingDisclosureUrl(null);
+      setPendingDisclosureLink(null);
       setDuplicateLink(null);
       onChatOpenChange(true);
     },
-    [onChatOpenChange, onStartLinkImport],
+    [onChatOpenChange, onStartLinkImport, onToolFragmentCreated],
   );
 
   const handleAction = useCallback(
@@ -123,14 +173,18 @@ export function useCompanionLinkImport({
       setErrorMessage(null);
       setDisclosureErrorMessage(null);
       if (disclosureAcceptedAt === null) {
-        setPendingDisclosureUrl(action.url);
+        setPendingDisclosureLink({
+          sourceUrl: action.url,
+          title: action.title ?? null,
+          requestId: action.requestId,
+        });
         onChatOpenChange(false);
         return;
       }
 
       setIsPending(true);
       try {
-        await createLink(action.url, false);
+        await createLink(action.url, false, action.title, action.requestId);
       } catch {
         setErrorMessage("链接没有保存，因此没有提交给第三方。请检查链接后重试。");
       } finally {
@@ -141,7 +195,7 @@ export function useCompanionLinkImport({
   );
 
   const acceptDisclosure = useCallback(async (): Promise<void> => {
-    if (pendingDisclosureUrl === null || isPending) {
+    if (pendingDisclosureLink === null || isPending) {
       return;
     }
 
@@ -149,20 +203,25 @@ export function useCompanionLinkImport({
     setDisclosureErrorMessage(null);
     try {
       await acceptGetNoteDisclosure({ now: now() });
-      await createLink(pendingDisclosureUrl, false);
+      await createLink(
+        pendingDisclosureLink.sourceUrl,
+        false,
+        pendingDisclosureLink.title,
+        pendingDisclosureLink.requestId,
+      );
     } catch {
       setDisclosureErrorMessage("第三方处理选择或链接没有保存，因此没有发出读取请求。请重试。");
     } finally {
       setIsPending(false);
     }
-  }, [createLink, isPending, pendingDisclosureUrl]);
+  }, [createLink, isPending, pendingDisclosureLink]);
 
   const cancelDisclosure = useCallback((): void => {
     if (isPending) {
       return;
     }
 
-    setPendingDisclosureUrl(null);
+    setPendingDisclosureLink(null);
     setDisclosureErrorMessage(null);
     onChatOpenChange(true);
   }, [isPending, onChatOpenChange]);
@@ -184,7 +243,7 @@ export function useCompanionLinkImport({
 
     setIsPending(true);
     try {
-      await createLink(duplicateLink.sourceUrl, true);
+      await createLink(duplicateLink.sourceUrl, true, duplicateLink.title, duplicateLink.requestId);
     } catch {
       setErrorMessage("新的链接碎片没有保存，也没有发出读取请求。请重试。");
     } finally {
@@ -221,7 +280,7 @@ export function useCompanionLinkImport({
     duplicateLink,
     errorMessage,
     handleAction,
-    isDisclosureOpen: pendingDisclosureUrl !== null,
+    isDisclosureOpen: pendingDisclosureLink !== null,
     isPending,
     acceptDisclosure,
     cancelDisclosure,

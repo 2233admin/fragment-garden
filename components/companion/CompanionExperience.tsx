@@ -4,17 +4,30 @@ import { useEffect, useRef, useState } from "react";
 
 import { DuplicateLinkDialog } from "@/components/link-imports/DuplicateLinkDialog";
 import { GetNoteDisclosureDialog } from "@/components/link-imports/GetNoteDisclosureDialog";
-import type { CompanionType } from "@/domain";
+import type { CompanionAiMode, CompanionType } from "@/domain";
+import type { GardenSummary } from "@/domain/companion/context-builder";
+import { CompanionProviderError } from "@/domain/companion/response-engine";
 import type { CurrentRecommendationView } from "@/data/queries/companion-query";
+import {
+  importLinkToolArgumentsSchema,
+  openFragmentToolArgumentsSchema,
+} from "@/validation/companion-api";
+import { acceptOpenAiDisclosure, setCompanionAiMode } from "@/services/accept-openai-disclosure";
+import {
+  COMPANION_AI_FALLBACK_MESSAGE,
+  appendToolResultMessage,
+  sendCompanionTurn,
+} from "@/services/send-companion-turn";
 import { completeCompanionOnboarding } from "@/services/complete-companion-onboarding";
 import { dismissFragmentRecommendation } from "@/services/dismiss-fragment-recommendation";
 import { openFragmentRecommendation } from "@/services/open-fragment-recommendation";
 import { requestDailyFragmentRecommendation } from "@/services/request-daily-fragment-recommendation";
-import { sendCompanionMessage } from "@/services/send-companion-message";
+import { requestFragmentRecommendation } from "@/services/request-fragment-recommendation";
 
 import { CompanionChatPanel } from "./CompanionChatPanel";
 import { CompanionMark } from "./CompanionMark";
 import { CompanionOnboardingDialog } from "./CompanionOnboardingDialog";
+import { OpenAiDisclosureDialog } from "./OpenAiDisclosureDialog";
 import { CompanionStatusBubble } from "./CompanionStatusBubble";
 import type {
   FragmentRecommendationView,
@@ -25,6 +38,7 @@ import { useCompanionLinkImport } from "./useCompanionLinkImport";
 
 type CompanionExperienceProps = {
   gardenRevision: string;
+  gardenSummary: GardenSummary;
   isChatOpen: boolean;
   onChatOpenChange: (isOpen: boolean) => void;
   onCompanionTypeChange: (companionType: CompanionType | null) => void;
@@ -60,8 +74,33 @@ function waitForDialogTransition(): Promise<void> {
   });
 }
 
+function buildAllowedOpenFragments(
+  recommendation: CurrentRecommendationView | null,
+  sessionFragments: readonly { id: string; title: string; status: string }[],
+): readonly { id: string; title: string; status: string }[] {
+  const candidates: Array<{ id: string; title: string; status: string }> = [];
+  if (recommendation !== null) {
+    candidates.push({
+      id: recommendation.fragment.id,
+      title: recommendation.fragment.title || "未命名碎片",
+      status: recommendation.fragment.lifecycleStatus,
+    });
+  }
+  for (const fragment of sessionFragments) {
+    if (candidates.some(({ id }) => id === fragment.id)) {
+      continue;
+    }
+    candidates.push(fragment);
+    if (candidates.length >= 3) {
+      break;
+    }
+  }
+  return candidates.slice(0, 3);
+}
+
 export function CompanionExperience({
   gardenRevision,
+  gardenSummary,
   isChatOpen,
   onChatOpenChange,
   onCompanionTypeChange,
@@ -74,6 +113,18 @@ export function CompanionExperience({
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [recommendationPending, setRecommendationPending] =
     useState<RecommendationPendingAction>(null);
+  const [isOpenAiDisclosureOpen, setIsOpenAiDisclosureOpen] = useState(false);
+  const [openAiDisclosureError, setOpenAiDisclosureError] = useState<string | null>(null);
+  const [isOpenAiDisclosurePending, setIsOpenAiDisclosurePending] = useState(false);
+  const [lastFailedMessage, setLastFailedMessage] = useState<{
+    content: string;
+    requestId: string;
+  } | null>(null);
+  const [turnPending, setTurnPending] = useState(false);
+  const [turnErrorMessage, setTurnErrorMessage] = useState<string | null>(null);
+  const [sessionOpenFragments, setSessionOpenFragments] = useState<
+    readonly { id: string; title: string; status: string }[]
+  >([]);
   const companionButtonRef = useRef<HTMLButtonElement>(null);
   const dailyRequestLockRef = useRef(false);
 
@@ -89,12 +140,23 @@ export function CompanionExperience({
     recommendationState.status === "ready" ? recommendationState.value : null;
   const recommendationView =
     currentRecommendation === null ? null : createRecommendationView(currentRecommendation);
+  const companionAiMode: CompanionAiMode =
+    settingsState.status === "ready" ? (settingsState.value.companionAiMode ?? "local") : "local";
+  const allowedOpenFragments = buildAllowedOpenFragments(
+    currentRecommendation,
+    sessionOpenFragments,
+  );
   const linkImportFlow = useCompanionLinkImport({
     disclosureAcceptedAt:
       settingsState.status === "ready" ? settingsState.value.getNoteDisclosureAcceptedAt : null,
     onChatOpenChange,
     onOpenFragment,
     onStartLinkImport,
+    onToolFragmentCreated: (fragment) => {
+      setSessionOpenFragments((current) =>
+        [fragment, ...current.filter(({ id }) => id !== fragment.id)].slice(0, 3),
+      );
+    },
   });
 
   useEffect(() => {
@@ -149,13 +211,188 @@ export function CompanionExperience({
     }
   }
 
-  async function sendMessage(content: string): Promise<void> {
+  function requestAiMode(): void {
+    if (settingsState.status !== "ready") {
+      return;
+    }
+    setOpenAiDisclosureError(null);
+    if (settingsState.value.openAiDisclosureAcceptedAt !== null) {
+      void switchAiMode("openai");
+      return;
+    }
+    setIsOpenAiDisclosureOpen(true);
+  }
+
+  async function switchAiMode(mode: CompanionAiMode): Promise<void> {
+    try {
+      await setCompanionAiMode(mode);
+      setSettingsAttempt((attempt) => attempt + 1);
+      if (mode === "local") {
+        setOpenAiDisclosureError(null);
+        setTurnErrorMessage(null);
+      }
+    } catch {
+      setOpenAiDisclosureError("模式选择没有保存，现有聊天记录没有被修改。请重试。");
+    }
+  }
+
+  async function acceptAiDisclosure(): Promise<void> {
+    setIsOpenAiDisclosurePending(true);
+    try {
+      await acceptOpenAiDisclosure({ now: new Date().toISOString() });
+      setIsOpenAiDisclosureOpen(false);
+      setSettingsAttempt((attempt) => attempt + 1);
+    } catch {
+      setOpenAiDisclosureError("OpenAI 同意状态没有保存，尚未切换到 AI 模式。请重试。");
+    } finally {
+      setIsOpenAiDisclosurePending(false);
+    }
+  }
+
+  async function sendMessage(
+    content: string,
+    existingRequestId?: string,
+    modeOverride?: CompanionAiMode,
+  ): Promise<void> {
     setRecommendationError(null);
-    const result = await sendCompanionMessage({
-      content,
-      now: new Date().toISOString(),
+    const requestId = existingRequestId ?? crypto.randomUUID();
+    setLastFailedMessage({ content, requestId });
+    setTurnPending(true);
+    setTurnErrorMessage(null);
+    try {
+      const result = await sendCompanionTurn({
+        content,
+        mode: modeOverride ?? companionAiMode,
+        gardenSummary,
+        allowedOpenFragments,
+        now: new Date().toISOString(),
+        clientRequestId: requestId,
+        fallbackToLocal: false,
+      });
+      if (result.usedFallback && result.response.type === "tool_call") {
+        await appendToolResultMessage({
+          requestId,
+          content: COMPANION_AI_FALLBACK_MESSAGE,
+          now: new Date().toISOString(),
+          messageKey: "fallback",
+        });
+      }
+      if (
+        result.fallbackErrorCode === "openai_disabled" ||
+        result.fallbackErrorCode === "missing_configuration"
+      ) {
+        await switchAiMode("local");
+      }
+      if (result.response.type === "tool_call") {
+        await executeToolCall(result.response, requestId);
+      }
+      setLastFailedMessage(null);
+    } catch (error) {
+      setTurnErrorMessage(
+        error instanceof CompanionProviderError
+          ? error.message
+          : "伙伴暂时没有完成这次回复。现有本地内容没有被修改。",
+      );
+      throw error;
+    } finally {
+      setTurnPending(false);
+    }
+  }
+
+  async function executeToolCall(
+    response: Extract<
+      Awaited<ReturnType<typeof sendCompanionTurn>>["response"],
+      { type: "tool_call" }
+    >,
+    requestId: string,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    if (response.name === "recommend_fragment") {
+      const recommendation = await requestFragmentRecommendation({ now });
+      await appendToolResultMessage({
+        requestId,
+        content:
+          recommendation === null
+            ? "暂时没有找到适合回看的旧碎片。你仍然可以在卡片模式中查找。"
+            : "我找到了一条以前种下的内容，你可以看看现在是否还有新的想法。",
+        fragmentId: recommendation?.fragment.id ?? null,
+        now,
+      });
+      if (recommendation === null) {
+        setRecommendationError(RECOMMENDATION_QUERY_ERROR);
+      } else {
+        setSessionOpenFragments((current) =>
+          [
+            {
+              id: recommendation.fragment.id,
+              title: recommendation.fragment.title || "未命名碎片",
+              status: recommendation.fragment.lifecycleStatus,
+            },
+            ...current.filter(({ id }) => id !== recommendation.fragment.id),
+          ].slice(0, 3),
+        );
+      }
+      return;
+    }
+
+    if (response.name === "import_link") {
+      const parsed = importLinkToolArgumentsSchema.safeParse(response.arguments);
+      if (!parsed.success) {
+        throw new Error("Invalid import link tool arguments");
+      }
+      await linkImportFlow.handleAction({
+        type: "IMPORT_LINK",
+        url: parsed.data.url,
+        title: parsed.data.title,
+        requestId,
+      });
+      return;
+    }
+
+    const parsed = openFragmentToolArgumentsSchema.safeParse(response.arguments);
+    if (!parsed.success || !allowedOpenFragments.some(({ id }) => id === parsed.data.fragmentId)) {
+      throw new Error("This fragment is not available to open");
+    }
+
+    const recommendationToOpen =
+      currentRecommendation?.fragment.id === parsed.data.fragmentId ? currentRecommendation : null;
+    if (recommendationToOpen !== null) {
+      await openFragmentRecommendation({
+        recommendationId: recommendationToOpen.recommendation.id,
+        now,
+      });
+    }
+
+    onChatOpenChange(false);
+    await waitForDialogTransition();
+    const didOpen = await onOpenFragment(
+      parsed.data.fragmentId,
+      companionButtonRef.current,
+      recommendationToOpen !== null,
+    );
+    if (!didOpen) {
+      throw new Error("The requested fragment could not be opened");
+    }
+    await appendToolResultMessage({
+      requestId,
+      content: "已经为你打开了这条内容。",
+      fragmentId: parsed.data.fragmentId,
+      now,
     });
-    await linkImportFlow.handleAction(result.response.action);
+  }
+
+  async function retryLastMessage(): Promise<void> {
+    if (lastFailedMessage === null) {
+      return;
+    }
+    await sendMessage(lastFailedMessage.content, lastFailedMessage.requestId);
+  }
+
+  async function useLocalModeAndRetry(): Promise<void> {
+    await switchAiMode("local");
+    if (lastFailedMessage !== null) {
+      await sendMessage(lastFailedMessage.content, lastFailedMessage.requestId, "local");
+    }
   }
 
   async function openRecommendation(): Promise<void> {
@@ -292,26 +529,49 @@ export function CompanionExperience({
       {companionType !== null ? (
         <CompanionChatPanel
           companionType={companionType}
+          companionAiMode={companionAiMode}
           errorMessage={
             linkImportFlow.errorMessage ??
             (messagesState.status === "error"
               ? CHAT_HISTORY_QUERY_ERROR
               : recommendationState.status === "error"
                 ? RECOMMENDATION_QUERY_ERROR
-                : recommendationError)
+                : (turnErrorMessage ?? recommendationError ?? openAiDisclosureError))
           }
           isLoading={messagesState.status === "loading" || recommendationState.status === "loading"}
           isOpen={isChatOpen}
-          isPending={recommendationPending !== null || linkImportFlow.isPending}
+          isPending={turnPending || recommendationPending !== null || linkImportFlow.isPending}
           messages={messagesState.status === "ready" ? messagesState.value : []}
           onClose={() => onChatOpenChange(false)}
           onDismissRecommendation={dismissRecommendation}
           onOpenLinkedFragment={openLinkedFragment}
           onOpenRecommendation={openRecommendation}
           onSend={sendMessage}
+          onRequestAiMode={requestAiMode}
+          onUseLocalMode={useLocalModeAndRetry}
+          onRetry={retryLastMessage}
           recommendation={recommendationView}
         />
       ) : null}
+
+      <OpenAiDisclosureDialog
+        errorMessage={openAiDisclosureError}
+        isOpen={isOpenAiDisclosureOpen}
+        isPending={isOpenAiDisclosurePending}
+        onAccept={() => void acceptAiDisclosure()}
+        onCancel={() => {
+          if (!isOpenAiDisclosurePending) {
+            setIsOpenAiDisclosureOpen(false);
+            setOpenAiDisclosureError(null);
+          }
+        }}
+        onUseLocal={() => {
+          if (!isOpenAiDisclosurePending) {
+            setIsOpenAiDisclosureOpen(false);
+            void switchAiMode("local");
+          }
+        }}
+      />
 
       <GetNoteDisclosureDialog
         errorMessage={linkImportFlow.disclosureErrorMessage}

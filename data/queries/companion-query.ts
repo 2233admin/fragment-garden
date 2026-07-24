@@ -14,7 +14,14 @@ export type CurrentRecommendationView = Readonly<{
 export async function queryLocalSettings(
   database: FragmentGardenDatabase = fragmentGardenDb,
 ): Promise<Settings> {
-  return (await new SettingsRepository(database).get()) ?? createDefaultSettings();
+  const stored = await new SettingsRepository(database).get();
+  const defaults = createDefaultSettings();
+  return {
+    ...defaults,
+    ...stored,
+    openAiDisclosureAcceptedAt: stored?.openAiDisclosureAcceptedAt ?? null,
+    companionAiMode: stored?.companionAiMode === "openai" ? "openai" : "local",
+  };
 }
 
 export function listChatMessages(

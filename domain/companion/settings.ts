@@ -10,6 +10,8 @@ export function createDefaultSettings(): Settings {
     lastOpenedAt: null,
     lastRecommendationDate: null,
     getNoteDisclosureAcceptedAt: null,
+    openAiDisclosureAcceptedAt: null,
+    companionAiMode: "local",
     schemaVersion: 1,
   };
 }

@@ -9,9 +9,10 @@ import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
 import { useDormancySync } from "@/components/fragments/useDormancySync";
 import { useExternalLinkImportRuntime } from "@/components/link-imports/useExternalLinkImportRuntime";
 import type { GardenPlantSnapshot } from "@/domain";
+import type { GardenSummary } from "@/domain/companion/context-builder";
 import type { CompanionViewModel } from "@/domain/garden/companion-view-model";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
-import { queryGardenPlantSnapshot } from "@/services/garden-query-service";
+import { queryGardenPlantSnapshot, queryGardenSummary } from "@/services/garden-query-service";
 import { recordFragmentViewed } from "@/services/record-fragment-viewed";
 
 import { GardenAccessibilitySummary } from "./GardenAccessibilitySummary";
@@ -23,6 +24,8 @@ import { GardenModeToggle, type GardenMode } from "./GardenModeToggle";
 
 type GardenQueryState =
   { status: "loading" } | { status: "error" } | { status: "ready"; snapshot: GardenPlantSnapshot };
+type GardenSummaryState =
+  { status: "loading" } | { status: "error" } | { status: "ready"; summary: GardenSummary };
 
 type InteractionFeedback = Readonly<{
   kind: "status" | "error";
@@ -38,6 +41,7 @@ type OpenFragmentOptions = Readonly<{
 }>;
 
 const LOADING_GARDEN_STATE: GardenQueryState = { status: "loading" };
+const LOADING_GARDEN_SUMMARY: GardenSummaryState = { status: "loading" };
 
 export function GardenWorkspace() {
   const [mode, setMode] = useState<GardenMode>("garden");
@@ -101,6 +105,17 @@ export function GardenWorkspace() {
     },
     [queryAttempt],
     LOADING_GARDEN_STATE,
+  );
+  const gardenSummaryState: GardenSummaryState = useLiveQuery(
+    async (): Promise<GardenSummaryState> => {
+      try {
+        return { status: "ready", summary: await queryGardenSummary() };
+      } catch {
+        return { status: "error" };
+      }
+    },
+    [queryAttempt],
+    LOADING_GARDEN_SUMMARY,
   );
 
   function restoreDetailFocus(): void {
@@ -323,6 +338,11 @@ export function GardenWorkspace() {
                   )
                   .join("|")
               : gardenState.status
+          }
+          gardenSummary={
+            gardenSummaryState.status === "ready"
+              ? gardenSummaryState.summary
+              : { activeCount: 0, dormantCount: 0, completedCount: 0, archivedCount: 0 }
           }
           isChatOpen={isCompanionChatOpen}
           onChatOpenChange={handleCompanionChatOpenChange}

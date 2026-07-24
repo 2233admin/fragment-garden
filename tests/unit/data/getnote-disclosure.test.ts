@@ -35,6 +35,8 @@ describe("acceptGetNoteDisclosure", () => {
       lastOpenedAt: null,
       lastRecommendationDate: null,
       getNoteDisclosureAcceptedAt: FIRST_ACCEPTED_AT,
+      openAiDisclosureAcceptedAt: null,
+      companionAiMode: "local",
       schemaVersion: 1,
     });
     await expect(database.settings.get("local-user")).resolves.toEqual(settings);

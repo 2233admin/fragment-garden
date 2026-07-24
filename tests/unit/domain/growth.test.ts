@@ -14,6 +14,25 @@ function createEvent(type: FragmentEventType, occurredAt: string): FragmentEvent
   };
 }
 
+function createPartnerSuggestionEvent(
+  id: string,
+  occurredAt: string,
+  localDateKey: string,
+): FragmentEvent {
+  return {
+    ...createEvent("partner_suggestion_saved", occurredAt),
+    id,
+    payload: {
+      direction: "一个具体方向",
+      guidingQuestion: "最想先验证什么？",
+      recommendedAction: "record_next_step",
+      source: "partner",
+      promptVersion: "sprout-v1",
+      localDateKey,
+    },
+  };
+}
+
 describe("calculateGrowthScore", () => {
   it.each([
     ["text_added", 1],
@@ -61,6 +80,45 @@ describe("calculateGrowthScore", () => {
     ];
 
     expect(calculateGrowthScore(events)).toBe(4);
+  });
+
+  it("scores saved partner suggestions once per persisted browser-local date", () => {
+    const events = [
+      createPartnerSuggestionEvent("suggestion-one", "2026-07-24T15:30:00.000Z", "2026-07-24"),
+      createPartnerSuggestionEvent("suggestion-two", "2026-07-25T01:00:00.000Z", "2026-07-24"),
+      createPartnerSuggestionEvent("suggestion-three", "2026-07-25T16:30:00.000Z", "2026-07-25"),
+    ];
+
+    expect(calculateGrowthScore(events)).toBe(2);
+  });
+
+  it("does not guess a date for malformed partner suggestion events", () => {
+    const event = createEvent("partner_suggestion_saved", "2026-07-24T08:00:00.000Z");
+
+    expect(calculateGrowthScore([event])).toBe(0);
+  });
+
+  it("does not score a hidden or partially corrupted partner suggestion", () => {
+    const incomplete = createPartnerSuggestionEvent(
+      "incomplete-suggestion",
+      "2026-07-24T08:00:00.000Z",
+      "2026-07-24",
+    );
+    incomplete.payload = {
+      source: "partner",
+      localDateKey: "2026-07-24",
+    };
+    const withUnexpectedField = createPartnerSuggestionEvent(
+      "unexpected-suggestion",
+      "2026-07-25T08:00:00.000Z",
+      "2026-07-25",
+    );
+    withUnexpectedField.payload = {
+      ...withUnexpectedField.payload,
+      unexpected: true,
+    };
+
+    expect(calculateGrowthScore([incomplete, withUnexpectedField])).toBe(0);
   });
 });
 

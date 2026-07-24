@@ -22,6 +22,7 @@ function createExternalLinkImport(overrides: Partial<ExternalLinkImport> = {}): 
     sourceUrl: NORMALIZED_URL,
     normalizedUrl: NORMALIZED_URL,
     canonicalUrl: null,
+    sourceContent: null,
     sourceContentTruncated: false,
     status: "pending",
     initiatedBy: "form",
@@ -108,6 +109,18 @@ describe("ExternalLinkImportRepository", () => {
       ),
     ).resolves.toBe("same-normalized-url-second-fragment");
     await expect(repository.listByNormalizedUrl(NORMALIZED_URL)).resolves.toHaveLength(2);
+  });
+
+  it("normalizes source content missing from an older V3 record to null", async () => {
+    const repository = new ExternalLinkImportRepository(database);
+    const legacyRecord = createExternalLinkImport();
+    delete legacyRecord.sourceContent;
+    await database.externalLinkImports.add(legacyRecord);
+
+    await expect(repository.getById(legacyRecord.id)).resolves.toMatchObject({
+      id: legacyRecord.id,
+      sourceContent: null,
+    });
   });
 });
 

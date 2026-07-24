@@ -2,8 +2,11 @@ import type { BrowserContext, Page } from "@playwright/test";
 
 export type StoredFragment = {
   analysisStatus: string;
+  completionStatus: string;
   contentType: string;
   id: string;
+  lastInteractedAt: string;
+  lifecycleStatus: string;
   rawText: string | null;
   sourceUrl: string | null;
   summary: string | null;
@@ -12,7 +15,19 @@ export type StoredFragment = {
 
 export type StoredPlant = {
   fragmentId: string;
+  growthScore: number;
   id: string;
+  slotId: string | null;
+  stage: string;
+  vitality: string;
+};
+
+export type StoredFragmentEvent = {
+  fragmentId: string;
+  id: string;
+  occurredAt: string;
+  payload: Record<string, unknown> | null;
+  type: string;
 };
 
 export type StoredExternalLinkImport = {
@@ -33,9 +48,12 @@ export type StoredChatMessage = {
 export type FragmentGardenPersistenceState = {
   chatMessages: StoredChatMessage[];
   externalLinkImports: StoredExternalLinkImport[];
+  fragmentEvents: StoredFragmentEvent[];
   fragments: StoredFragment[];
   getNoteDisclosureAcceptedAt: string | null;
+  openAiDisclosureAcceptedAt: string | null;
   plants: StoredPlant[];
+  sproutAiDisclosureAcceptedAt: string | null;
 };
 
 export async function clearFragmentGardenIndexedDb(
@@ -59,7 +77,7 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
       request.onsuccess = () => resolve(request.result);
     });
     const transaction = database.transaction(
-      ["settings", "fragments", "plants", "externalLinkImports", "chatMessages"],
+      ["settings", "fragments", "plants", "fragmentEvents", "externalLinkImports", "chatMessages"],
       "readonly",
     );
     const readAll = <T>(storeName: string): Promise<T[]> =>
@@ -68,28 +86,48 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result as T[]);
       });
-    const readSettings = (): Promise<{ getNoteDisclosureAcceptedAt?: string | null } | undefined> =>
+    const readSettings = (): Promise<
+      | {
+          getNoteDisclosureAcceptedAt?: string | null;
+          openAiDisclosureAcceptedAt?: string | null;
+          sproutAiDisclosureAcceptedAt?: string | null;
+        }
+      | undefined
+    > =>
       new Promise((resolve, reject) => {
         const request = transaction.objectStore("settings").get("local-user");
         request.onerror = () => reject(request.error);
         request.onsuccess = () =>
-          resolve(request.result as { getNoteDisclosureAcceptedAt?: string | null } | undefined);
+          resolve(
+            request.result as
+              | {
+                  getNoteDisclosureAcceptedAt?: string | null;
+                  openAiDisclosureAcceptedAt?: string | null;
+                  sproutAiDisclosureAcceptedAt?: string | null;
+                }
+              | undefined,
+          );
       });
-    const [settings, fragments, plants, externalLinkImports, chatMessages] = await Promise.all([
-      readSettings(),
-      readAll<StoredFragment>("fragments"),
-      readAll<StoredPlant>("plants"),
-      readAll<StoredExternalLinkImport>("externalLinkImports"),
-      readAll<StoredChatMessage>("chatMessages"),
-    ]);
+    const [settings, fragments, plants, fragmentEvents, externalLinkImports, chatMessages] =
+      await Promise.all([
+        readSettings(),
+        readAll<StoredFragment>("fragments"),
+        readAll<StoredPlant>("plants"),
+        readAll<StoredFragmentEvent>("fragmentEvents"),
+        readAll<StoredExternalLinkImport>("externalLinkImports"),
+        readAll<StoredChatMessage>("chatMessages"),
+      ]);
 
     database.close();
     return {
       chatMessages,
       externalLinkImports,
+      fragmentEvents,
       fragments,
       getNoteDisclosureAcceptedAt: settings?.getNoteDisclosureAcceptedAt ?? null,
+      openAiDisclosureAcceptedAt: settings?.openAiDisclosureAcceptedAt ?? null,
       plants,
+      sproutAiDisclosureAcceptedAt: settings?.sproutAiDisclosureAcceptedAt ?? null,
     };
   });
 }

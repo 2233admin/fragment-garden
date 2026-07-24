@@ -70,6 +70,7 @@ describe("external link import finalization", () => {
       status: "completed",
       externalNoteId: "9223372036854775807",
       canonicalUrl: "https://example.com/canonical",
+      sourceContent: "读取后的完整正文",
       sourceContentTruncated: true,
       providerRequestId: "detail-request",
       completedAt: "2026-07-23T12:05:00.000Z",
@@ -88,7 +89,7 @@ describe("external link import finalization", () => {
       userProvidedTitle: false,
     });
 
-    await completeExternalLinkImport(
+    const result = await completeExternalLinkImport(
       {
         fragmentId: seeded.fragment.id,
         externalNoteId: "external-note",
@@ -113,6 +114,7 @@ describe("external link import finalization", () => {
       summary: null,
       analysisStatus: "completed",
     });
+    expect(result.externalLinkImport.sourceContent).toBeNull();
   });
 
   it("preserves user-edited link content without blocking a provider title", async () => {
@@ -125,7 +127,7 @@ describe("external link import finalization", () => {
       rawText: "用户手动保留的正文",
     });
 
-    await completeExternalLinkImport(
+    const result = await completeExternalLinkImport(
       {
         fragmentId: seeded.fragment.id,
         externalNoteId: "external-note-manual-content",
@@ -150,6 +152,7 @@ describe("external link import finalization", () => {
       summary: "Provider 新摘要",
       analysisStatus: "completed",
     });
+    expect(result.externalLinkImport.sourceContent).toBe("Provider 不得覆盖的正文");
   });
 
   it("ignores a late completion from an older task generation", async () => {

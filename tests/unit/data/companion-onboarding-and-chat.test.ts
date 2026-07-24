@@ -46,6 +46,7 @@ describe("companion onboarding", () => {
       getNoteDisclosureAcceptedAt: null,
       openAiDisclosureAcceptedAt: null,
       companionAiMode: "local",
+      sproutAiDisclosureAcceptedAt: null,
       schemaVersion: 1,
     });
     await expect(database.settings.count()).resolves.toBe(0);

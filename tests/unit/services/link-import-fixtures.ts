@@ -89,6 +89,7 @@ export async function seedLinkImport(
     sourceUrl,
     normalizedUrl: sourceUrl,
     canonicalUrl: null,
+    sourceContent: null,
     sourceContentTruncated: false,
     status,
     initiatedBy: options.initiatedBy ?? "form",

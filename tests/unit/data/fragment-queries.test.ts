@@ -167,6 +167,23 @@ describe("getFragmentDetailViewModel", () => {
         payload: { unexpected: true },
         occurredAt: "2026-07-24T10:00:00.000Z",
       }),
+      createStageTwoEvent("partner_suggestion_saved", {
+        id: "partner-suggestion",
+        payload: {
+          direction: "先观察最容易分心的一个时段",
+          guidingQuestion: "哪个时段最值得先记录？",
+          recommendedAction: "record_next_step",
+          source: "partner",
+          promptVersion: "sprout-v1",
+          localDateKey: "2026-07-24",
+        },
+        occurredAt: "2026-07-24T09:30:00.000Z",
+      }),
+      createStageTwoEvent("partner_suggestion_saved", {
+        id: "invalid-partner-suggestion",
+        payload: { direction: "缺少其余字段" },
+        occurredAt: "2026-07-24T10:30:00.000Z",
+      }),
       createStageTwoEvent("viewed", {
         id: "viewed-event",
         occurredAt: "2026-07-24T11:00:00.000Z",
@@ -189,6 +206,31 @@ describe("getFragmentDetailViewModel", () => {
           occurredAt: "2026-07-24T09:00:00.000Z",
         },
       ],
+      additions: [
+        {
+          id: "event-a",
+          source: "user",
+          content: "第一条",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+        },
+        {
+          id: "event-b",
+          source: "user",
+          content: "第二条",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+        },
+        {
+          id: "partner-suggestion",
+          source: "partner",
+          content:
+            "具体化方向：先观察最容易分心的一个时段\n引导问题：哪个时段最值得先记录？\n推荐动作：record_next_step",
+          direction: "先观察最容易分心的一个时段",
+          guidingQuestion: "哪个时段最值得先记录？",
+          recommendedAction: "record_next_step",
+          promptVersion: "sprout-v1",
+          occurredAt: "2026-07-24T09:30:00.000Z",
+        },
+      ],
       completion: null,
       history: [
         {
@@ -200,6 +242,11 @@ describe("getFragmentDetailViewModel", () => {
           id: "event-b",
           label: "补充了一段新内容",
           occurredAt: "2026-07-24T09:00:00.000Z",
+        },
+        {
+          id: "partner-suggestion",
+          label: "保存了一条伙伴建议",
+          occurredAt: "2026-07-24T09:30:00.000Z",
         },
       ],
       sourceFragment: null,
@@ -222,6 +269,7 @@ describe("getFragmentDetailViewModel", () => {
       sourceUrl: fragment.sourceUrl ?? "",
       normalizedUrl: fragment.sourceUrl ?? "",
       canonicalUrl: null,
+      sourceContent: null,
       sourceContentTruncated: false,
       status: "processing",
       initiatedBy: "form",

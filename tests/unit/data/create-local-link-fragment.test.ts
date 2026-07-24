@@ -115,6 +115,7 @@ describe("createLocalLinkFragment", () => {
       sourceUrl: "https://EXAMPLE.com/article/?utm_source=newsletter&item=keep#section",
       normalizedUrl: "https://example.com/article?item=keep",
       canonicalUrl: null,
+      sourceContent: null,
       sourceContentTruncated: false,
       status: "pending",
       initiatedBy: "form",

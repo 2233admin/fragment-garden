@@ -21,6 +21,7 @@ export type FragmentEventType =
   | "progress_recorded"
   | "cluster_joined"
   | "child_fragment_created"
+  | "partner_suggestion_saved"
   | "completed"
   | "restored"
   | "archived"
@@ -42,6 +43,29 @@ export type CompletedEventPayload = {
 
 export type ChildFragmentCreatedEventPayload = {
   childFragmentId: string;
+};
+
+export type SproutRecommendedAction =
+  "add_content" | "record_next_step" | "grow_new_idea" | "keep_for_later" | "mark_completed";
+
+export type PartnerSuggestionSavedEventPayload = {
+  direction: string;
+  guidingQuestion: string;
+  recommendedAction: SproutRecommendedAction;
+  source: "partner";
+  promptVersion: string;
+  localDateKey: string;
+};
+
+export type PartnerSuggestion = {
+  id: string;
+  fragmentId: string;
+  direction: string;
+  guidingQuestion: string;
+  recommendedAction: SproutRecommendedAction;
+  source: "partner";
+  createdAt: string;
+  promptVersion: string;
 };
 
 export type ArchivedEventPayload = {
@@ -85,6 +109,8 @@ export type Settings = {
   openAiDisclosureAcceptedAt?: string | null;
   /** Optional for V3 records; missing values are treated as local mode. */
   companionAiMode?: CompanionAiMode;
+  /** Optional for V3 records; queryLocalSettings supplies the local default. */
+  sproutAiDisclosureAcceptedAt?: string | null;
   schemaVersion: number;
 };
 
@@ -196,6 +222,8 @@ export type ExternalLinkImport = {
   sourceUrl: string;
   normalizedUrl: string;
   canonicalUrl: string | null;
+  /** Optional for V3 records created before link source content was retained separately. */
+  sourceContent?: string | null;
   sourceContentTruncated: boolean;
 
   status: LinkImportStatus;

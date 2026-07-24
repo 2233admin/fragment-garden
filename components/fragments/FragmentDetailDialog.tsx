@@ -7,7 +7,6 @@ import {
   getFragmentDetailViewModel,
   type FragmentDetailViewModel,
 } from "@/data/queries/fragment-detail-query";
-
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { ModalDialog } from "../shared/ModalDialog";
 import { CompleteFragmentDialog } from "./CompleteFragmentDialog";
@@ -17,9 +16,12 @@ import { FragmentDispositionDialog } from "./FragmentDispositionDialog";
 import { FragmentEditForm } from "./FragmentEditForm";
 import { FragmentLinkDetailPanel } from "./FragmentLinkDetailPanel";
 import { FragmentLifecyclePanel } from "./FragmentLifecyclePanel";
+import { FragmentSproutSection } from "./FragmentSproutSection";
+import { SproutAnalysisDialog } from "./SproutAnalysisDialog";
 import { TextSupplementForm } from "./TextSupplementForm";
 import { useFragmentDetailActions } from "./useFragmentDetailActions";
 import { useFragmentDispositionActions } from "./useFragmentDispositionActions";
+import { useFragmentSproutActions } from "./useFragmentSproutActions";
 
 type FragmentDetailDialogProps = {
   fragmentId: string;
@@ -74,6 +76,11 @@ export function FragmentDetailDialog({
     fragmentId,
     onOpenRelatedFragment,
     onRequestStableFocus: requestStableFocus,
+  });
+  const sprout = useFragmentSproutActions({
+    detail: detailState.status === "ready" ? detailState.detail : null,
+    onCloseOverlay: actions.closeOverlay,
+    onOpenOverlay: actions.openOverlay,
   });
   const disposition = useFragmentDispositionActions({
     fragmentId,
@@ -170,6 +177,14 @@ export function FragmentDetailDialog({
                 />
               ) : null}
 
+              {detailState.detail.fragment.lifecycleStatus !== "deleted" ? (
+                <FragmentSproutSection
+                  buttonRef={sprout.sproutTriggerRef}
+                  isDisabled={isBusy}
+                  onOpen={() => actions.openOverlay("sprout")}
+                />
+              ) : null}
+
               <div>
                 <p
                   aria-atomic="true"
@@ -214,11 +229,16 @@ export function FragmentDetailDialog({
 
               <TextSupplementForm
                 fragmentId={fragmentId}
+                intent={sprout.supplementIntent}
                 isDisabled={isBusy}
                 onPendingChange={(isPending) =>
                   actions.handleFormPendingChange("supplement", isPending)
                 }
-                onSaved={(message) => actions.setFeedback({ kind: "status", message })}
+                onSaved={(message) => {
+                  sprout.resetSupplementIntent();
+                  actions.setFeedback({ kind: "status", message });
+                }}
+                textareaRef={sprout.supplementTextareaRef}
               />
 
               <FragmentEditForm
@@ -252,6 +272,19 @@ export function FragmentDetailDialog({
           ) : null}
         </div>
       </ModalDialog>
+
+      {actions.activeOverlay === "sprout" &&
+      detailState.status === "ready" &&
+      detailState.detail.fragment.lifecycleStatus !== "deleted" ? (
+        <SproutAnalysisDialog
+          additions={detailState.detail.additions}
+          externalLinkImport={detailState.detail.externalLinkImport}
+          fragment={detailState.detail.fragment}
+          onClose={sprout.closeAndRestoreFocus}
+          onContinue={sprout.continueFromSuggestion}
+          plant={detailState.detail.plant}
+        />
+      ) : null}
 
       <FragmentDispositionDialog
         errorMessage={disposition.dispositionError}

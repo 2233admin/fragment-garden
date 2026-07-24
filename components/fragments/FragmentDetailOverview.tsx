@@ -1,4 +1,5 @@
 import type { FragmentDetailViewModel } from "@/data/queries/fragment-detail-query";
+import { SPROUT_RECOMMENDED_ACTION_LABELS } from "@/domain/sprout/recommended-actions";
 
 import {
   COMPLETION_STATUS_LABELS,
@@ -12,7 +13,7 @@ type FragmentDetailOverviewProps = {
 };
 
 export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) {
-  const { childFragments, completion, fragment, history, plant, sourceFragment, textSupplements } =
+  const { additions, childFragments, completion, fragment, history, plant, sourceFragment } =
     detail;
 
   return (
@@ -125,30 +126,54 @@ export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) 
 
       <section>
         <div className="flex items-baseline justify-between gap-4">
-          <h3 className="font-display text-xl font-semibold text-garden-ink">文字补充历史</h3>
-          <span className="text-xs text-garden-muted">{textSupplements.length} 条</span>
+          <h3 className="font-display text-xl font-semibold text-garden-ink">补充历史</h3>
+          <span className="text-xs text-garden-muted">{additions.length} 条</span>
         </div>
 
-        {textSupplements.length === 0 ? (
+        {additions.length === 0 ? (
           <p className="mt-3 rounded-2xl border border-dashed border-garden-line px-4 py-5 text-sm text-garden-muted">
-            还没有文字补充。新的补充会按时间保留在这里。
+            还没有补充。用户补充和保存的伙伴建议会按时间保留在这里。
           </p>
         ) : (
           <ol className="mt-3 space-y-3">
-            {textSupplements.map((supplement) => (
+            {additions.map((addition) => (
               <li
-                className="rounded-2xl border border-garden-line bg-white p-4"
-                key={supplement.id}
+                className={`rounded-2xl border border-garden-line bg-white p-4 ${
+                  addition.source === "partner" ? "border-l-4 border-l-garden-accent" : ""
+                }`}
+                key={addition.id}
               >
-                <time
-                  className="text-xs font-semibold text-garden-muted"
-                  dateTime={supplement.occurredAt}
-                >
-                  {formatFragmentTimestamp(supplement.occurredAt)}
-                </time>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-garden-ink">
-                  {supplement.text}
-                </p>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-xs font-semibold text-garden-accent">
+                    {addition.source === "partner" ? "伙伴建议" : "用户补充"}
+                  </span>
+                  <time
+                    className="text-xs font-semibold text-garden-muted"
+                    dateTime={addition.occurredAt}
+                  >
+                    {formatFragmentTimestamp(addition.occurredAt)}
+                  </time>
+                </div>
+                {addition.source === "user" ? (
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-garden-ink">
+                    {addition.content}
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3 text-sm leading-6 text-garden-ink">
+                    <div>
+                      <p className="text-xs font-semibold text-garden-muted">可能的方向</p>
+                      <p className="mt-1 whitespace-pre-wrap">{addition.direction}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-garden-muted">可以继续想想</p>
+                      <p className="mt-1 whitespace-pre-wrap">{addition.guidingQuestion}</p>
+                    </div>
+                    <p className="text-xs font-semibold text-garden-muted">
+                      建议下一步：
+                      {SPROUT_RECOMMENDED_ACTION_LABELS[addition.recommendedAction]}
+                    </p>
+                  </div>
+                )}
               </li>
             ))}
           </ol>

@@ -127,6 +127,7 @@ export async function createLocalLinkFragment(
         sourceUrl,
         normalizedUrl,
         canonicalUrl: null,
+        sourceContent: null,
         sourceContentTruncated: false,
         status: "pending",
         initiatedBy: input.initiatedBy,

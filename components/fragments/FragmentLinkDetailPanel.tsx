@@ -45,6 +45,9 @@ export function FragmentLinkDetailPanel({
   const [retryError, setRetryError] = useState<string | null>(null);
   const sourceHostname = deriveSourceHostname(fragment.sourceUrl);
   const canRetry = fragment.analysisStatus === "failed" && onRetryLinkImport !== undefined;
+  const extractedSourceContent =
+    externalLinkImport?.sourceContent ??
+    (externalLinkImport?.userProvidedContent === true ? null : fragment.rawText);
 
   async function retryLinkImport(): Promise<void> {
     if (!canRetry || isRetrying) {
@@ -164,7 +167,7 @@ export function FragmentLinkDetailPanel({
             )}
           </div>
           <p className="mt-2 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl border border-garden-line bg-garden-paper px-4 py-3 text-sm leading-7 text-garden-ink">
-            {fragment.rawText ?? "还没有提取到正文。"}
+            {extractedSourceContent ?? "还没有提取到正文。"}
           </p>
         </section>
       </div>

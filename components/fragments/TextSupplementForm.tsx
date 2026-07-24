@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type RefObject } from "react";
 
 import { addTextSupplement } from "@/services/add-text-supplement";
 
@@ -8,16 +8,20 @@ import { AsyncButton } from "../shared/AsyncButton";
 
 type TextSupplementFormProps = {
   fragmentId: string;
+  intent?: "next_step" | "supplement";
   isDisabled: boolean;
   onPendingChange: (isPending: boolean) => void;
   onSaved: (message: string) => void;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
 };
 
 export function TextSupplementForm({
   fragmentId,
+  intent = "supplement",
   isDisabled,
   onPendingChange,
   onSaved,
+  textareaRef,
 }: TextSupplementFormProps) {
   const [text, setText] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -59,23 +63,30 @@ export function TextSupplementForm({
       className="rounded-2xl border border-garden-line bg-garden-soft/45 p-5"
       onSubmit={handleSubmit}
     >
-      <h3 className="font-display text-xl font-semibold text-garden-ink">添加新补充</h3>
+      <h3 className="font-display text-xl font-semibold text-garden-ink">
+        {intent === "next_step" ? "写下下一步" : "添加新补充"}
+      </h3>
       <p className="mt-1 text-xs leading-5 text-garden-muted">
-        补充会保留为独立历史，并按领域规则重新计算成长。
+        {intent === "next_step"
+          ? "下一步会作为一条文字补充保存，不会创建任务或自动执行。"
+          : "补充会保留为独立历史，并按领域规则重新计算成长。"}
       </p>
 
       <label
         className="mt-5 mb-2 block text-sm font-semibold text-garden-ink"
         htmlFor={`supplement-${fragmentId}`}
       >
-        添加新补充
+        {intent === "next_step" ? "写下下一步" : "添加新补充"}
       </label>
       <textarea
         className="min-h-28 w-full resize-y rounded-xl border border-garden-line bg-white px-4 py-3 text-sm leading-6 text-garden-ink disabled:opacity-60"
         disabled={isDisabled}
         id={`supplement-${fragmentId}`}
         onChange={(event) => setText(event.target.value)}
-        placeholder="写下新的资料、判断或进展…"
+        placeholder={
+          intent === "next_step" ? "写下你愿意尝试的下一小步…" : "写下新的资料、判断或进展…"
+        }
+        ref={textareaRef}
         value={text}
       />
 

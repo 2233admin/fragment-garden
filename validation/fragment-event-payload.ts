@@ -5,10 +5,28 @@ import type {
   ChildFragmentCreatedEventPayload,
   CompletedEventPayload,
   FragmentReviewDecision,
+  PartnerSuggestionSavedEventPayload,
   RestoredEventPayload,
   ReviewedEventPayload,
   TextAddedEventPayload,
 } from "../domain";
+import { isLocalDateKey } from "../domain/sprout/local-date";
+import {
+  SPROUT_MAX_DIRECTION_CHARACTERS,
+  SPROUT_MAX_GUIDING_QUESTION_CHARACTERS,
+  SPROUT_MAX_PROMPT_VERSION_CHARACTERS,
+} from "../domain/sprout/constants";
+import { sproutRecommendedActionSchema } from "./sprout-api";
+
+function boundedUnicodeText(maxCharacters: number) {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .refine((value) => Array.from(value).length <= maxCharacters, {
+      message: `Text must contain at most ${maxCharacters} Unicode characters`,
+    });
+}
 
 export const fragmentReviewDecisionSchema: z.ZodType<FragmentReviewDecision> = z.enum([
   "still_interested",
@@ -44,6 +62,20 @@ export const childFragmentCreatedEventPayloadSchema: z.ZodType<ChildFragmentCrea
     childFragmentId: z.string().trim().min(1),
   })
   .strict();
+
+export const partnerSuggestionSavedEventPayloadSchema: z.ZodType<PartnerSuggestionSavedEventPayload> =
+  z
+    .object({
+      direction: boundedUnicodeText(SPROUT_MAX_DIRECTION_CHARACTERS),
+      guidingQuestion: boundedUnicodeText(SPROUT_MAX_GUIDING_QUESTION_CHARACTERS),
+      recommendedAction: sproutRecommendedActionSchema,
+      source: z.literal("partner"),
+      promptVersion: boundedUnicodeText(SPROUT_MAX_PROMPT_VERSION_CHARACTERS),
+      localDateKey: z.string().refine(isLocalDateKey, {
+        message: "A valid local date key is required",
+      }),
+    })
+    .strict();
 
 export const archivedEventPayloadSchema: z.ZodType<ArchivedEventPayload> = z
   .object({
@@ -94,6 +126,19 @@ export function safelyParseChildFragmentCreatedEventPayload(
   payload: unknown,
 ): ChildFragmentCreatedEventPayload | null {
   const result = childFragmentCreatedEventPayloadSchema.safeParse(payload);
+  return result.success ? result.data : null;
+}
+
+export function parsePartnerSuggestionSavedEventPayload(
+  payload: unknown,
+): PartnerSuggestionSavedEventPayload {
+  return partnerSuggestionSavedEventPayloadSchema.parse(payload);
+}
+
+export function safelyParsePartnerSuggestionSavedEventPayload(
+  payload: unknown,
+): PartnerSuggestionSavedEventPayload | null {
+  const result = partnerSuggestionSavedEventPayloadSchema.safeParse(payload);
   return result.success ? result.data : null;
 }
 

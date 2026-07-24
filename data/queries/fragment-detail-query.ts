@@ -1,8 +1,9 @@
-import type { ExternalLinkImport, Fragment, Plant } from "../../domain";
+import type { ExternalLinkImport, Fragment, Plant, SproutRecommendedAction } from "../../domain";
 import {
   safelyParseArchivedEventPayload,
   safelyParseChildFragmentCreatedEventPayload,
   safelyParseCompletedEventPayload,
+  safelyParsePartnerSuggestionSavedEventPayload,
   safelyParseRestoredEventPayload,
   safelyParseReviewedEventPayload,
   safelyParseTextAddedEventPayload,
@@ -19,6 +20,24 @@ export type TextSupplementViewModel = {
   text: string;
   occurredAt: string;
 };
+
+export type FragmentAdditionViewModel =
+  | Readonly<{
+      id: string;
+      source: "user";
+      content: string;
+      occurredAt: string;
+    }>
+  | Readonly<{
+      id: string;
+      source: "partner";
+      content: string;
+      direction: string;
+      guidingQuestion: string;
+      recommendedAction: SproutRecommendedAction;
+      promptVersion: string;
+      occurredAt: string;
+    }>;
 
 export type RelatedFragmentViewModel = {
   id: string;
@@ -41,6 +60,7 @@ export type FragmentDetailViewModel = {
   plant: Plant;
   externalLinkImport: ExternalLinkImport | null;
   textSupplements: TextSupplementViewModel[];
+  additions: FragmentAdditionViewModel[];
   completion: FragmentCompletionViewModel | null;
   history: FragmentHistoryItemViewModel[];
   sourceFragment: RelatedFragmentViewModel | null;
@@ -120,6 +140,7 @@ export function getFragmentDetailViewModel(
       }
 
       const textSupplements: TextSupplementViewModel[] = [];
+      const additions: FragmentAdditionViewModel[] = [];
       const history: FragmentHistoryItemViewModel[] = [];
       let completion: FragmentCompletionViewModel | null = null;
 
@@ -133,9 +154,39 @@ export function getFragmentDetailViewModel(
               text: payload.text,
               occurredAt: event.occurredAt,
             });
+            additions.push({
+              id: event.id,
+              source: "user",
+              content: payload.text,
+              occurredAt: event.occurredAt,
+            });
             history.push({
               id: event.id,
               label: "补充了一段新内容",
+              occurredAt: event.occurredAt,
+            });
+          }
+        } else if (event.type === "partner_suggestion_saved") {
+          const payload = safelyParsePartnerSuggestionSavedEventPayload(event.payload);
+
+          if (payload !== null) {
+            additions.push({
+              id: event.id,
+              source: "partner",
+              content: [
+                `具体化方向：${payload.direction}`,
+                `引导问题：${payload.guidingQuestion}`,
+                `推荐动作：${payload.recommendedAction}`,
+              ].join("\n"),
+              direction: payload.direction,
+              guidingQuestion: payload.guidingQuestion,
+              recommendedAction: payload.recommendedAction,
+              promptVersion: payload.promptVersion,
+              occurredAt: event.occurredAt,
+            });
+            history.push({
+              id: event.id,
+              label: "保存了一条伙伴建议",
               occurredAt: event.occurredAt,
             });
           }
@@ -243,6 +294,7 @@ export function getFragmentDetailViewModel(
         plant,
         externalLinkImport: externalLinkImport ?? null,
         textSupplements,
+        additions,
         completion,
         history,
         sourceFragment:

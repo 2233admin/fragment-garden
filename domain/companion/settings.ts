@@ -12,6 +12,7 @@ export function createDefaultSettings(): Settings {
     getNoteDisclosureAcceptedAt: null,
     openAiDisclosureAcceptedAt: null,
     companionAiMode: "local",
+    sproutAiDisclosureAcceptedAt: null,
     schemaVersion: 1,
   };
 }

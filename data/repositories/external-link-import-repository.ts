@@ -13,15 +13,30 @@ function compareExternalLinkImports(left: ExternalLinkImport, right: ExternalLin
   return createdAtComparison === 0 ? left.id.localeCompare(right.id) : createdAtComparison;
 }
 
+function normalizeExternalLinkImport(externalLinkImport: ExternalLinkImport): ExternalLinkImport {
+  return externalLinkImport.sourceContent === undefined
+    ? { ...externalLinkImport, sourceContent: null }
+    : externalLinkImport;
+}
+
 export class ExternalLinkImportRepository {
   constructor(private readonly database: FragmentGardenDatabase = fragmentGardenDb) {}
 
-  getById(id: string): Promise<ExternalLinkImport | undefined> {
-    return this.database.externalLinkImports.get(id);
+  async getById(id: string): Promise<ExternalLinkImport | undefined> {
+    const externalLinkImport = await this.database.externalLinkImports.get(id);
+    return externalLinkImport === undefined
+      ? undefined
+      : normalizeExternalLinkImport(externalLinkImport);
   }
 
-  getByFragmentId(fragmentId: string): Promise<ExternalLinkImport | undefined> {
-    return this.database.externalLinkImports.where("fragmentId").equals(fragmentId).first();
+  async getByFragmentId(fragmentId: string): Promise<ExternalLinkImport | undefined> {
+    const externalLinkImport = await this.database.externalLinkImports
+      .where("fragmentId")
+      .equals(fragmentId)
+      .first();
+    return externalLinkImport === undefined
+      ? undefined
+      : normalizeExternalLinkImport(externalLinkImport);
   }
 
   async listByNormalizedUrl(normalizedUrl: string): Promise<ExternalLinkImport[]> {
@@ -30,7 +45,7 @@ export class ExternalLinkImportRepository {
       .equals(normalizedUrl)
       .toArray();
 
-    return imports.sort(compareExternalLinkImports);
+    return imports.map(normalizeExternalLinkImport).sort(compareExternalLinkImports);
   }
 
   async listByStatuses(statuses: readonly LinkImportStatus[]): Promise<ExternalLinkImport[]> {
@@ -44,7 +59,7 @@ export class ExternalLinkImportRepository {
       .anyOf(uniqueStatuses)
       .toArray();
 
-    return imports.sort(compareExternalLinkImports);
+    return imports.map(normalizeExternalLinkImport).sort(compareExternalLinkImports);
   }
 
   add(externalLinkImport: ExternalLinkImport): Promise<string> {

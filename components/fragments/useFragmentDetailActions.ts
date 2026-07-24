@@ -11,7 +11,7 @@ import { reviewFragment } from "@/services/review-fragment";
 import type { FragmentLifecyclePendingAction } from "./FragmentLifecyclePanel";
 
 export type FragmentDetailOverlay =
-  "disposition" | "completion" | "create_child" | "delete_confirm" | null;
+  "disposition" | "completion" | "create_child" | "delete_confirm" | "sprout" | null;
 
 type DetailPendingAction =
   | Exclude<FragmentLifecyclePendingAction, null>

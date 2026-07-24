@@ -112,11 +112,8 @@ export async function completeExternalLinkImport(
       const title =
         current.userProvidedTitle || providerTitle.length === 0 ? fragment.title : providerTitle;
       const summary = input.summary.trim().length === 0 ? null : input.summary;
-      const rawText = current.userProvidedContent
-        ? fragment.rawText
-        : input.sourceContent.length === 0
-          ? null
-          : input.sourceContent;
+      const sourceContent = input.sourceContent.trim().length === 0 ? null : input.sourceContent;
+      const rawText = current.userProvidedContent ? fragment.rawText : sourceContent;
       const updatedFragment: Fragment = {
         ...fragment,
         title,
@@ -130,6 +127,7 @@ export async function completeExternalLinkImport(
       const updatedImport: ExternalLinkImport = {
         ...current,
         canonicalUrl: input.canonicalUrl,
+        sourceContent,
         sourceContentTruncated: input.truncated,
         status: "completed",
         externalNoteId: input.externalNoteId,
@@ -154,6 +152,7 @@ export async function completeExternalLinkImport(
       requireRecordUpdated(
         await importRepository.update(current.id, {
           canonicalUrl: input.canonicalUrl,
+          sourceContent,
           sourceContentTruncated: input.truncated,
           status: "completed",
           externalNoteId: input.externalNoteId,

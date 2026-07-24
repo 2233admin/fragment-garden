@@ -1,18 +1,42 @@
-import { expect, test, type BrowserContext, type Page, type Request } from "@playwright/test";
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type Request,
+} from "@playwright/test";
 
 import { expectSingleCompanion } from "./helpers/companion";
+import { readFragmentGardenPersistence } from "./helpers/indexed-db";
 
-const WELCOME_MESSAGE =
-  "以后我会陪你照看这座花园。你可以随时来记录想法，也可以让我带你看看以前种下的内容。";
-const DORMANCY_RESPONSE =
-  "植物连续满 72 小时没有互动后会休眠，内容不会消失。再次打开或复盘后它会恢复，植物也不会死亡。";
-const RECOMMENDATION_UNAVAILABLE = "暂时没能找到适合回看的内容，你仍然可以在卡片模式中查找。";
-const OLD_FRAGMENT_ID = "stage6-old-dormant-fragment";
+const MAIN_OPTION_LABELS = [
+  "帮我找一株值得重新看看的植物",
+  "看看我的花园近况",
+  "帮我种下一个新想法",
+  "更多",
+  "离开",
+] as const;
+const MORE_OPTION_LABELS = [
+  "看看哪些植物正在休眠",
+  "告诉我植物为什么会成长",
+  "告诉我休眠、完成和封存是什么",
+  "只是来看看你",
+  "返回",
+  "离开",
+] as const;
+const OLD_FRAGMENT_ID = "stage8-old-dormant-fragment";
 const OLD_FRAGMENT_TITLE = "重新看看那次雨天散步";
-const NEW_FRAGMENT_ID = "stage6-new-fragment";
+const NEW_FRAGMENT_ID = "stage8-new-fragment";
 const NEW_FRAGMENT_TITLE = "刚刚种下的窗边念头";
-const SECOND_OLD_FRAGMENT_ID = "stage6-second-old-fragment";
+const SECOND_OLD_FRAGMENT_ID = "stage8-second-old-fragment";
 const SECOND_OLD_FRAGMENT_TITLE = "还没整理的手作灵感";
+const COMPLETED_FRAGMENT_ID = "stage8-completed-fragment";
+const COMPLETED_FRAGMENT_TITLE = "已经完成的旅行清单";
+const ARCHIVED_FRAGMENT_ID = "stage8-archived-fragment";
+const ARCHIVED_FRAGMENT_TITLE = "已经封存的旧计划";
+const NPC_CREATED_TITLE = "伙伴入口种下的窗边想法";
+const NPC_CREATED_TEXT = "把窗边整理出来，先放一盆容易照看的植物。";
 const COMPANION_WORLD_POSITION = { x: 496, y: 76 };
 
 type RuntimeObservations = {
@@ -23,10 +47,11 @@ type RuntimeObservations = {
 
 type SeedFragment = {
   ageHours: number;
+  completionStatus?: "open" | "completed";
   id: string;
-  lifecycleStatus: "active" | "dormant";
+  lifecycleStatus: "active" | "dormant" | "archived";
   rawText: string;
-  slotId: string;
+  slotId: string | null;
   title: string;
 };
 
@@ -76,7 +101,12 @@ function observeRuntime(page: Page): RuntimeObservations {
   page.on("request", (request) => {
     const url = request.url().toLowerCase();
 
-    if (url.includes("openai") || url.includes("getnote") || url.includes("/api/ai/")) {
+    if (
+      url.includes("/api/companion/respond") ||
+      url.includes("openai.com") ||
+      url.includes("openapi.biji.com") ||
+      url.includes("getnote")
+    ) {
       observations.prohibitedRequests.push(request.url());
     }
   });
@@ -115,6 +145,23 @@ async function chooseCompanion(page: Page, companion: "猫" | "狗"): Promise<vo
   await expect(dialog).toBeHidden();
 }
 
+function getCompanionDialog(page: Page): Locator {
+  return page.getByRole("dialog", { name: "花园伙伴" });
+}
+
+function getNpcScreen(dialog: Locator, name: string): Locator {
+  return dialog.getByRole("region", { name, exact: true });
+}
+
+async function expectMenuLabels(menu: Locator, labels: readonly string[]): Promise<void> {
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("button")).toHaveCount(labels.length);
+  const actualLabels = (await menu.getByRole("button").allTextContents()).map((label) =>
+    label.trim(),
+  );
+  expect(actualLabels).toEqual(labels);
+}
+
 async function clickCanvasWorld(page: Page, worldX: number, worldY: number): Promise<void> {
   const canvas = page.getByTestId("garden-canvas-host").locator("canvas");
   const scale = await canvas.evaluate((element) => {
@@ -135,99 +182,84 @@ async function clickCanvasWorld(page: Page, worldX: number, worldY: number): Pro
   });
 }
 
-async function openCompanionFromCanvas(page: Page): Promise<void> {
+async function openCompanionFromCanvas(page: Page): Promise<Locator> {
   const gardenHost = page.getByTestId("garden-canvas-host");
   await expect(gardenHost).toHaveAttribute("aria-busy", "false");
   await clickCanvasWorld(page, COMPANION_WORLD_POSITION.x, COMPANION_WORLD_POSITION.y);
-  await expect(page.getByRole("dialog", { name: "花园伙伴" })).toBeVisible();
+  const dialog = getCompanionDialog(page);
+  await expect(dialog).toBeVisible();
+  await expect(getNpcScreen(dialog, "伙伴主菜单")).toBeVisible();
+  return dialog;
 }
 
-async function sendCompanionMessage(page: Page, message: string): Promise<void> {
-  const dialog = page.getByRole("dialog", { name: "花园伙伴" });
-  await dialog.getByLabel("想问些什么？").fill(message);
-  await dialog.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(dialog.getByText(message, { exact: true })).toBeVisible();
+async function openCompanionFromButton(page: Page): Promise<Locator> {
+  const existingDialog = getCompanionDialog(page);
+  if (await existingDialog.isVisible()) {
+    await expect(getNpcScreen(existingDialog, "伙伴主菜单")).toBeVisible();
+    return existingDialog;
+  }
+
+  await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
+  const dialog = getCompanionDialog(page);
+  await expect(dialog).toBeVisible();
+  await expect(getNpcScreen(dialog, "伙伴主菜单")).toBeVisible();
+  return dialog;
 }
 
-async function seedFragments(
-  page: Page,
-  fragments: readonly SeedFragment[],
-  suppressDailyRecommendation: boolean,
-): Promise<void> {
-  await page.evaluate(
-    async ({ fragmentSeeds, shouldSuppressDaily }) => {
-      const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open("fragment-garden");
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
+async function seedFragments(page: Page, fragments: readonly SeedFragment[]): Promise<void> {
+  await page.evaluate(async (fragmentSeeds) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("fragment-garden");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const transaction = database.transaction(["fragments", "plants"], "readwrite");
+    const completion = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    const now = new Date();
+
+    for (const fragmentSeed of fragmentSeeds) {
+      const createdAt = new Date(now.getTime() - fragmentSeed.ageHours * 60 * 60 * 1_000);
+      const timestamp = createdAt.toISOString();
+      const completionStatus = fragmentSeed.completionStatus ?? "open";
+
+      transaction.objectStore("fragments").put({
+        id: fragmentSeed.id,
+        contentType: "text",
+        title: fragmentSeed.title,
+        rawText: fragmentSeed.rawText,
+        sourceUrl: null,
+        summary: null,
+        keywords: [],
+        lifecycleStatus: fragmentSeed.lifecycleStatus,
+        completionStatus,
+        analysisStatus: "not_required",
+        embedding: null,
+        parentFragmentId: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastInteractedAt: timestamp,
+        completedAt: completionStatus === "completed" ? timestamp : null,
       });
-      const transaction = database.transaction(["settings", "fragments", "plants"], "readwrite");
-      const completion = new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
+      transaction.objectStore("plants").put({
+        id: `plant-${fragmentSeed.id}`,
+        fragmentId: fragmentSeed.id,
+        speciesId: null,
+        stage: completionStatus === "completed" ? "permanent_bloom" : "seedling",
+        vitality: fragmentSeed.lifecycleStatus === "dormant" ? "dormant" : "active",
+        growthScore: 0,
+        slotId: fragmentSeed.slotId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
       });
-      const now = new Date();
-      const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
-        2,
-        "0",
-      )}-${String(now.getDate()).padStart(2, "0")}`;
+    }
 
-      if (shouldSuppressDaily) {
-        transaction.objectStore("settings").put({
-          id: "local-user",
-          onboardingCompleted: true,
-          companionType: "cat",
-          lastOpenedAt: null,
-          lastRecommendationDate: localDate,
-          getNoteDisclosureAcceptedAt: null,
-          schemaVersion: 1,
-        });
-      }
-
-      for (const fragmentSeed of fragmentSeeds) {
-        const createdAt = new Date(now.getTime() - fragmentSeed.ageHours * 60 * 60 * 1_000);
-        const timestamp = createdAt.toISOString();
-
-        transaction.objectStore("fragments").put({
-          id: fragmentSeed.id,
-          contentType: "text",
-          title: fragmentSeed.title,
-          rawText: fragmentSeed.rawText,
-          sourceUrl: null,
-          summary: null,
-          keywords: [],
-          lifecycleStatus: fragmentSeed.lifecycleStatus,
-          completionStatus: "open",
-          analysisStatus: "not_required",
-          embedding: null,
-          parentFragmentId: null,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          lastInteractedAt: timestamp,
-          completedAt: null,
-        });
-        transaction.objectStore("plants").put({
-          id: `plant-${fragmentSeed.id}`,
-          fragmentId: fragmentSeed.id,
-          speciesId: null,
-          stage: "seedling",
-          vitality: fragmentSeed.lifecycleStatus,
-          growthScore: 0,
-          slotId: fragmentSeed.slotId,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        });
-      }
-
-      await completion;
-      database.close();
-    },
-    {
-      fragmentSeeds: fragments,
-      shouldSuppressDaily: suppressDailyRecommendation,
-    },
-  );
+    await completion;
+    database.close();
+  }, fragments);
 }
 
 async function readFragmentPersistenceState(
@@ -288,7 +320,7 @@ async function readFragmentPersistenceState(
   }, fragmentId);
 }
 
-test("selects and persists one cat companion with local chat history", async ({
+test("opens the deterministic NPC main and more menus without chat or AI", async ({
   context,
   page,
 }) => {
@@ -311,32 +343,48 @@ test("selects and persists one cat companion with local chat history", async ({
     "data-movement-state",
     "moving",
   );
-  await openCompanionFromCanvas(page);
+  let dialog = await openCompanionFromCanvas(page);
   await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute(
     "data-movement-state",
     "idle",
   );
-  let chat = page.getByRole("dialog", { name: "花园伙伴" });
-  await expect(chat.getByText(WELCOME_MESSAGE, { exact: true })).toBeVisible();
-  await sendCompanionMessage(page, "植物为什么休眠");
-  await expect(chat.getByText(DORMANCY_RESPONSE, { exact: true })).toBeVisible();
 
-  await page.reload();
-  await expect(onboarding).toBeHidden();
-  await expectSingleCompanion(page, "cat");
-  await expect(page.locator("canvas")).toHaveCount(1);
-  await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
-  chat = page.getByRole("dialog", { name: "花园伙伴" });
-  await expect(chat.getByText(WELCOME_MESSAGE, { exact: true })).toHaveCount(1);
-  await expect(chat.getByText("植物为什么休眠", { exact: true })).toBeVisible();
-  await expect(chat.getByText(DORMANCY_RESPONSE, { exact: true })).toBeVisible();
-  await chat.getByLabel("想问些什么？").press("Escape");
-  await expect(chat).toBeHidden();
+  let main = getNpcScreen(dialog, "伙伴主菜单");
+  await expect(main.getByText("今天想先看看花园里的什么？", { exact: true })).toBeVisible();
+  await expectMenuLabels(main, MAIN_OPTION_LABELS);
+  await expect(dialog.locator("input, textarea")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "发送", exact: true })).toHaveCount(0);
+  await expect(dialog.getByTestId("companion-mode")).toHaveCount(0);
+  await expect(dialog.getByRole("log")).toHaveCount(0);
+
+  await main.getByRole("button", { name: "更多", exact: true }).click();
+  const more = getNpcScreen(dialog, "伙伴更多选项");
+  await expect(
+    more.getByText("还有一些关于花园的事，我也可以告诉你。", { exact: true }),
+  ).toBeVisible();
+  await expectMenuLabels(more, MORE_OPTION_LABELS);
+  await more.getByRole("button", { name: "返回", exact: true }).click();
+
+  main = getNpcScreen(dialog, "伙伴主菜单");
+  await expectMenuLabels(main, MAIN_OPTION_LABELS);
+  await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute(
+    "data-movement-state",
+    "idle",
+  );
+  await main.getByRole("button", { name: "离开", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  dialog = await openCompanionFromButton(page);
+  await expect(getNpcScreen(dialog, "伙伴主菜单")).toBeVisible();
+  await expect(getNpcScreen(dialog, "伙伴更多选项")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", { name: "打开花园伙伴", exact: true })).toBeFocused();
 
   expectCleanRuntime(observations);
 });
 
-test("recommends an eligible old fragment, opens it once, and dismisses without mutation", async ({
+test("shows local garden counts and opens only dormant fragments through shared details", async ({
   context,
   page,
 }) => {
@@ -344,42 +392,146 @@ test("recommends an eligible old fragment, opens it once, and dismisses without 
   await clearIndexedDb(context, page);
   await page.goto("/garden");
   await chooseCompanion(page, "猫");
-  await seedFragments(
-    page,
-    [
-      {
-        ageHours: 240,
-        id: OLD_FRAGMENT_ID,
-        lifecycleStatus: "dormant",
-        rawText: "那天绕开大路，沿着河边慢慢走了一圈。",
-        slotId: "slot-01",
-        title: OLD_FRAGMENT_TITLE,
-      },
-      {
-        ageHours: 1,
-        id: NEW_FRAGMENT_ID,
-        lifecycleStatus: "active",
-        rawText: "试着把窗边空出来，放一小盆绿植。",
-        slotId: "slot-02",
-        title: NEW_FRAGMENT_TITLE,
-      },
-    ],
-    true,
-  );
+  await seedFragments(page, [
+    {
+      ageHours: 240,
+      id: OLD_FRAGMENT_ID,
+      lifecycleStatus: "dormant",
+      rawText: "那天绕开大路，沿着河边慢慢走了一圈。",
+      slotId: "slot-01",
+      title: OLD_FRAGMENT_TITLE,
+    },
+    {
+      ageHours: 1,
+      id: NEW_FRAGMENT_ID,
+      lifecycleStatus: "active",
+      rawText: "试着把窗边空出来，放一小盆绿植。",
+      slotId: "slot-02",
+      title: NEW_FRAGMENT_TITLE,
+    },
+    {
+      ageHours: 120,
+      completionStatus: "completed",
+      id: COMPLETED_FRAGMENT_ID,
+      lifecycleStatus: "active",
+      rawText: "已经整理并走完的路线。",
+      slotId: "slot-03",
+      title: COMPLETED_FRAGMENT_TITLE,
+    },
+    {
+      ageHours: 360,
+      id: ARCHIVED_FRAGMENT_ID,
+      lifecycleStatus: "archived",
+      rawText: "以后也许还会重新拿出来。",
+      slotId: null,
+      title: ARCHIVED_FRAGMENT_TITLE,
+    },
+  ]);
   await page.reload();
   await expectSingleCompanion(page, "cat");
-  await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
 
-  await sendCompanionMessage(page, "我该看看什么？");
-  let chat = page.getByRole("dialog", { name: "花园伙伴" });
-  const oldRecommendation = chat.locator(`article[data-fragment-id="${OLD_FRAGMENT_ID}"]`);
+  let dialog = await openCompanionFromButton(page);
+  let main = getNpcScreen(dialog, "伙伴主菜单");
+  await main.getByRole("button", { name: "看看我的花园近况", exact: true }).click();
+  const summary = getNpcScreen(dialog, "花园近况");
+  await expect(
+    summary.getByText("现在有 2 株植物正在生长，还有 1 株正在休息。", { exact: true }),
+  ).toBeVisible();
+  await expect(summary).toContainText("你已经让 1 株植物永久盛开了。");
+  await expect(summary).toContainText("还有 1 株内容已经封存，仍然保留在卡片里。");
+  await summary.getByRole("button", { name: "看看休眠植物", exact: true }).click();
+
+  const dormantList = getNpcScreen(dialog, "休眠植物");
+  await expect(dormantList).toContainText(OLD_FRAGMENT_TITLE);
+  await expect(dormantList).not.toContainText(NEW_FRAGMENT_TITLE);
+  await expect(dormantList).not.toContainText(ARCHIVED_FRAGMENT_TITLE);
+  const dormantOpenButton = dormantList.getByRole("button").filter({
+    hasText: OLD_FRAGMENT_TITLE,
+  });
+  await dormantOpenButton.press("Enter");
+
+  const detail = page.getByRole("dialog", { name: OLD_FRAGMENT_TITLE });
+  await expect(detail).toBeVisible();
+  await expect(detail.getByText("活跃", { exact: true }).first()).toBeVisible();
+  const openedState = await readFragmentPersistenceState(page, OLD_FRAGMENT_ID);
+  expect(openedState.lifecycleStatus).toBe("active");
+  expect(openedState.events.filter((event) => event === "viewed")).toHaveLength(1);
+  expect(openedState.events.filter((event) => event === "restored")).toHaveLength(1);
+  expect(openedState.recommendations).toEqual([]);
+  await detail.getByRole("button", { name: "关闭详情" }).click();
+
+  dialog = await openCompanionFromButton(page);
+  main = getNpcScreen(dialog, "伙伴主菜单");
+  await main.getByRole("button", { name: "更多", exact: true }).click();
+  const more = getNpcScreen(dialog, "伙伴更多选项");
+  await more.getByRole("button", { name: "告诉我休眠、完成和封存是什么", exact: true }).click();
+  const lifecycle = getNpcScreen(dialog, "生命周期规则");
+  await expect(lifecycle).toContainText("72 小时");
+  await expect(lifecycle).toContainText("植物不会死亡");
+  await expect(lifecycle).toContainText("永久盛开");
+  await expect(lifecycle).toContainText("释放植物槽位");
+  await lifecycle.getByRole("button", { name: "返回", exact: true }).click();
+  await expect(getNpcScreen(dialog, "伙伴主菜单")).toBeVisible();
+  await dialog.getByRole("button", { name: "关闭花园伙伴" }).click();
+  await expect(page.locator("canvas")).toHaveCount(1);
+
+  expectCleanRuntime(observations);
+});
+
+test("requests recommendations only on demand and persists opened and dismissed results", async ({
+  context,
+  page,
+}) => {
+  const observations = observeRuntime(page);
+  await clearIndexedDb(context, page);
+  await page.goto("/garden");
+  await chooseCompanion(page, "猫");
+  await seedFragments(page, [
+    {
+      ageHours: 240,
+      id: OLD_FRAGMENT_ID,
+      lifecycleStatus: "dormant",
+      rawText: "那天绕开大路，沿着河边慢慢走了一圈。",
+      slotId: "slot-01",
+      title: OLD_FRAGMENT_TITLE,
+    },
+    {
+      ageHours: 1,
+      id: NEW_FRAGMENT_ID,
+      lifecycleStatus: "active",
+      rawText: "试着把窗边空出来，放一小盆绿植。",
+      slotId: "slot-02",
+      title: NEW_FRAGMENT_TITLE,
+    },
+  ]);
+  await page.reload();
+  await expectSingleCompanion(page, "cat");
+  await expect(page.getByText("今天要不要看看一株以前种下的植物？")).toHaveCount(0);
+
+  let dialog = await openCompanionFromButton(page);
+  let main = getNpcScreen(dialog, "伙伴主菜单");
+  await main.getByRole("button", { name: "帮我找一株值得重新看看的植物", exact: true }).click();
+  let recommendationResult = getNpcScreen(dialog, "回看推荐");
+  let oldRecommendation = recommendationResult.locator(
+    `article[data-fragment-id="${OLD_FRAGMENT_ID}"]`,
+  );
   await expect(oldRecommendation).toContainText(OLD_FRAGMENT_TITLE);
   await expect(oldRecommendation).not.toContainText(NEW_FRAGMENT_TITLE);
+
+  await page.reload();
+  await expectSingleCompanion(page, "cat");
+  dialog = await openCompanionFromButton(page);
+  main = getNpcScreen(dialog, "伙伴主菜单");
+  await main.getByRole("button", { name: "帮我找一株值得重新看看的植物", exact: true }).click();
+  recommendationResult = getNpcScreen(dialog, "回看推荐");
+  oldRecommendation = recommendationResult.locator(
+    `article[data-fragment-id="${OLD_FRAGMENT_ID}"]`,
+  );
+  await expect(oldRecommendation).toContainText(OLD_FRAGMENT_TITLE);
   await oldRecommendation.getByRole("button", { name: "去看看", exact: true }).click();
 
-  const oldDetail = page.getByRole("dialog", { name: OLD_FRAGMENT_TITLE });
-  await expect(oldDetail).toBeVisible();
-  await expect(oldDetail.getByText("活跃", { exact: true }).first()).toBeVisible();
+  const detail = page.getByRole("dialog", { name: OLD_FRAGMENT_TITLE });
+  await expect(detail).toBeVisible();
   const openedState = await readFragmentPersistenceState(page, OLD_FRAGMENT_ID);
   expect(openedState.lifecycleStatus).toBe("active");
   expect(openedState.events.filter((event) => event === "viewed")).toHaveLength(1);
@@ -387,40 +539,44 @@ test("recommends an eligible old fragment, opens it once, and dismisses without 
   expect(openedState.recommendations).toHaveLength(1);
   expect(openedState.recommendations[0]?.openedAt).not.toBeNull();
   expect(openedState.recommendations[0]?.dismissedAt).toBeNull();
-  await oldDetail.getByRole("button", { name: "关闭详情" }).click();
+  await detail.getByRole("button", { name: "关闭详情" }).click();
 
-  await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
-  await sendCompanionMessage(page, "推荐一条以前的想法");
-  chat = page.getByRole("dialog", { name: "花园伙伴" });
-  await expect(chat.getByText(RECOMMENDATION_UNAVAILABLE, { exact: true })).toBeVisible();
-  await expect(chat.locator(`article[data-fragment-id="${OLD_FRAGMENT_ID}"]`)).toHaveCount(0);
+  dialog = await openCompanionFromButton(page);
+  main = getNpcScreen(dialog, "伙伴主菜单");
+  await main.getByRole("button", { name: "帮我找一株值得重新看看的植物", exact: true }).click();
+  recommendationResult = getNpcScreen(dialog, "回看推荐");
+  await expect(
+    recommendationResult.getByText("现在没有特别适合回看的植物。你也可以直接去卡片模式里看看。", {
+      exact: true,
+    }),
+  ).toBeVisible();
 
-  await seedFragments(
-    page,
-    [
-      {
-        ageHours: 168,
-        id: SECOND_OLD_FRAGMENT_ID,
-        lifecycleStatus: "dormant",
-        rawText: "把剩下的布料做成一个可以随手收纳的小袋子。",
-        slotId: "slot-03",
-        title: SECOND_OLD_FRAGMENT_TITLE,
-      },
-    ],
-    false,
-  );
+  await seedFragments(page, [
+    {
+      ageHours: 168,
+      id: SECOND_OLD_FRAGMENT_ID,
+      lifecycleStatus: "dormant",
+      rawText: "把剩下的布料做成一个可以随手收纳的小袋子。",
+      slotId: "slot-03",
+      title: SECOND_OLD_FRAGMENT_TITLE,
+    },
+  ]);
   const secondBefore = await readFragmentPersistenceState(page, SECOND_OLD_FRAGMENT_ID);
-  await page.reload();
-  await expectSingleCompanion(page, "cat");
-  await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
-  chat = page.getByRole("dialog", { name: "花园伙伴" });
-  await sendCompanionMessage(page, "带我回顾一下");
-  const secondRecommendation = chat.locator(
+  await recommendationResult.getByRole("button", { name: "返回", exact: true }).click();
+  main = getNpcScreen(dialog, "伙伴主菜单");
+  await main.getByRole("button", { name: "帮我找一株值得重新看看的植物", exact: true }).click();
+  recommendationResult = getNpcScreen(dialog, "回看推荐");
+  const secondRecommendation = recommendationResult.locator(
     `article[data-fragment-id="${SECOND_OLD_FRAGMENT_ID}"]`,
   );
   await expect(secondRecommendation).toContainText(SECOND_OLD_FRAGMENT_TITLE);
   await secondRecommendation.getByRole("button", { name: "先不用", exact: true }).click();
   await expect(secondRecommendation).toHaveCount(0);
+  await expect(
+    recommendationResult.getByText("好，先不用看它。它会继续留在花园里，想看的时候再回来就好。", {
+      exact: true,
+    }),
+  ).toBeVisible();
 
   const dismissedState = await readFragmentPersistenceState(page, SECOND_OLD_FRAGMENT_ID);
   expect(dismissedState.lifecycleStatus).toBe(secondBefore.lifecycleStatus);
@@ -429,14 +585,53 @@ test("recommends an eligible old fragment, opens it once, and dismisses without 
   expect(dismissedState.recommendations).toHaveLength(1);
   expect(dismissedState.recommendations[0]?.openedAt).toBeNull();
   expect(dismissedState.recommendations[0]?.dismissedAt).not.toBeNull();
+  await recommendationResult.getByRole("button", { name: "离开", exact: true }).click();
+  await expect(page.locator("canvas")).toHaveCount(1);
 
   expectCleanRuntime(observations);
 });
 
-test("supports the same required onboarding path with the dog visual", async ({
-  context,
-  page,
-}) => {
+test("reuses the existing text creation flow from the NPC", async ({ context, page }) => {
+  const observations = observeRuntime(page);
+  await clearIndexedDb(context, page);
+  await page.goto("/garden");
+  await chooseCompanion(page, "猫");
+  await expectSingleCompanion(page, "cat");
+  const beforeCreate = await readFragmentGardenPersistence(page);
+
+  const dialog = await openCompanionFromButton(page);
+  await getNpcScreen(dialog, "伙伴主菜单")
+    .getByRole("button", { name: "帮我种下一个新想法", exact: true })
+    .click();
+
+  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
+  await expect(createDialog).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await createDialog.getByLabel("标题（可选）").fill(NPC_CREATED_TITLE);
+  await createDialog.getByLabel("内容").fill(NPC_CREATED_TEXT);
+  await createDialog.getByRole("button", { name: "种下", exact: true }).click();
+  await expect(createDialog).toBeHidden();
+
+  await expect(page.getByTestId("garden-interaction-status")).toHaveText(
+    "已经种下了。以后再回来看看，它也许会慢慢长出新的方向。",
+  );
+  await expect(page.getByRole("button", { name: `打开碎片：${NPC_CREATED_TITLE}` })).toBeVisible();
+
+  const persistence = await readFragmentGardenPersistence(page);
+  const fragment = persistence.fragments.find(({ title }) => title === NPC_CREATED_TITLE);
+  expect(fragment).toMatchObject({ contentType: "text", rawText: NPC_CREATED_TEXT });
+  expect(persistence.plants.filter(({ fragmentId }) => fragmentId === fragment?.id)).toHaveLength(
+    1,
+  );
+  expect(persistence.chatMessages).toEqual(beforeCreate.chatMessages);
+  expect(await page.locator("canvas").count()).toBeLessThanOrEqual(1);
+  await page.getByRole("button", { name: "花园模式", exact: true }).click();
+  await expectSingleCompanion(page, "cat");
+  await expect(page.locator("canvas")).toHaveCount(1);
+  expectCleanRuntime(observations);
+});
+
+test("uses identical fixed NPC menus for the dog companion", async ({ context, page }) => {
   const observations = observeRuntime(page);
   await clearIndexedDb(context, page);
   await page.goto("/garden");
@@ -447,10 +642,16 @@ test("supports the same required onboarding path with the dog visual", async ({
   await expect(onboarding).toBeHidden();
   await expectSingleCompanion(page, "dog");
   await expect(page.locator("canvas")).toHaveCount(1);
-  await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
-  await expect(
-    page.getByRole("dialog", { name: "花园伙伴" }).getByText(WELCOME_MESSAGE, { exact: true }),
-  ).toBeVisible();
+
+  const dialog = await openCompanionFromButton(page);
+  const main = getNpcScreen(dialog, "伙伴主菜单");
+  await expectMenuLabels(main, MAIN_OPTION_LABELS);
+  await main.getByRole("button", { name: "更多", exact: true }).click();
+  await expectMenuLabels(getNpcScreen(dialog, "伙伴更多选项"), MORE_OPTION_LABELS);
+  await expect(dialog.locator("input, textarea")).toHaveCount(0);
+  await expect(dialog.getByTestId("companion-mode")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 
   expectCleanRuntime(observations);
 });

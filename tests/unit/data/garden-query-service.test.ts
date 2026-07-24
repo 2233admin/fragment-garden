@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FragmentGardenDatabase } from "../../../data/db";
 import { FragmentRepository } from "../../../data/repositories/fragment-repository";
 import { PlantRepository } from "../../../data/repositories/plant-repository";
-import { queryGardenPlantSnapshot } from "../../../services/garden-query-service";
+import {
+  queryGardenPlantSnapshot,
+  queryGardenSummary,
+} from "../../../services/garden-query-service";
 import { createStageTwoFragment, createStageTwoPlant } from "./stage-two-fixtures";
 
 let database: FragmentGardenDatabase;
@@ -63,5 +66,32 @@ describe("queryGardenPlantSnapshot", () => {
       unplacedPlantCount: 1,
     });
     expect(snapshot.plants.map((plant) => plant.title)).toEqual(["第一株"]);
+  });
+});
+
+describe("queryGardenSummary", () => {
+  it("does not expose deleted content in NPC garden counts", async () => {
+    await database.fragments.bulkAdd([
+      createStageTwoFragment({ id: "active", lifecycleStatus: "active" }),
+      createStageTwoFragment({ id: "dormant", lifecycleStatus: "dormant" }),
+      createStageTwoFragment({
+        id: "completed",
+        lifecycleStatus: "active",
+        completionStatus: "completed",
+      }),
+      createStageTwoFragment({ id: "archived", lifecycleStatus: "archived" }),
+      createStageTwoFragment({
+        id: "deleted-completed",
+        lifecycleStatus: "deleted",
+        completionStatus: "completed",
+      }),
+    ]);
+
+    await expect(queryGardenSummary(database)).resolves.toEqual({
+      activeCount: 2,
+      dormantCount: 1,
+      completedCount: 1,
+      archivedCount: 1,
+    });
   });
 });

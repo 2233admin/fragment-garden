@@ -46,4 +46,5 @@ export async function expectSingleCompanion(
 
   await expect(gardenHost).toHaveAttribute("data-companion-count", "1");
   await expect(gardenHost).toHaveAttribute("data-companion-type", companionType);
+  await expect(gardenHost).toHaveAttribute("aria-busy", "false");
 }

@@ -10,8 +10,6 @@ const IMPORTED_TITLE = "把安静角落整理成一座小花园";
 const IMPORTED_SUMMARY = "一篇关于整理阳台角落并种下耐阴植物的笔记。";
 const IMPORTED_CONTENT = "先清理角落，再根据日照选择植物。保留一把椅子，让这里也能用来阅读。";
 const USER_EDITED_CONTENT = "这是我在读取失败后补写的正文，后续重试不能覆盖。";
-const COMPLETED_COMPANION_MESSAGE = "链接内容读取完成，已经更新到这株植物里。";
-const SAVED_COMPANION_MESSAGE = "链接已经先种下了，我正在帮你读取内容。";
 
 type RuntimeObservations = {
   pageErrors: string[];
@@ -383,13 +381,10 @@ test("failed link remains local, retries automatically once, then succeeds manua
   expectCleanRuntime(observations);
 });
 
-test("companion IMPORT_LINK uses the same local fragment and persists one completion notice", async ({
-  context,
-  page,
-}) => {
+test("NPC new-idea action reuses the existing link creation flow", async ({ context, page }) => {
   const observations = observeRuntime(page);
   const trace = await mockLinkImportRoutes(page, {
-    onStart: ({ callIndex }) => pendingStartResponse(`companion-task-${callIndex}`),
+    onStart: ({ callIndex }) => pendingStartResponse(`npc-task-${callIndex}`),
     onProgress: () => completedProgressResponse(),
   });
   await clearFragmentGardenIndexedDb(context, page, requireBaseURL());
@@ -399,29 +394,34 @@ test("companion IMPORT_LINK uses the same local fragment and persists one comple
   await expect(page.locator("canvas")).toHaveCount(1);
 
   await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
-  let chat = page.getByRole("dialog", { name: "花园伙伴" });
-  await chat.getByLabel("想问些什么？").fill(`帮我种下这个链接 ${SOURCE_URL}`);
-  await chat.getByRole("button", { name: "发送", exact: true }).click();
+  const npc = page.getByRole("dialog", { name: "花园伙伴" });
+  await npc.getByRole("button", { name: "帮我种下一个新想法", exact: true }).click();
 
+  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
+  await expect(createDialog).toBeVisible();
+  await createDialog.getByRole("button", { name: "链接", exact: true }).click();
   const disclosure = page.getByRole("dialog", {
     name: "读取链接前，请先确认",
   });
   await expect(disclosure).toBeVisible();
   await disclosure.getByRole("button", { name: "同意并继续", exact: true }).click();
 
-  chat = page.getByRole("dialog", { name: "花园伙伴" });
-  await expect(chat).toBeVisible();
-  await expect(chat.getByText(SAVED_COMPANION_MESSAGE, { exact: true })).toBeVisible();
-  await expect(chat.getByText(COMPLETED_COMPANION_MESSAGE, { exact: true })).toHaveCount(1);
+  const linkDialog = page.getByRole("dialog", { name: "种下链接碎片" });
+  await linkDialog.getByLabel("链接地址").fill(SOURCE_URL);
+  await linkDialog.getByRole("button", { name: "种下链接", exact: true }).click();
+
+  await expect(linkDialog).toBeHidden();
+  await expect(page.getByTestId("garden-interaction-status")).toContainText(
+    "已经种下了。以后再回来看看，它也许会慢慢长出新的方向。",
+  );
   await expect.poll(() => trace.startUrls.length).toBe(1);
   await expect.poll(() => trace.progressTaskIds.length).toBe(1);
-  await expect(page.locator("canvas")).toHaveCount(1);
+  await expect(page.locator("canvas")).toHaveCount(0);
 
-  const completionMessage = chat
-    .getByText(COMPLETED_COMPANION_MESSAGE, { exact: true })
-    .locator("xpath=ancestor::article");
-  await completionMessage.getByRole("button", { name: "打开这株植物", exact: true }).click();
   const detail = page.getByRole("dialog", { name: IMPORTED_TITLE });
+  const card = page.getByRole("button", { name: `打开碎片：${IMPORTED_TITLE}` });
+  await expect(card).toBeVisible();
+  await card.click();
   await expect(detail).toBeVisible();
   await expect(detail.getByText(IMPORTED_SUMMARY, { exact: true })).toBeVisible();
   await expect(
@@ -434,17 +434,13 @@ test("companion IMPORT_LINK uses the same local fragment and persists one comple
   await page.reload();
   await completeCompanionOnboardingIfNeeded(page);
   await expect(page.locator("canvas")).toHaveCount(1);
-  await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();
-  chat = page.getByRole("dialog", { name: "花园伙伴" });
-  await expect(chat.getByText(COMPLETED_COMPANION_MESSAGE, { exact: true })).toHaveCount(1);
-  await expect(chat.getByText(SAVED_COMPANION_MESSAGE, { exact: true })).toHaveCount(1);
 
   const persisted = await readFragmentGardenPersistence(page);
   expect(persisted.fragments).toHaveLength(1);
   expect(persisted.plants).toHaveLength(1);
   expect(persisted.externalLinkImports).toHaveLength(1);
-  expect(
-    persisted.chatMessages.filter((message) => message.content === COMPLETED_COMPANION_MESSAGE),
-  ).toHaveLength(1);
+  expect(persisted.chatMessages.some((message) => message.content.includes("链接已经先种下"))).toBe(
+    false,
+  );
   expectCleanRuntime(observations);
 });

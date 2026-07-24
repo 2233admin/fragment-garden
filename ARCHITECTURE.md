@@ -90,7 +90,9 @@ Next.js Route Handlers
 OpenAI API
 ```
 
-上图中的 Route Handlers 和 OpenAI 是后续目标架构。阶段 6 的 Chatbot 已完成本地外壳，但只使用确定性本地回复引擎，不存在 `/api/ai/chat` 请求，也不读取链接、图片或语音。
+阶段 7B 已启用受限的真实 AI Chatbot。伙伴只通过服务端 `/api/companion/respond` 调用 OpenAI Responses
+API；API Key 不进入浏览器，响应不暴露原始 provider 数据。阶段 6 的本地确定性引擎仍作为基础模式和
+服务不可用时的明确降级路径。图片、语音、Embedding、相似碎片和花丛仍属于后续阶段。
 
 ---
 
@@ -195,6 +197,13 @@ Domain 不依赖 React、Phaser 或 Dexie。
 - 输入输出校验；
 - 超时和错误处理。
 
+阶段 7B 的 `POST /api/companion/respond` 是固定接口，不是通用代理。它从服务端环境读取
+`OPENAI_API_KEY` 和 `OPENAI_MODEL`，使用官方 Responses API、`store: false`、45 秒超时和约 600 token
+输出上限；客户端不能提交模型、Base URL、Prompt、工具定义或任意 metadata。请求上下文限制为最近最多
+20 条有效消息（单条最多 4,000、总计最多 12,000 字符）、最小花园统计和最多 3 条允许打开的碎片。
+模型每回合最多选择一个严格校验的 `recommend_fragment`、`open_fragment` 或 `import_link` 工具；
+工具由客户端现有本地 Service 执行，Route 不直接写 Dexie。
+
 服务端接口不得直接修改浏览器数据库。
 
 ---
@@ -207,6 +216,7 @@ fragment-garden/
 │   ├── page.tsx
 │   ├── garden/page.tsx
 │   ├── api/
+│   │   ├── companion/respond/route.ts
 │   │   ├── ai/
 │   │   │   ├── analyze-content/route.ts
 │   │   │   ├── analyze-image/route.ts
@@ -247,6 +257,11 @@ fragment-garden/
 │   └── repositories/
 │
 ├── services/
+├── lib/server/openai/
+│   ├── openai-client.ts
+│   ├── companion-tools.ts
+│   ├── companion-schemas.ts
+│   └── companion-errors.ts
 ├── validation/
 ├── public/assets/
 │   ├── map/
@@ -277,6 +292,8 @@ type Settings = {
   lastOpenedAt: string | null;
   lastRecommendationDate: string | null;
   getNoteDisclosureAcceptedAt: string | null;
+  openAiDisclosureAcceptedAt?: string | null;
+  companionAiMode?: "local" | "openai";
   schemaVersion: number;
 };
 ```
@@ -292,6 +309,10 @@ type Settings = {
 
 阶段 7A 使用 `getNoteDisclosureAcceptedAt` 记录用户首次同意第三方处理的时间。未同意时不启动
 GetNote；保存同意状态失败时不能假装已经同意。清空本地数据会删除该状态。
+
+阶段 7B 使用独立的 `openAiDisclosureAcceptedAt` 和 `companionAiMode`。V3 旧 Settings 缺少这两个
+普通字段时由查询层补 `null` 与 `"local"` 默认值，不增加无意义的数据库版本。GetNote 同意不代表
+OpenAI 同意；聊天默认使用本地引擎，用户明确同意后才切换到 AI 模式。
 
 ### 6.2 Fragment
 
@@ -505,6 +526,10 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  source?: "local" | "openai" | "tool" | "system";
+  status?: "pending" | "completed" | "failed";
+  clientRequestId?: string;
+  errorCode?: string | null;
 };
 ```
 
@@ -512,6 +537,10 @@ type ChatMessage = {
 `createdAt`、`id` 稳定排序；发送 Service 在一个事务中保存 user 和 assistant 消息，并使用单调时间保证刷新后的阅读顺序。伙伴回复或推荐写入失败时，整个发送事务回滚，不伪造已保存的回复。
 阶段 7A 的链接完成或失败消息可通过 `fragmentId` 指向同一 Fragment，刷新后仍可打开共用详情；
 普通聊天与旧消息使用 `null`。
+
+阶段 7B 的 user 消息先本地写入，`clientRequestId` 用于幂等和重试；pending 请求不会因刷新而无限重发，
+失败只标记为 failed。ChatMessage 不保存 Prompt、API Key、reasoning、完整 provider 响应或 response id。
+本地聊天记录是唯一会话事实来源，不依赖 OpenAI 远端会话。
 
 ### 6.10 ExternalLinkImport
 
@@ -903,7 +932,7 @@ type CompanionResponse = {
 `LocalCompanionResponseEngine` 只接收用户文本，不接收 `companionType`，不访问 Dexie、Phaser、React、
 网络或外部模型。阶段 6 建立了使用帮助、真实成长规则、72 小时休眠规则、旧碎片推荐和有界 fallback；
 阶段 7A 只增加确定性的 URL 识别与 `IMPORT_LINK` Action。成长说明会明确当前支持文字补充和链接碎片，
-不声称图片或语音已经实现。
+不声称图片或语音已经实现。阶段 7B 保留该引擎作为基础模式和服务降级路径。
 
 回复引擎只产生 action，应用 Service 或受限 Action 执行层负责执行：
 
@@ -930,6 +959,29 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 打开推荐时，`openFragmentRecommendation` 在单一事务中把 Recommendation 标记为 opened，并复用
 `recordFragmentViewed` 写入 viewed、恢复 dormant 内容，再由 React 打开共用
 `FragmentDetailDialog`，不会创建伙伴专用详情。忽略只写 `dismissedAt`，不改变 Fragment、Plant、生命周期、成长分或事件。任一事务步骤失败都回滚，卡片模式和普通详情入口继续可用。
+
+### 9.5 阶段 7B 真实 AI Chatbot 边界
+
+真实 AI 通过 `POST /api/companion/respond` 接入。服务端使用固定版本的 developer Prompt
+`companion-v1`、官方 Responses API、服务端 `OPENAI_MODEL`、`store: false`、45 秒超时和约 600 token
+输出上限；不使用 Conversation API、`previous_response_id`、streaming 或递归 Agent Loop。Prompt 不接收
+`companionType`，猫狗因此共用完全相同的模型、语气、工具和行为。
+
+上下文由纯函数 `buildCompanionContext` 构建：仅保留当前本地会话最近 20 条有效 user/assistant 文本消息，
+单条最多 4,000 字符、总计最多 12,000 字符，并附最小 `GardenSummary` 与最多 3 条
+`allowedOpenFragments` 元数据。不发送全部 Fragment、正文、taskId、externalNoteId 或网页提取指令。
+
+模型只可调用三个严格工具，且每回合最多一个：
+
+- `recommend_fragment`：客户端调用既有推荐 Service；
+- `open_fragment`：服务端和客户端都验证 fragment id 属于允许列表，再打开共用详情；
+- `import_link`：客户端复用阶段 7A 的 URL 校验、披露、查重和本地优先导入流程；服务端还要求 URL
+  能在本次会话的用户消息中找到，避免模型凭空触发远端读取。
+
+工具执行结果和完成消息由客户端本地 Service 确定性产生，模型未经成功结果不得声称操作完成。OpenAI
+启用前必须单独获得用户披露同意；未配置、禁用、超时、限流或模型不可用时保留用户消息并允许切回
+`LocalCompanionResponseEngine`，不伪装成 AI 成功。链接只有标题而没有摘要或正文时，伙伴必须明确说明
+内容不足，不能根据平台或 URL 猜测正文。
 
 ---
 
@@ -1020,41 +1072,29 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 }
 ```
 
-### 11.5 未来 AI Chatbot（尚未实现）
+### 11.5 真实 AI Chatbot（阶段 7B 已完成）
 
-`POST /api/ai/chat`
+`POST /api/companion/respond` 是唯一的伙伴 AI Route。请求只允许 `user` / `assistant` 文本消息、
+最小 `GardenSummary` 和最多 3 条 `allowedOpenFragments`；客户端不能提交 system/developer 消息、模型、
+Prompt、工具定义、API Key、taskId、externalNoteId 或原始数据库对象。公共响应只是一条文本消息或一个
+经白名单和 Zod 校验的工具调用，不返回 OpenAI 原始 Response、headers、token 或 reasoning。
 
-请求只包含：
+服务端调用官方 `client.responses.create`，固定 `store: false`、`parallel_tool_calls: false`、
+`tool_choice: "auto"`、45 秒超时和约 600 token 输出上限。模型从服务端 `OPENAI_MODEL` 读取，不能由客户端
+指定模型或 Base URL。每回合最多接受一个工具调用；允许的工具只有：
 
-- 当前问题；
-- 最近少量聊天；
-- 本地检索出的最多 5 条碎片；
-- 当前推荐；
-- 必要的花园状态摘要。
+- `recommend_fragment`，执行阶段 6 的确定性推荐 Service；
+- `open_fragment`，仅允许打开请求中白名单里的 Fragment；
+- `import_link`，复用阶段 7A 的 URL 校验、披露、查重和本地优先导入 Service。
 
-返回：
+工具调用不会再次自动进入模型循环。客户端执行成功后才写确定性完成消息；失败不会伪造成功。真实模式
+必须先取得独立 OpenAI 披露同意，默认模式仍为 local。`openai_disabled`、`missing_configuration`、
+`authentication_failed`、`rate_limited`、`model_unavailable`、`request_timeout`、`invalid_model_response`、
+`provider_error` 和 `tool_validation_failed` 统一为安全错误码；可恢复的服务错误提供重试或基础模式。
 
-```ts
-{
-  message: string;
-  suggestedActions: Array<{
-    type:
-      | "open_fragment"
-      | "show_similarity"
-      | "explain_growth"
-      | "none";
-    fragmentId?: string;
-  }>;
-}
-```
-
-该接口仍属于阶段 7B 的后续目标，阶段 7A 没有实现或调用真实模型。即使未来接入模型，Chatbot
-仍只能建议动作，不能直接写数据库。
-
-阶段 7A 在 `LocalCompanionResponseEngine` 中增加确定性的 URL 意图识别，只返回
-`{ type: "IMPORT_LINK", url }`。回复引擎本身不读 Dexie、不调用 Route，也不访问网络；Action 执行层
-与表单共用披露、查重、`createLocalLinkFragment` 和 ExternalLinkImportManager。猫狗继续使用同一
-Action 与文案。OpenAI Chat、模型工具调用和系统 Prompt 属于阶段 7B，尚未实现。
+`LocalCompanionResponseEngine` 仍是无网络基础模式，也是配置缺失时的明确降级路径。聊天消息先保存到
+本地 IndexedDB，使用 `clientRequestId` 幂等，刷新不会无限重发 pending；不保存 Prompt、Key、reasoning
+或远端会话 ID。若链接只有通用标题而无摘要和正文，伙伴只能说明内容不足，不得根据 URL 或平台猜测。
 
 ---
 
@@ -1268,6 +1308,9 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 - V2 到 V3 迁移和 ExternalLinkImport 事务回滚；
 - GetNote 固定客户端、int64、超时、错误映射与响应裁剪；
 - 轮询间隔、并发、恢复、自动/手动重试和终态通知防重；
+- `buildCompanionContext` 的消息、字符、花园摘要和允许打开列表边界；
+- Responses API 的 `store: false`、严格工具、单工具限制、模型错误和安全响应；
+- 本地与 OpenAI 模式切换、披露、幂等 request id、失败降级和刷新恢复；
 - 余弦相似度；
 - 推荐去重；
 - 备份校验。
@@ -1295,8 +1338,8 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 17. 伙伴 `IMPORT_LINK` 复用同一详情且通知不重复；
 18. 导出并恢复。
 
-GetNote 和未来真实 AI 在自动测试中使用 Mock，避免创建远端笔记、依赖真实账号、产生费用或引入
-平台波动。
+GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，避免创建远端笔记、依赖真实账号、
+产生费用或引入平台波动。真实 AI 冒烟测试不属于自动化测试。
 
 ---
 
@@ -1308,9 +1351,11 @@ GetNote 和未来真实 AI 在自动测试中使用 Mock，避免创建远端笔
 4. 鼠标移动与植物交互；
 5. 成长、休眠、完成和新想法；
 6. 猫狗选择与 Chatbot 外壳；
-7. 7A GetNote 链接导入；7B 真实 AI 内容分析；
+7. 7A GetNote 链接导入；7B 受限真实 AI 花园伙伴；
 8. 图片与语音；
 9. 相似碎片与花丛；
 10. 导入导出与完整回归测试。
 
 每阶段完成后必须测试并创建 Git commit。
+
+阶段 7B 已完成；阶段 8 图片与语音尚未开始，后续阶段不得提前实现。

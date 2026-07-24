@@ -50,14 +50,15 @@
 | 5 | 成长、休眠、完成与新想法 | 植物状态形成完整闭环 |
 | 6 | 伙伴选择与 Chatbot 外壳 | 可选择猫或狗并打开统一聊天面板 |
 | 7A | 链接碎片与 GetNoteConnector | 链接先本地保存，再异步读取并可恢复 |
-| 7B | 真实 AI 内容分析 | 受限模型分析与 Chatbot 工具调用 |
+| 7B | 真实 AI 花园伙伴 | Responses API、受限工具与本地降级 |
 | 8 | 图片与语音 | 图片分析和语音转写可用 |
 | 9 | 相似碎片与花丛 | AI 建议关联，用户确认后建立关系 |
 | 10 | 备份、回归与容错 | 可导入导出，关键流程有自动测试 |
 | 11 | 一周自测与 MVP 收口 | 根据真实使用结果修正产品 |
 
-当前阶段 7A 已完成，浏览器数据库为 V3，新增 ExternalLinkImport 并迁移 Settings 与 ChatMessage。
-阶段 7B 的真实 AI Chatbot、OpenAI 内容分析、Embedding、相似碎片和花丛尚未开始。
+当前阶段 7B 已完成，浏览器数据库仍为 V3，新增的 AI 模式字段通过默认值兼容旧 Settings。
+阶段 7A 的 GetNote 链接导入与阶段 7B 的真实 AI Chatbot 均已完成；阶段 8 图片与语音、Embedding、
+相似碎片和花丛尚未开始。
 
 ---
 
@@ -500,13 +501,7 @@ GETNOTE_LINK_IMPORT_ENABLED=true
 
 Key 不得发送到聊天或输出到终端。真实调用可能创建远端笔记，本阶段不自动删除。
 
-## 阶段 7B（尚未开始）
-
-阶段 7B 才接入真实 AI Chatbot、OpenAI 内容分析、模型工具调用、系统 Prompt 和受校验的结构化分析。
-阶段 7A 没有 OpenAI 请求、Embedding、相似碎片、花丛、图片或语音，也不把本地确定性回复描述成
-真实 AI。
-
-## 建议 commits
+## 阶段 7A 建议 commits
 
 ```text
 feat: add link fragment persistence
@@ -515,6 +510,45 @@ feat: add asynchronous link import workflow
 feat: support link imports from companion chat
 test: cover link import and GetNote fallbacks
 docs: document GetNote link import architecture
+```
+
+## 阶段 7B：真实 AI 花园伙伴（已完成）
+
+### 目标与范围
+
+阶段 7B 将阶段 6 的本地确定性聊天升级为可降级的真实 AI 伙伴，但不建立通用 Agent。实现范围为：
+
+- 服务端固定 `POST /api/companion/respond`，使用官方 OpenAI Responses API；
+- `OPENAI_API_KEY` 仅服务端读取，模型由 `OPENAI_MODEL` 配置，固定 `store: false`；
+- 最近最多 20 条有效消息、单条最多 4,000 字符、总计最多 12,000 字符的上下文边界；
+- 每回合最多一个严格校验工具：`recommend_fragment`、`open_fragment`、`import_link`；
+- 工具由客户端已有推荐、详情和阶段 7A 链接 Service 执行，完成消息确定性写回；
+- OpenAI 独立披露、AI/基础模式切换、pending/failed 状态、request id 幂等和刷新恢复；
+- 未配置、禁用、超时、限流或模型不可用时保留消息并明确降级基础模式；
+- 空链接内容不由模型根据标题、平台或 URL 猜测；猫狗共用 Prompt、模型、工具和逻辑。
+
+阶段 7B 不包含图片、语音、Streaming、OpenAI 远端会话、递归 Agent、多工具并行、Embedding、相似碎片、
+花丛或阶段 8 的任何实现。
+
+### 验收
+
+- Context Builder、Prompt、Responses API 客户端、Route、工具白名单、错误映射和本地持久化均有单元测试；
+- Playwright 使用 Route Mock 覆盖普通回复、推荐/打开、import_link、失败降级和无障碍植物入口；
+- 标准 lint 能在合理时间结束，默认并行 E2E 不依赖临时单 worker；
+- `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run test`、`npm run test:e2e`、
+  `npm run build` 和 `npm ls phaser` 均通过；
+- 自动测试不调用真实 OpenAI 或 GetNote，不提交 `.env.local`、聊天数据、测试报告或真实链接内容。
+
+### 建议 commits
+
+```text
+fix: stabilize lint and garden e2e lifecycle
+feat: add server-only OpenAI companion
+feat: add restricted companion tool calling
+feat: add AI mode disclosure and fallback
+fix: restore accessible plant opening
+test: cover AI companion and tool flows
+docs: document real companion architecture
 ```
 
 ---

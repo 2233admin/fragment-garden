@@ -6,8 +6,8 @@
 
 1. 完成可以真实使用一周的本地 MVP；
 2. 花园具有人物移动和植物交互；
-3. 文字、链接、图片、语音和 AI 能力可以稳定工作；
-4. 后续增加云端账户时，不需要推翻核心业务逻辑。
+3. 文字、链接、规则型 NPC 和绑定 Fragment 的思维发芽边界清晰可靠；
+4. 后续增加多媒体或云端能力时，不需要推翻核心业务逻辑。
 
 核心职责：
 
@@ -46,7 +46,7 @@ MVP 阶段锁定 Phaser 3.90.0，不升级到 Phaser 4，不混用不同版本 A
 │   ├── 新建碎片
 │   ├── 卡片模式
 │   ├── 碎片详情
-│   ├── Chatbot
+│   ├── 规则型 NPC 对话与思维发芽结果
 │   ├── 图鉴
 │   └── 设置与导入导出
 │
@@ -65,7 +65,7 @@ MVP 阶段锁定 Phaser 3.90.0，不升级到 Phaser 4，不混用不同版本 A
 │   ├── 休眠规则
 │   ├── 网格、坐标转换与路线计算
 │   ├── 推荐规则
-│   ├── 相似度规则
+│   ├── 相似度规则（后续候选）
 │   └── 植物槽位规则
 │
 └── Dexie / IndexedDB
@@ -79,20 +79,41 @@ MVP 阶段锁定 Phaser 3.90.0，不升级到 Phaser 4，不混用不同版本 A
     ├── Chat 记录
     └── 设置
 
-Next.js Route Handlers
-├── 内容分析
-├── 图片理解
-├── 语音转写
-├── Embedding
-├── Chatbot
+Next.js Route Handlers（当前实现与后续候选）
+├── 内容分析（历史/候选）
+├── 图片理解（原阶段 8 候选）
+├── 语音转写（原阶段 8 候选）
+├── Embedding（原阶段 9 候选）
+├── 伙伴过渡 AI Route（阶段 7B 当前实现）
 └── 链接提取
     ↓
 OpenAI API
 ```
 
-阶段 7B 已启用受限的真实 AI Chatbot。伙伴只通过服务端 `/api/companion/respond` 调用 OpenAI Responses
-API；API Key 不进入浏览器，响应不暴露原始 provider 数据。阶段 6 的本地确定性引擎仍作为基础模式和
-服务不可用时的明确降级路径。图片、语音、Embedding、相似碎片和花丛仍属于后续阶段。
+阶段 7B 的技术实现已经验证了服务端 OpenAI Responses API、受限工具和本地降级，但它不是校准后的普通
+用户入口。当前代码仍保留开放 Chat UI、`/api/companion/respond`、ChatMessage 和三个工具作为过渡/开发
+调试基础设施；本次文档校准不删除它们。校准后的目标架构是：
+
+```text
+规则型 NPC 对话
+    ↓
+固定选项 / 本地 Service
+
+用户选中 Fragment
+    ↓
+Sprout Analysis Service
+    ↓
+本地信息充分性规则
+    ↓
+可选 OpenAI 增强
+    ↓
+结构化思维发芽建议
+    ↓
+用户确认保存
+```
+
+思维发芽只读取当前选中的 Fragment，AI 不访问 Dexie、不修改 Fragment；Phaser 只负责伙伴显示和点击事件。
+图片、语音、Embedding、相似碎片和花丛仍属于待重新规划的后续候选。
 
 ---
 
@@ -107,7 +128,8 @@ API；API Key 不进入浏览器，响应不暴露原始 provider 数据。阶�
 - 弹窗；
 - 卡片；
 - 搜索与筛选；
-- Chatbot 面板；
+- 规则型 NPC 固定对话面板、选项和模板数据；
+- Fragment 详情中的思维发芽结果、等待和错误状态；
 - 数据导入导出；
 - AI 状态反馈；
 - 通过 GameBridge 向 Phaser 发送数据。
@@ -149,7 +171,7 @@ Phaser 不负责：
 - 恢复活跃；
 - 推荐旧碎片；
 - 外部 URL 安全判断、规范化和临时标题；
-- 相似度阈值；
+- 相似度阈值（后续候选）；
 - 植物槽位分配；
 - 状态转换；
 - “生长自”关系。
@@ -178,13 +200,15 @@ Domain 不依赖 React、Phaser 或 Dexie。
 - 标记完成；
 - 从父碎片原子创建新想法及关系；
 - 完成唯一伙伴的首次选择并保存统一欢迎语；
+- 执行 NPC 固定 Action（推荐、近况、休眠查看、规则说明和种下新想法）；
+- 编排绑定 Fragment 的思维发芽、本地信息充分性判断和建议保存；
 - 原子保存本地聊天和推荐动作；
 - 创建每日非强制旧碎片推荐；
 - 打开或忽略推荐；
 - 原子创建本地链接碎片并检查重复；
 - 编排 GetNote 提交、轮询、恢复和重试；
-- 后台 AI 分析；
-- 相似候选生成；
+- 后台 AI 分析（历史/后续候选，思维发芽除外）；
+- 相似候选生成（后续候选）；
 - 备份恢复。
 
 ### 4.6 Route Handlers
@@ -197,12 +221,13 @@ Domain 不依赖 React、Phaser 或 Dexie。
 - 输入输出校验；
 - 超时和错误处理。
 
-阶段 7B 的 `POST /api/companion/respond` 是固定接口，不是通用代理。它从服务端环境读取
+现有阶段 7B 的 `POST /api/companion/respond` 是固定接口，不是通用代理。它从服务端环境读取
 `OPENAI_API_KEY` 和 `OPENAI_MODEL`，使用官方 Responses API、`store: false`、45 秒超时和约 600 token
 输出上限；客户端不能提交模型、Base URL、Prompt、工具定义或任意 metadata。请求上下文限制为最近最多
 20 条有效消息（单条最多 4,000、总计最多 12,000 字符）、最小花园统计和最多 3 条允许打开的碎片。
 模型每回合最多选择一个严格校验的 `recommend_fragment`、`open_fragment` 或 `import_link` 工具；
-工具由客户端现有本地 Service 执行，Route 不直接写 Dexie。
+工具由客户端现有本地 Service 执行，Route 不直接写 Dexie。这些是已完成的过渡能力。校准后的固定 NPC
+Action 不经过模型工具选择；未来 Sprout Analysis Route 只接受当前 Fragment 的受限字段并返回结构化建议。
 
 服务端接口不得直接修改浏览器数据库。
 
@@ -312,7 +337,8 @@ GetNote；保存同意状态失败时不能假装已经同意。清空本地数�
 
 阶段 7B 使用独立的 `openAiDisclosureAcceptedAt` 和 `companionAiMode`。V3 旧 Settings 缺少这两个
 普通字段时由查询层补 `null` 与 `"local"` 默认值，不增加无意义的数据库版本。GetNote 同意不代表
-OpenAI 同意；聊天默认使用本地引擎，用户明确同意后才切换到 AI 模式。
+OpenAI 同意；当前聊天实现默认使用本地引擎，用户明确同意后才切换到 AI 模式。它们是 7B 的过渡兼容字段，
+校准后的 NPC UI 不展示 AI/基础模式切换；未来只在思维发芽服务需要时重新定义同意范围。
 
 ### 6.2 Fragment
 
@@ -432,6 +458,10 @@ type FragmentEvent = {
 `text_added`、`reviewed`、`completed`、`child_fragment_created`、`archived` 和 `restored` 的 payload 都通过统一 Zod Schema 校验。`completed.outcome` trim 后为空时保存为 `null`，长度上限为 300 个字符。读取旧事件时使用安全解析；非法 payload 只跳过对应历史展示，不能让整个详情崩溃。产品界面不得直接假设任意 `Record` 一定包含某个字段。
 
 `dormant`、`reviewed`、`archived`、`restored`、`deleted` 和 `completed` 不增加成长分；完成由 `completionStatus` 决定永久盛开，而不是通过给成长分写入特殊大值。
+
+方向校准新增未来事件概念 `partner_suggestion_saved`（本次只写文档，不改数据库 Schema 或代码）。打开思维
+发芽、生成建议和换方向不增加成长分；只有用户确认保存建议时才记录该事件并增加 +1，同一 Fragment 按浏览器
+本地日期每天最多计分一次。建议写入补充历史并标记来源“伙伴建议”，不覆盖原文或自动执行动作。
 
 ### 6.5 Plant
 
@@ -618,6 +648,9 @@ Settings 内既有 `schemaVersion = 1` 是该记录自身的版本字段，不�
 
 同一种事件同一天最多计算一次成长分。
 
+图片、语音、加入花丛和相似关系对应的事件保留为未来候选；当前校准只要求已有文字/链接行为和未来
+`partner_suggestion_saved` 保存建议规则，不能因为文档中的表格就视为这些能力已经开放。
+
 ### 7.2 阶段
 
 ```text
@@ -740,6 +773,21 @@ relationType = grows_from
 详情查询安全解析完成结果、文字补充和父子关系：父详情展示发展出的新想法，子详情展示“生长自”的父标题，非法旧 payload 只跳过对应历史项。
 
 花园继续复用 `PlantViewModel` 和完整 `LOAD_GARDEN` diff：休眠改变 vitality，查看或复盘恢复 active，完成改变 stage，封存/删除移除植物，显式恢复或创建新想法时重新出现。Phaser 不参与任何生命周期计算或数据库写入。
+
+### 7.10 思维发芽边界（校准目标，尚未实现）
+
+思维发芽是思维层面的产品术语，不等同于植物视觉阶段发芽。入口位于共享 `FragmentDetailDialog`，不依赖
+Phaser 植物：active、dormant、completed、archived 和 `slotId = null` 的 Fragment 均可使用，deleted 不可使用。
+
+`SproutAnalysisService` 只接收当前选中 Fragment 的标题、原文、补充历史、链接摘要/原文、生命周期、完成状态
+和植物阶段。它先运行本地信息充分性规则；标题过短、正文/补充/下一步为空或链接没有摘要/原文时直接返回固定的
+信息不足结果，不调用 AI。信息充分时才可选调用服务端 AI，返回一个结构化结果：具体化方向、引导问题和一个
+允许动作（补充内容、记录下一步、发展成新想法、暂时保留或标记完成）。
+
+AI 不访问 Dexie、整个花园或其他 Fragment，也不直接修改 Fragment、执行动作或切换植物阶段。结果是临时建议，
+只有用户确认保存才写入补充历史并标记“伙伴建议”。未来 `partner_suggestion_saved` 事件按本地日期去重计分；
+dormant 保存后恢复 active，completed 保持永久盛开，archived 保持封存且不占槽位，deleted 不允许保存。该服务、
+事件和 API 本次只记录目标架构，不在本次文档校准中实现。
 
 ---
 
@@ -905,8 +953,10 @@ type GameToReactEvent =
 Bridge 为双向独立监听集合，两个方向不会接收到自己的事件。订阅可单独取消，销毁会清空全部监听；Strict Mode 重订阅不会产生重复到达处理。`PLAYER_STATE_CHANGED` 只在初始化、开始、停止、到达、取消或选择变化时发送，供 Canvas 容器更新非敏感诊断属性，不在 Phaser `update` 中逐帧发送，也不进入业务详情处理。
 
 伙伴点击不会触发人物寻路，也不传递 Settings、ChatMessage 或伙伴类型。Phaser 只发出无 payload 的
-`COMPANION_CLICKED`，React 打开与 Canvas 外“打开花园伙伴”按钮共用的聊天面板。这样即使 Phaser 渲染失败，键盘和屏幕阅读器用户仍可进入同一功能。
-两个聊天入口都会先取消尚未完成的植物交互，避免人物随后到达时把碎片详情叠加到聊天面板上。
+`COMPANION_CLICKED`。当前代码仍由 React 打开与 Canvas 外“打开花园伙伴”按钮共用的聊天面板；校准后的目标
+是在不改变 Bridge payload 的前提下改为规则型 NPC 对话面板。这样即使 Phaser 渲染失败，键盘和屏幕阅读器
+用户仍可进入同一功能。当前两个聊天入口都会先取消尚未完成的植物交互，避免人物随后到达时把碎片详情
+叠加到聊天面板上；目标 NPC 面板应保持同一取消行为。
 
 ### 9.3 Canvas 生命周期
 
@@ -914,7 +964,10 @@ Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡�
 
 异步 import 使用取消标记，避免 Strict Mode 或 HMR 留下孤立 Canvas。同一页面最多存在一个 Canvas。测试诊断属性由 GameBridge 的低频状态转换事件更新，只暴露人物坐标、移动状态和选中 plant id，不包含正文或附件，产品逻辑不依赖这些属性。
 
-### 9.4 阶段 6 本地 Chatbot 与推荐边界
+### 9.4 阶段 6 本地 Chatbot 与推荐边界（当前过渡实现）
+
+以下是阶段 6/7A 已完成的开放输入和本地 Action 技术事实，不是校准后的普通用户入口。目标形态由固定
+NPC 选项枚举触发本地 Service；不得把这些旧 Action 扩展成模型自由生成的通用工具。
 
 本地回复引擎是无状态纯 TypeScript：
 
@@ -960,7 +1013,10 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 `recordFragmentViewed` 写入 viewed、恢复 dormant 内容，再由 React 打开共用
 `FragmentDetailDialog`，不会创建伙伴专用详情。忽略只写 `dismissedAt`，不改变 Fragment、Plant、生命周期、成长分或事件。任一事务步骤失败都回滚，卡片模式和普通详情入口继续可用。
 
-### 9.5 阶段 7B 真实 AI Chatbot 边界
+### 9.5 阶段 7B 真实 AI Chatbot 边界（当前过渡实现）
+
+本节描述已完成的服务端 AI、安全边界和工具调用能力。开放聊天、AI/基础模式切换和三个工具暂时保留为
+不可见调试/迁移基础设施，校准后的普通用户不通过它们发起开放请求。
 
 真实 AI 通过 `POST /api/companion/respond` 接入。服务端使用固定版本的 developer Prompt
 `companion-v1`、官方 Responses API、服务端 `OPENAI_MODEL`、`store: false`、45 秒超时和约 600 token
@@ -983,6 +1039,29 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 `LocalCompanionResponseEngine`，不伪装成 AI 成功。链接只有标题而没有摘要或正文时，伙伴必须明确说明
 内容不足，不能根据平台或 URL 猜测正文。
 
+### 9.6 校准后的 NPC 与思维发芽目标架构（尚未实现）
+
+伙伴点击仍只通过无 payload 的 `COMPANION_CLICKED` 进入 React，但 React 目标打开的是固定 NPC 对话面板，
+而不是开放 Chatbot。面板只渲染版本化的台词、固定选项和本地模板数据：推荐旧碎片、花园近况、休眠查看、
+成长/生命周期说明、种下新想法、更多和离开。推荐与其他选项直接调用本地 Service，不经过 OpenAI 工具选择。
+
+思维发芽从共享 `FragmentDetailDialog` 发起，先显示“伙伴正在过来看看”的短暂等待状态：
+
+```text
+选中 Fragment
+→ Sprout Analysis Service
+→ 本地信息充分性规则
+→ 可选 OpenAI Route（只读当前 Fragment）
+→ 结构化单方向建议
+→ 用户确认保存到补充历史
+```
+
+AI 返回的建议必须通过 Zod 校验，且只包含具体化方向、引导问题和一个允许动作。AI 不访问 Dexie，不读取
+全园或无关内容，不直接修改 Fragment、执行动作或改变 Plant stage。OpenAI 不可用时由本地基础规则生成固定
+提示或基础结果；建议未被确认前不写库、不增加成长分。正式角色走到植物旁、观察动画和发芽特效均不属于当前
+MVP 校准。后续 Sprout Analysis 可以复用现有 server-only OpenAI client、错误规范化和披露边界，但不复用
+开放聊天入口，也不让模型自由选择阶段 7B 工具。
+
 ---
 
 ## 10. 创建碎片流程
@@ -996,19 +1075,21 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 → 写入 Plant
 → 写入 created Event
 → 花园立即显示幼苗
-→ 后台调用 AI
-→ 写入标题、摘要、关键词和 Embedding
-→ 本地计算相似度
-→ 生成 suggested relation
+→ （未来计划明确后才）执行对应的可选分析
 ```
 
-断网、AI、链接或图片处理失败时，碎片和植物仍然存在。
+本次校准后的核心闭环只要求本地保存和链接异步读取；当前创建流程不调用通用 AI。思维发芽是用户随后在
+明确 Fragment 详情中主动发起的独立分析，不是创建碎片的隐式步骤。图片、语音、Embedding 和相似关系仍是
+待重新规划的候选。断网、AI 或链接处理失败时，碎片和植物仍然存在。
 
 ---
 
 ## 11. AI 接口
 
-### 11.1 内容分析
+本节的通用内容、图片、语音和 Embedding Route 是历史记录或后续候选，不是校准后 MVP 的默认入口。当前
+创建流程不自动调用这些接口；新的 AI 能力必须通过 11.6 的 Sprout Analysis Service 绑定明确 Fragment。
+
+### 11.1 内容分析（历史/后续候选）
 
 `POST /api/ai/analyze-content`
 
@@ -1038,7 +1119,7 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 }
 ```
 
-### 11.2 图片分析
+### 11.2 图片分析（原阶段 8 候选，暂缓）
 
 `POST /api/ai/analyze-image`
 
@@ -1051,7 +1132,7 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 }
 ```
 
-### 11.3 语音转写
+### 11.3 语音转写（原阶段 8 候选，暂缓）
 
 `POST /api/ai/transcribe-audio`
 
@@ -1061,7 +1142,7 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 }
 ```
 
-### 11.4 Embedding
+### 11.4 Embedding（原阶段 9 候选，暂缓）
 
 `POST /api/ai/embedding`
 
@@ -1072,7 +1153,7 @@ Settings、Fragment 和 Recommendation 的同一事务内检查并写入日期�
 }
 ```
 
-### 11.5 真实 AI Chatbot（阶段 7B 已完成）
+### 11.5 真实 AI Chatbot（阶段 7B 当前技术实现，过渡）
 
 `POST /api/companion/respond` 是唯一的伙伴 AI Route。请求只允许 `user` / `assistant` 文本消息、
 最小 `GardenSummary` 和最多 3 条 `allowedOpenFragments`；客户端不能提交 system/developer 消息、模型、
@@ -1096,9 +1177,33 @@ Prompt、工具定义、API Key、taskId、externalNoteId 或原始数据库对�
 本地 IndexedDB，使用 `clientRequestId` 幂等，刷新不会无限重发 pending；不保存 Prompt、Key、reasoning
 或远端会话 ID。若链接只有通用标题而无摘要和正文，伙伴只能说明内容不足，不得根据 URL 或平台猜测。
 
+### 11.6 Sprout Analysis Service（校准目标，尚未实现）
+
+思维发芽不是通用 Chat Route，也不是创建碎片时自动触发的后台分析。服务只接受一个已由用户明确选中的
+Fragment，并在服务端边界内读取标题、原文、补充历史、链接摘要/原文、生命周期、完成状态和植物阶段。
+
+处理顺序固定为：
+
+```text
+校验 Fragment 未被删除
+→ 本地信息充分性判断
+→ 信息不足：返回固定提示，不调用 AI
+→ 信息充分：可选调用 OpenAI
+→ Zod 校验结构化结果
+→ 返回一个具体化方向、一个引导问题和一个允许动作
+```
+
+AI 不访问 Dexie 或其他 Fragment，不接收网页中的指令，不修改原文、标题或 Plant。客户端只在用户确认后
+调用本地保存 Service，把建议写入补充历史并标记“伙伴建议”；`partner_suggestion_saved` 及其每日去重
+规则是未来领域事件，本次不增加 Schema 或实现。OpenAI 未配置或不可用时，Service 返回本地基础提示，不能
+把技术错误暴露给用户，也不能把建议伪装成已执行动作。
+
 ---
 
-## 12. 相似碎片
+## 12. 相似碎片（后续待重新规划）
+
+本节保留原设计作为候选，不属于校准后的当前 MVP 或下一步默认任务。是否实现 Embedding、相似度和花丛，
+需在伙伴 NPC 与思维发芽闭环稳定后重新评估。
 
 标准文本由以下内容构成：
 
@@ -1263,6 +1368,9 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 - 显示重新分析；
 - 允许手动编辑。
 
+思维发芽的 AI 失败不应让 NPC 消失或阻止详情访问。服务返回固定的本地基础提示，保留临时建议为空，
+并允许用户补充内容或稍后重试；不得把失败伪装成已生成或已保存建议。
+
 ### 链接失败
 
 - 保留已经本地保存的 Fragment、Plant、原始 URL 和手工内容；
@@ -1296,7 +1404,7 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 
 ### 16.1 单元测试
 
-覆盖：
+以下已完成或保留为阶段 1 至 7B 的技术测试事实：
 
 - 成长分；
 - 阶段映射；
@@ -1315,9 +1423,17 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 - 推荐去重；
 - 备份校验。
 
+伙伴方向校准后的后续测试还应覆盖（本次不修改测试）：
+
+- 固定 NPC 首屏与“更多”选项、模板变量和猫狗一致性；
+- Fragment 详情发芽入口对 active、dormant、completed、archived、无槽位和 deleted 的边界；
+- 本地信息充分性判断、空内容固定提示和不调用 AI 的路径；
+- 结构化单方向建议、用户确认保存、`partner_suggestion_saved` 每日去重和各生命周期状态；
+- OpenAI 不可用时的本地发芽降级，不把技术错误或未执行动作伪装成成功。
+
 ### 16.2 E2E
 
-覆盖：
+以下已完成或保留为阶段 1 至 7B 的技术 E2E 事实：
 
 1. 选择伙伴；
 2. 创建文字碎片；
@@ -1338,12 +1454,17 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 17. 伙伴 `IMPORT_LINK` 复用同一详情且通知不重复；
 18. 导出并恢复。
 
+校准后的目标 E2E（待后续实现）还应覆盖：点击伙伴只出现固定选项、推荐/近况/休眠/规则说明由本地
+Action 完成、从详情发起发芽、信息不足时不调用 AI、用户确认后才保存建议，以及 AI 不可用时 NPC 仍可用。
+
 GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，避免创建远端笔记、依赖真实账号、
 产生费用或引入平台波动。真实 AI 冒烟测试不属于自动化测试。
 
 ---
 
-## 17. 开发顺序
+## 17. 开发顺序与重新规划状态
+
+历史顺序已经完成到阶段 7B：
 
 1. 项目初始化与 Dexie；
 2. 文字碎片和卡片模式；
@@ -1351,11 +1472,17 @@ GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，�
 4. 鼠标移动与植物交互；
 5. 成长、休眠、完成和新想法；
 6. 猫狗选择与 Chatbot 外壳；
-7. 7A GetNote 链接导入；7B 受限真实 AI 花园伙伴；
-8. 图片与语音；
-9. 相似碎片与花丛；
-10. 导入导出与完整回归测试。
+7. 7A GetNote 链接导入；7B 受限真实 AI 花园伙伴。
 
-每阶段完成后必须测试并创建 Git commit。
+阶段 7B 验证了服务端 AI、安全边界、受限工具和本地持久化能力；产品验证后已将伙伴定位校准为规则型
+NPC。本次不是阶段 8，也不直接沿用旧阶段 8 计划。下一步需要重新规划剩余 MVP，优先顺序为：
 
-阶段 7B 已完成；阶段 8 图片与语音尚未开始，后续阶段不得提前实现。
+1. 隐藏普通用户的开放聊天入口，停止普通用户发起开放式 AI 请求；
+2. 实现 NPC 固定对话、固定选项和本地 Action；
+3. 设计思维发芽领域模型、信息充分性规则和结构化结果；
+4. 实现用户确认保存建议及未来 `partner_suggestion_saved` 事件；
+5. 稳定后再评估图片、语音、相似碎片和花丛。
+
+原阶段 8 的图片/语音及后续相似碎片、花丛等能力保留为候选记录，状态为“待重新规划”，不表示已开始或
+已完成。导入导出已有基础实现，后续只在 MVP 收口/回归需要时再评估增强。每个新阶段仍须先获得明确范围、
+测试和文档确认。

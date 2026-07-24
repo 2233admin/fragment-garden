@@ -98,7 +98,9 @@ export function GardenAccessibilitySummary({
                     onClick={(event) => onOpenPlant(plant.plantId, event.currentTarget)}
                     type="button"
                   >
-                    <span className="truncate">{plant.title}</span>
+                    <span className="min-w-0 truncate">
+                      {isOpening ? "正在打开" : "打开"}“{plant.title}”
+                    </span>
                     <span className="shrink-0 text-xs text-garden-muted">
                       {isOpening ? "正在打开" : PLANT_STAGE_LABELS[plant.stage]}
                     </span>

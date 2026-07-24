@@ -178,7 +178,10 @@ test("moves through the fixed garden and opens fragments through plants", async 
       "moving",
     );
     await summary.locator("summary").click();
-    await directOpenButton.click();
+    await expect(directOpenButton).toContainText(`打开“${FRAGMENT_TITLE}”`);
+    await directOpenButton.focus();
+    await expect(directOpenButton).toBeFocused();
+    await directOpenButton.press("Enter");
     await expect(page.getByRole("dialog", { name: FRAGMENT_TITLE })).toBeVisible();
     await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute(
       "data-movement-state",

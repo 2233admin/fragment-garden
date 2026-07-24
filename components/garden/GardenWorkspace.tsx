@@ -35,6 +35,7 @@ type InteractionFeedback = Readonly<{
 type OpenFragmentOptions = Readonly<{
   plantId?: string;
   replaceSelected?: boolean;
+  reopenCompanionOnClose?: boolean;
   successMessage?: string;
   triggerElement: HTMLButtonElement | null;
   viewAlreadyRecorded?: boolean;
@@ -53,9 +54,14 @@ export function GardenWorkspace() {
   const [interactionFeedback, setInteractionFeedback] = useState<InteractionFeedback | null>(null);
   const [companion, setCompanion] = useState<CompanionViewModel | null>(null);
   const [isCompanionChatOpen, setIsCompanionChatOpen] = useState(false);
+  const [companionOpenGeneration, setCompanionOpenGeneration] = useState(0);
+  const [preserveCompanionScreen, setPreserveCompanionScreen] = useState(false);
+  const [openCreateRequest, setOpenCreateRequest] = useState(0);
   const selectedFragmentIdRef = useRef<string | null>(null);
+  const isCompanionDialogOpenRef = useRef(false);
   const openingLockRef = useRef<string | null>(null);
   const openRequestGenerationRef = useRef(0);
+  const reopenCompanionAfterDetailRef = useRef(false);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const gardenModeButtonRef = useRef<HTMLButtonElement>(null);
   const cardModeButtonRef = useRef<HTMLButtonElement>(null);
@@ -82,12 +88,26 @@ export function GardenWorkspace() {
     },
     [],
   );
-  const handleCompanionChatOpenChange = useCallback((shouldOpen: boolean): void => {
-    if (shouldOpen) {
-      setCancelInteractionRequest((request) => request + 1);
-    }
+  const handleCompanionChatOpenChange = useCallback(
+    (shouldOpen: boolean, options?: { preserveScreen?: boolean }): void => {
+      isCompanionDialogOpenRef.current = shouldOpen;
+      if (shouldOpen) {
+        setCancelInteractionRequest((request) => request + 1);
+        setCompanionOpenGeneration((generation) => generation + 1);
+        setPreserveCompanionScreen(options?.preserveScreen === true);
+      } else {
+        setPreserveCompanionScreen(false);
+      }
 
-    setIsCompanionChatOpen(shouldOpen);
+      setIsCompanionChatOpen(shouldOpen);
+    },
+    [],
+  );
+  const handleCompanionCreateRequest = useCallback((): void => {
+    isCompanionDialogOpenRef.current = false;
+    setIsCompanionChatOpen(false);
+    setMode("cards");
+    setOpenCreateRequest((request) => request + 1);
   }, []);
 
   useDormancySync({ onFeedback: setInteractionFeedback });
@@ -141,6 +161,7 @@ export function GardenWorkspace() {
     {
       plantId,
       replaceSelected = false,
+      reopenCompanionOnClose = false,
       successMessage,
       triggerElement,
       viewAlreadyRecorded = false,
@@ -158,6 +179,7 @@ export function GardenWorkspace() {
     openingLockRef.current = fragmentId;
     if (!replaceSelected) {
       detailTriggerRef.current = triggerElement;
+      reopenCompanionAfterDetailRef.current = reopenCompanionOnClose;
     }
     setOpeningFragmentId(fragmentId);
     setOpeningPlantId(plantId ?? null);
@@ -190,6 +212,7 @@ export function GardenWorkspace() {
         kind: "error",
         message: "详情打开失败，没有写入查看记录，也没有修改本地内容。请重试。",
       });
+      reopenCompanionAfterDetailRef.current = false;
       return false;
     } finally {
       if (openRequestGenerationRef.current === requestGeneration) {
@@ -226,6 +249,10 @@ export function GardenWorkspace() {
   }
 
   function handleGameEvent(event: GardenInteractionEvent): void {
+    if (isCompanionDialogOpenRef.current) {
+      return;
+    }
+
     if (event.type === "COMPANION_CLICKED") {
       handleCompanionChatOpenChange(true);
       return;
@@ -270,18 +297,25 @@ export function GardenWorkspace() {
   }
 
   function closeDetailDialog(): void {
+    const shouldReopenCompanion = reopenCompanionAfterDetailRef.current;
     openRequestGenerationRef.current += 1;
     openingLockRef.current = null;
+    reopenCompanionAfterDetailRef.current = false;
     setOpeningFragmentId(null);
     setOpeningPlantId(null);
     selectedFragmentIdRef.current = null;
     setSelectedFragmentId(null);
-    restoreDetailFocus();
+    if (shouldReopenCompanion) {
+      handleCompanionChatOpenChange(true);
+    } else {
+      restoreDetailFocus();
+    }
   }
 
   function handleDeleted(): void {
     openRequestGenerationRef.current += 1;
     openingLockRef.current = null;
+    reopenCompanionAfterDetailRef.current = false;
     setOpeningFragmentId(null);
     setOpeningPlantId(null);
     selectedFragmentIdRef.current = null;
@@ -329,6 +363,7 @@ export function GardenWorkspace() {
         </div>
 
         <CompanionExperience
+          companionOpenGeneration={companionOpenGeneration}
           gardenRevision={
             gardenState.status === "ready"
               ? gardenState.snapshot.plants
@@ -344,16 +379,24 @@ export function GardenWorkspace() {
               ? gardenSummaryState.summary
               : { activeCount: 0, dormantCount: 0, completedCount: 0, archivedCount: 0 }
           }
+          gardenSummaryStatus={gardenSummaryState.status}
+          preserveCompanionScreen={preserveCompanionScreen}
           isChatOpen={isCompanionChatOpen}
           onChatOpenChange={handleCompanionChatOpenChange}
           onCompanionTypeChange={handleCompanionTypeChange}
-          onOpenFragment={(fragmentId, triggerElement, viewAlreadyRecorded = false) =>
+          onOpenFragment={(
+            fragmentId,
+            triggerElement,
+            viewAlreadyRecorded = false,
+            reopenCompanionOnClose = false,
+          ) =>
             openFragment(fragmentId, {
+              reopenCompanionOnClose,
               triggerElement,
               viewAlreadyRecorded,
             })
           }
-          onStartLinkImport={startExternalLinkImport}
+          onRequestCreateFragment={handleCompanionCreateRequest}
         />
 
         <Activity mode={mode === "garden" ? "visible" : "hidden"}>
@@ -415,6 +458,13 @@ export function GardenWorkspace() {
               onOpenFragment={(fragmentId, triggerElement) => {
                 void openFragment(fragmentId, { triggerElement });
               }}
+              onExternalCreateCompleted={() =>
+                setInteractionFeedback({
+                  kind: "status",
+                  message: "已经种下了。以后再回来看看，它也许会慢慢长出新的方向。",
+                })
+              }
+              openCreateRequest={openCreateRequest}
               onRetryLinkImport={retryExternalLinkImport}
               onStartLinkImport={startExternalLinkImport}
               openingFragmentId={openingFragmentId}

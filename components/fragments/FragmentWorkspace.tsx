@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import { filterFragmentCardsByStatus, type FragmentCardFilter } from "@/domain";
@@ -11,7 +11,7 @@ import {
   type FragmentCardViewModel,
 } from "@/data/queries/fragment-card-query";
 
-import { CreateFragmentDialog } from "./CreateFragmentDialog";
+import { CreateFragmentDialog, type CreatedFragmentNotice } from "./CreateFragmentDialog";
 import { EmptyFragmentState } from "./EmptyFragmentState";
 import { FragmentList } from "./FragmentList";
 import { FragmentSearchBar } from "./FragmentSearchBar";
@@ -33,6 +33,9 @@ type FragmentWorkspaceProps = {
   layout?: "page" | "embedded";
   onOpenFragment: (fragmentId: string, triggerElement: HTMLButtonElement) => void;
   openingFragmentId: string | null;
+  /** Monotonic external request counter for opening the existing create dialog. */
+  openCreateRequest?: number;
+  onExternalCreateCompleted?: (notice: CreatedFragmentNotice) => void;
   onRetryLinkImport?: (fragmentId: string) => Promise<void>;
   onStartLinkImport?: (fragmentId: string) => void;
 };
@@ -41,6 +44,8 @@ export function FragmentWorkspace({
   layout = "page",
   onOpenFragment,
   openingFragmentId,
+  openCreateRequest,
+  onExternalCreateCompleted,
   onRetryLinkImport,
   onStartLinkImport,
 }: FragmentWorkspaceProps) {
@@ -51,7 +56,50 @@ export function FragmentWorkspace({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const seedButtonRef = useRef<HTMLButtonElement>(null);
+  const workspaceRootRef = useRef<HTMLDivElement>(null);
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const handledOpenCreateRequestRef = useRef(0);
+  const isExternalCreateRequestRef = useRef(false);
+  const pendingOpenCreateRequestRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (
+      openCreateRequest === undefined ||
+      openCreateRequest <= handledOpenCreateRequestRef.current ||
+      pendingOpenCreateRequestRef.current === openCreateRequest
+    ) {
+      return;
+    }
+
+    pendingOpenCreateRequestRef.current = openCreateRequest;
+    let frame = 0;
+
+    const openWhenVisible = (): void => {
+      const root = workspaceRootRef.current;
+      const isVisible = root !== null && root.getClientRects().length > 0;
+
+      if (!isVisible) {
+        frame = requestAnimationFrame(openWhenVisible);
+        return;
+      }
+
+      handledOpenCreateRequestRef.current = openCreateRequest;
+      pendingOpenCreateRequestRef.current = null;
+      isExternalCreateRequestRef.current = true;
+      createTriggerRef.current = null;
+      setFeedback(null);
+      setIsCreateOpen(true);
+    };
+
+    frame = requestAnimationFrame(openWhenVisible);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      if (pendingOpenCreateRequestRef.current === openCreateRequest) {
+        pendingOpenCreateRequestRef.current = null;
+      }
+    };
+  }, [layout, openCreateRequest]);
 
   const cardState: CardQueryState = useLiveQuery(
     async (): Promise<CardQueryState> => {
@@ -83,6 +131,7 @@ export function FragmentWorkspace({
   }
 
   function openCreateDialog(triggerElement: HTMLButtonElement): void {
+    isExternalCreateRequestRef.current = false;
     createTriggerRef.current = triggerElement;
     setFeedback(null);
     setIsCreateOpen(true);
@@ -90,6 +139,7 @@ export function FragmentWorkspace({
 
   function closeCreateDialog(): void {
     setIsCreateOpen(false);
+    isExternalCreateRequestRef.current = false;
     restoreFocus(createTriggerRef.current);
   }
 
@@ -104,6 +154,7 @@ export function FragmentWorkspace({
           ? "min-h-screen px-5 py-8 text-garden-ink sm:px-8 lg:px-12 lg:py-10"
           : "pt-7 pb-12 text-garden-ink"
       }
+      ref={workspaceRootRef}
     >
       <div className="mx-auto max-w-7xl">
         <header className="flex flex-col gap-6 border-b border-garden-line pb-8 sm:flex-row sm:items-end sm:justify-between">
@@ -249,6 +300,10 @@ export function FragmentWorkspace({
         isOpen={isCreateOpen}
         onClose={closeCreateDialog}
         onCreated={(notice) => {
+          if (isExternalCreateRequestRef.current) {
+            onExternalCreateCompleted?.(notice);
+          }
+
           if (notice.contentType !== "link") {
             setFeedback(`“${notice.title}”已保存，并出现在卡片列表中。`);
             return;

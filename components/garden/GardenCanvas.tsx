@@ -256,7 +256,7 @@ export function GardenCanvas({
     >
       <div
         aria-label={`花园画面。可以点击地面移动人物，点击植物走近并查看内容。当前有 ${plants.length} 株已放置植物。${
-          companion === null ? "尚未选择花园伙伴。" : "可以点击花园伙伴打开本地聊天。"
+          companion === null ? "尚未选择花园伙伴。" : "可以点击花园伙伴打开规则型对话。"
         }`}
         className="absolute inset-0 [&_canvas]:block [&_canvas]:max-h-full [&_canvas]:max-w-full"
         ref={hostRef}

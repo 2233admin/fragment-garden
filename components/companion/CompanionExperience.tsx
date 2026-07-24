@@ -1,62 +1,71 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 
-import { DuplicateLinkDialog } from "@/components/link-imports/DuplicateLinkDialog";
-import { GetNoteDisclosureDialog } from "@/components/link-imports/GetNoteDisclosureDialog";
-import type { CompanionAiMode, CompanionType } from "@/domain";
+import type { CompanionType } from "@/domain";
 import type { GardenSummary } from "@/domain/companion/context-builder";
-import { CompanionProviderError } from "@/domain/companion/response-engine";
-import type { CurrentRecommendationView } from "@/data/queries/companion-query";
+import type { CompanionNpcScreen } from "@/domain/companion/npc";
 import {
-  importLinkToolArgumentsSchema,
-  openFragmentToolArgumentsSchema,
-} from "@/validation/companion-api";
-import { acceptOpenAiDisclosure, setCompanionAiMode } from "@/services/accept-openai-disclosure";
+  getCurrentRecommendationView,
+  type CurrentRecommendationView,
+} from "@/data/queries/companion-query";
 import {
-  COMPANION_AI_FALLBACK_MESSAGE,
-  appendToolResultMessage,
-  sendCompanionTurn,
-} from "@/services/send-companion-turn";
+  queryDormantFragmentList,
+  type DormantFragmentList,
+} from "@/data/queries/companion-npc-query";
 import { completeCompanionOnboarding } from "@/services/complete-companion-onboarding";
 import { dismissFragmentRecommendation } from "@/services/dismiss-fragment-recommendation";
 import { openFragmentRecommendation } from "@/services/open-fragment-recommendation";
-import { requestDailyFragmentRecommendation } from "@/services/request-daily-fragment-recommendation";
 import { requestFragmentRecommendation } from "@/services/request-fragment-recommendation";
 
-import { CompanionChatPanel } from "./CompanionChatPanel";
 import { CompanionMark } from "./CompanionMark";
+import { CompanionNpcDialog, type CompanionNpcRecommendationState } from "./CompanionNpcDialog";
 import { CompanionOnboardingDialog } from "./CompanionOnboardingDialog";
-import { OpenAiDisclosureDialog } from "./OpenAiDisclosureDialog";
-import { CompanionStatusBubble } from "./CompanionStatusBubble";
 import type {
   FragmentRecommendationView,
   RecommendationPendingAction,
 } from "./FragmentRecommendationCard";
-import { useCompanionData } from "./useCompanionData";
-import { useCompanionLinkImport } from "./useCompanionLinkImport";
+import { useCompanionSettings } from "./useCompanionData";
 
 type CompanionExperienceProps = {
+  /** Changes whenever garden data changes and keeps the NPC's read-only list fresh. */
   gardenRevision: string;
   gardenSummary: GardenSummary;
+  gardenSummaryStatus: "loading" | "error" | "ready";
+  companionOpenGeneration: number;
+  preserveCompanionScreen: boolean;
   isChatOpen: boolean;
-  onChatOpenChange: (isOpen: boolean) => void;
+  onChatOpenChange: (isOpen: boolean, options?: { preserveScreen?: boolean }) => void;
   onCompanionTypeChange: (companionType: CompanionType | null) => void;
   onOpenFragment: (
     fragmentId: string,
     triggerElement: HTMLButtonElement | null,
     viewAlreadyRecorded?: boolean,
+    reopenCompanionOnClose?: boolean,
   ) => Promise<boolean>;
-  onStartLinkImport: (fragmentId: string) => void;
+  onRequestCreateFragment: () => void;
 };
 
-const RECOMMENDATION_QUERY_ERROR = "暂时没能找到适合回看的内容，你仍然可以在卡片模式中查找。";
-const CHAT_HISTORY_QUERY_ERROR = "暂时无法读取本地对话。现有消息没有被修改，可以关闭后重试。";
+type DormantQueryState =
+  | { status: "loading"; value: DormantFragmentList }
+  | { status: "ready"; value: DormantFragmentList }
+  | { status: "error"; value: DormantFragmentList };
+
+const EMPTY_DORMANT_LIST: DormantFragmentList = { items: [], remainingCount: 0 };
+const LOADING_DORMANT_STATE: DormantQueryState = {
+  status: "loading",
+  value: EMPTY_DORMANT_LIST,
+};
+const RECOMMENDATION_QUERY_ERROR = "暂时没能找到适合回看的内容。你仍然可以在卡片模式中查找。";
+const RECOMMENDATION_OPEN_ERROR = "暂时没能打开这条内容。";
+const RECOMMENDATION_DISMISS_ERROR = "暂时没能保存这次选择，请重试。";
 
 function createRecommendationView(current: CurrentRecommendationView): FragmentRecommendationView {
   const source = current.fragment.rawText ?? current.fragment.summary ?? "";
-  const graphemes = Array.from(source.trim());
-  const excerpt = graphemes.length > 96 ? `${graphemes.slice(0, 95).join("")}…` : source.trim();
+  const characters = Array.from(source.trim());
+  const excerpt =
+    characters.length > 96 ? `${characters.slice(0, 95).join("")}…` : characters.join("");
 
   return {
     id: current.recommendation.id,
@@ -74,61 +83,43 @@ function waitForDialogTransition(): Promise<void> {
   });
 }
 
-function buildAllowedOpenFragments(
-  recommendation: CurrentRecommendationView | null,
-  sessionFragments: readonly { id: string; title: string; status: string }[],
-): readonly { id: string; title: string; status: string }[] {
-  const candidates: Array<{ id: string; title: string; status: string }> = [];
-  if (recommendation !== null) {
-    candidates.push({
-      id: recommendation.fragment.id,
-      title: recommendation.fragment.title || "未命名碎片",
-      status: recommendation.fragment.lifecycleStatus,
-    });
-  }
-  for (const fragment of sessionFragments) {
-    if (candidates.some(({ id }) => id === fragment.id)) {
-      continue;
-    }
-    candidates.push(fragment);
-    if (candidates.length >= 3) {
-      break;
-    }
-  }
-  return candidates.slice(0, 3);
-}
-
 export function CompanionExperience({
   gardenRevision,
   gardenSummary,
+  gardenSummaryStatus,
+  companionOpenGeneration,
+  preserveCompanionScreen,
   isChatOpen,
   onChatOpenChange,
   onCompanionTypeChange,
   onOpenFragment,
-  onStartLinkImport,
+  onRequestCreateFragment,
 }: CompanionExperienceProps) {
   const [settingsAttempt, setSettingsAttempt] = useState(0);
   const [isChoosing, setIsChoosing] = useState(false);
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
-  const [recommendationError, setRecommendationError] = useState<string | null>(null);
+  const [recommendationState, setRecommendationState] = useState<CompanionNpcRecommendationState>({
+    status: "idle",
+    recommendation: null,
+  });
   const [recommendationPending, setRecommendationPending] =
     useState<RecommendationPendingAction>(null);
-  const [isOpenAiDisclosureOpen, setIsOpenAiDisclosureOpen] = useState(false);
-  const [openAiDisclosureError, setOpenAiDisclosureError] = useState<string | null>(null);
-  const [isOpenAiDisclosurePending, setIsOpenAiDisclosurePending] = useState(false);
-  const [lastFailedMessage, setLastFailedMessage] = useState<{
-    content: string;
-    requestId: string;
-  } | null>(null);
-  const [turnPending, setTurnPending] = useState(false);
-  const [turnErrorMessage, setTurnErrorMessage] = useState<string | null>(null);
-  const [sessionOpenFragments, setSessionOpenFragments] = useState<
-    readonly { id: string; title: string; status: string }[]
-  >([]);
+  const [dormantOpenError, setDormantOpenError] = useState<string | null>(null);
+  const [dormantAttempt, setDormantAttempt] = useState(0);
   const companionButtonRef = useRef<HTMLButtonElement>(null);
-  const dailyRequestLockRef = useRef(false);
 
-  const { messagesState, recommendationState, settingsState } = useCompanionData(settingsAttempt);
+  const settingsState = useCompanionSettings(settingsAttempt);
+  const dormantState: DormantQueryState = useLiveQuery(
+    async (): Promise<DormantQueryState> => {
+      try {
+        return { status: "ready", value: await queryDormantFragmentList() };
+      } catch {
+        return { status: "error", value: EMPTY_DORMANT_LIST };
+      }
+    },
+    [dormantAttempt, gardenRevision],
+    LOADING_DORMANT_STATE,
+  );
 
   const companionType =
     settingsState.status === "ready" &&
@@ -136,59 +127,18 @@ export function CompanionExperience({
     settingsState.value.companionType !== null
       ? settingsState.value.companionType
       : null;
-  const currentRecommendation =
-    recommendationState.status === "ready" ? recommendationState.value : null;
-  const recommendationView =
-    currentRecommendation === null ? null : createRecommendationView(currentRecommendation);
-  const companionAiMode: CompanionAiMode =
-    settingsState.status === "ready" ? (settingsState.value.companionAiMode ?? "local") : "local";
-  const allowedOpenFragments = buildAllowedOpenFragments(
-    currentRecommendation,
-    sessionOpenFragments,
-  );
-  const linkImportFlow = useCompanionLinkImport({
-    disclosureAcceptedAt:
-      settingsState.status === "ready" ? settingsState.value.getNoteDisclosureAcceptedAt : null,
-    onChatOpenChange,
-    onOpenFragment,
-    onStartLinkImport,
-    onToolFragmentCreated: (fragment) => {
-      setSessionOpenFragments((current) =>
-        [fragment, ...current.filter(({ id }) => id !== fragment.id)].slice(0, 3),
-      );
-    },
-  });
 
   useEffect(() => {
     onCompanionTypeChange(companionType);
   }, [companionType, onCompanionTypeChange]);
 
   useEffect(() => {
-    if (companionType === null || settingsState.status !== "ready" || dailyRequestLockRef.current) {
-      return;
-    }
-
-    dailyRequestLockRef.current = true;
-    setRecommendationError(null);
-    void requestDailyFragmentRecommendation({ now: new Date().toISOString() })
-      .catch(() => {
-        setRecommendationError(RECOMMENDATION_QUERY_ERROR);
-      })
-      .finally(() => {
-        dailyRequestLockRef.current = false;
-      });
-  }, [companionType, gardenRevision, settingsState]);
-
-  useEffect(() => {
-    if (!isChatOpen) {
+    if (isChatOpen) {
       return;
     }
 
     const companionButton = companionButtonRef.current;
-
-    return () => {
-      requestAnimationFrame(() => companionButton?.focus());
-    };
+    requestAnimationFrame(() => companionButton?.focus());
   }, [isChatOpen]);
 
   async function chooseCompanion(nextCompanionType: CompanionType): Promise<void> {
@@ -198,12 +148,12 @@ export function CompanionExperience({
 
     setIsChoosing(true);
     setOnboardingError(null);
-
     try {
       await completeCompanionOnboarding({
         companionType: nextCompanionType,
         now: new Date().toISOString(),
       });
+      setSettingsAttempt((attempt) => attempt + 1);
     } catch {
       setOnboardingError("伙伴选择暂时没有保存，请重试。");
     } finally {
@@ -211,259 +161,161 @@ export function CompanionExperience({
     }
   }
 
-  function requestAiMode(): void {
-    if (settingsState.status !== "ready") {
+  async function requestRecommendation(): Promise<void> {
+    if (recommendationState.status === "loading" || recommendationPending !== null) {
       return;
     }
-    setOpenAiDisclosureError(null);
-    if (settingsState.value.openAiDisclosureAcceptedAt !== null) {
-      void switchAiMode("openai");
-      return;
-    }
-    setIsOpenAiDisclosureOpen(true);
-  }
 
-  async function switchAiMode(mode: CompanionAiMode): Promise<void> {
+    setRecommendationState({ status: "loading", recommendation: null });
     try {
-      await setCompanionAiMode(mode);
-      setSettingsAttempt((attempt) => attempt + 1);
-      if (mode === "local") {
-        setOpenAiDisclosureError(null);
-        setTurnErrorMessage(null);
-      }
-    } catch {
-      setOpenAiDisclosureError("模式选择没有保存，现有聊天记录没有被修改。请重试。");
-    }
-  }
-
-  async function acceptAiDisclosure(): Promise<void> {
-    setIsOpenAiDisclosurePending(true);
-    try {
-      await acceptOpenAiDisclosure({ now: new Date().toISOString() });
-      setIsOpenAiDisclosureOpen(false);
-      setSettingsAttempt((attempt) => attempt + 1);
-    } catch {
-      setOpenAiDisclosureError("OpenAI 同意状态没有保存，尚未切换到 AI 模式。请重试。");
-    } finally {
-      setIsOpenAiDisclosurePending(false);
-    }
-  }
-
-  async function sendMessage(
-    content: string,
-    existingRequestId?: string,
-    modeOverride?: CompanionAiMode,
-  ): Promise<void> {
-    setRecommendationError(null);
-    const requestId = existingRequestId ?? crypto.randomUUID();
-    setLastFailedMessage({ content, requestId });
-    setTurnPending(true);
-    setTurnErrorMessage(null);
-    try {
-      const result = await sendCompanionTurn({
-        content,
-        mode: modeOverride ?? companionAiMode,
-        gardenSummary,
-        allowedOpenFragments,
-        now: new Date().toISOString(),
-        clientRequestId: requestId,
-        fallbackToLocal: false,
-      });
-      if (result.usedFallback && result.response.type === "tool_call") {
-        await appendToolResultMessage({
-          requestId,
-          content: COMPANION_AI_FALLBACK_MESSAGE,
-          now: new Date().toISOString(),
-          messageKey: "fallback",
-        });
-      }
-      if (
-        result.fallbackErrorCode === "openai_disabled" ||
-        result.fallbackErrorCode === "missing_configuration"
-      ) {
-        await switchAiMode("local");
-      }
-      if (result.response.type === "tool_call") {
-        await executeToolCall(result.response, requestId);
-      }
-      setLastFailedMessage(null);
-    } catch (error) {
-      setTurnErrorMessage(
-        error instanceof CompanionProviderError
-          ? error.message
-          : "伙伴暂时没有完成这次回复。现有本地内容没有被修改。",
-      );
-      throw error;
-    } finally {
-      setTurnPending(false);
-    }
-  }
-
-  async function executeToolCall(
-    response: Extract<
-      Awaited<ReturnType<typeof sendCompanionTurn>>["response"],
-      { type: "tool_call" }
-    >,
-    requestId: string,
-  ): Promise<void> {
-    const now = new Date().toISOString();
-    if (response.name === "recommend_fragment") {
-      const recommendation = await requestFragmentRecommendation({ now });
-      await appendToolResultMessage({
-        requestId,
-        content:
-          recommendation === null
-            ? "暂时没有找到适合回看的旧碎片。你仍然可以在卡片模式中查找。"
-            : "我找到了一条以前种下的内容，你可以看看现在是否还有新的想法。",
-        fragmentId: recommendation?.fragment.id ?? null,
-        now,
-      });
-      if (recommendation === null) {
-        setRecommendationError(RECOMMENDATION_QUERY_ERROR);
-      } else {
-        setSessionOpenFragments((current) =>
-          [
-            {
-              id: recommendation.fragment.id,
-              title: recommendation.fragment.title || "未命名碎片",
-              status: recommendation.fragment.lifecycleStatus,
+      const current = await getCurrentRecommendationView();
+      const result =
+        current ?? (await requestFragmentRecommendation({ now: new Date().toISOString() }));
+      setRecommendationState(
+        result === null
+          ? { status: "empty", recommendation: null }
+          : {
+              status: "ready",
+              recommendation: createRecommendationView(result),
+              actionError: null,
             },
-            ...current.filter(({ id }) => id !== recommendation.fragment.id),
-          ].slice(0, 3),
-        );
-      }
-      return;
-    }
-
-    if (response.name === "import_link") {
-      const parsed = importLinkToolArgumentsSchema.safeParse(response.arguments);
-      if (!parsed.success) {
-        throw new Error("Invalid import link tool arguments");
-      }
-      await linkImportFlow.handleAction({
-        type: "IMPORT_LINK",
-        url: parsed.data.url,
-        title: parsed.data.title,
-        requestId,
+      );
+    } catch {
+      setRecommendationState({
+        status: "error",
+        recommendation: null,
+        message: RECOMMENDATION_QUERY_ERROR,
       });
-      return;
-    }
-
-    const parsed = openFragmentToolArgumentsSchema.safeParse(response.arguments);
-    if (!parsed.success || !allowedOpenFragments.some(({ id }) => id === parsed.data.fragmentId)) {
-      throw new Error("This fragment is not available to open");
-    }
-
-    const recommendationToOpen =
-      currentRecommendation?.fragment.id === parsed.data.fragmentId ? currentRecommendation : null;
-    if (recommendationToOpen !== null) {
-      await openFragmentRecommendation({
-        recommendationId: recommendationToOpen.recommendation.id,
-        now,
-      });
-    }
-
-    onChatOpenChange(false);
-    await waitForDialogTransition();
-    const didOpen = await onOpenFragment(
-      parsed.data.fragmentId,
-      companionButtonRef.current,
-      recommendationToOpen !== null,
-    );
-    if (!didOpen) {
-      throw new Error("The requested fragment could not be opened");
-    }
-    await appendToolResultMessage({
-      requestId,
-      content: "已经为你打开了这条内容。",
-      fragmentId: parsed.data.fragmentId,
-      now,
-    });
-  }
-
-  async function retryLastMessage(): Promise<void> {
-    if (lastFailedMessage === null) {
-      return;
-    }
-    await sendMessage(lastFailedMessage.content, lastFailedMessage.requestId);
-  }
-
-  async function useLocalModeAndRetry(): Promise<void> {
-    await switchAiMode("local");
-    if (lastFailedMessage !== null) {
-      await sendMessage(lastFailedMessage.content, lastFailedMessage.requestId, "local");
     }
   }
 
   async function openRecommendation(): Promise<void> {
-    if (currentRecommendation === null || recommendationPending !== null) {
+    if (recommendationState.status !== "ready" || recommendationPending !== null) {
       return;
     }
 
+    const currentRecommendation = recommendationState.recommendation;
     setRecommendationPending("opening");
-    setRecommendationError(null);
-
+    setRecommendationState({
+      status: "ready",
+      recommendation: currentRecommendation,
+      actionError: null,
+    });
+    let didCloseNpc = false;
     try {
       const result = await openFragmentRecommendation({
-        recommendationId: currentRecommendation.recommendation.id,
+        recommendationId: currentRecommendation.id,
         now: new Date().toISOString(),
       });
-
-      if (isChatOpen) {
-        onChatOpenChange(false);
-        await waitForDialogTransition();
-      }
-
+      closeNpc();
+      didCloseNpc = true;
+      await waitForDialogTransition();
       const didOpen = await onOpenFragment(
         result.viewed.fragment.id,
         companionButtonRef.current,
         true,
+        true,
       );
-
       if (!didOpen) {
-        throw new Error("The shared fragment detail could not be opened");
+        throw new Error("fragment detail could not be opened");
       }
-    } catch (error) {
-      setRecommendationError("推荐状态没有保存，因此内容没有打开。请重试。");
-      throw error;
+    } catch {
+      if (didCloseNpc) {
+        setRecommendationState({
+          status: "error",
+          recommendation: null,
+          message: RECOMMENDATION_OPEN_ERROR,
+        });
+        onChatOpenChange(true, { preserveScreen: true });
+      } else {
+        setRecommendationState({
+          status: "ready",
+          recommendation: currentRecommendation,
+          actionError: RECOMMENDATION_OPEN_ERROR,
+        });
+      }
     } finally {
       setRecommendationPending(null);
-    }
-  }
-
-  async function openLinkedFragment(
-    fragmentId: string,
-    triggerElement: HTMLButtonElement,
-  ): Promise<void> {
-    onChatOpenChange(false);
-    await waitForDialogTransition();
-    const didOpen = await onOpenFragment(fragmentId, triggerElement);
-    if (!didOpen) {
-      onChatOpenChange(true);
-      throw new Error("The shared fragment detail could not be opened");
     }
   }
 
   async function dismissRecommendation(): Promise<void> {
-    if (currentRecommendation === null || recommendationPending !== null) {
+    if (recommendationState.status !== "ready" || recommendationPending !== null) {
       return;
     }
 
+    const currentRecommendation = recommendationState.recommendation;
     setRecommendationPending("dismissing");
-    setRecommendationError(null);
-
+    setRecommendationState({
+      status: "ready",
+      recommendation: currentRecommendation,
+      actionError: null,
+    });
     try {
       await dismissFragmentRecommendation({
-        recommendationId: currentRecommendation.recommendation.id,
+        recommendationId: currentRecommendation.id,
         now: new Date().toISOString(),
       });
-    } catch (error) {
-      setRecommendationError("推荐状态没有保存，这条内容仍在原处。请重试。");
-      throw error;
+      setRecommendationState({ status: "dismissed", recommendation: null });
+    } catch {
+      setRecommendationState({
+        status: "ready",
+        recommendation: currentRecommendation,
+        actionError: RECOMMENDATION_DISMISS_ERROR,
+      });
     } finally {
       setRecommendationPending(null);
     }
   }
+
+  async function openDormantFragment(
+    fragmentId: string,
+    triggerElement: HTMLButtonElement,
+  ): Promise<void> {
+    const isAllowed = dormantState.value.items.some((item) => item.id === fragmentId);
+    if (!isAllowed) {
+      setDormantOpenError("暂时没能打开这条内容。");
+      return;
+    }
+
+    setDormantOpenError(null);
+    closeNpc();
+    try {
+      await waitForDialogTransition();
+      const didOpen = await onOpenFragment(
+        fragmentId,
+        companionButtonRef.current ?? triggerElement,
+        false,
+        true,
+      );
+      if (didOpen) {
+        return;
+      }
+    } catch {
+      // The shared detail opener reports the user-facing failure below.
+    }
+
+    setDormantOpenError("暂时没能打开这条内容。");
+    onChatOpenChange(true, { preserveScreen: true });
+  }
+
+  function requestCreateFragment(): void {
+    closeNpc();
+    onRequestCreateFragment();
+  }
+
+  function closeNpc(): void {
+    setDormantOpenError(null);
+    onChatOpenChange(false);
+  }
+
+  const initialNpcScreen: CompanionNpcScreen = preserveCompanionScreen
+    ? dormantOpenError !== null
+      ? "dormant_list"
+      : recommendationState.status === "error"
+        ? "recommendation_result"
+        : "main"
+    : "main";
 
   return (
     <>
@@ -486,7 +338,7 @@ export function CompanionExperience({
       ) : null}
 
       {companionType !== null ? (
-        <div className="mx-auto mt-4 flex max-w-[960px] flex-wrap items-start justify-between gap-3">
+        <div className="mx-auto mt-4 max-w-[960px]">
           <button
             className="inline-flex items-center gap-2 rounded-full border border-garden-line bg-garden-paper px-4 py-2 text-sm font-semibold text-garden-ink shadow-sm hover:bg-garden-soft"
             data-testid="open-companion"
@@ -497,22 +349,6 @@ export function CompanionExperience({
             <CompanionMark companionType={companionType} size="small" />
             打开花园伙伴
           </button>
-          {recommendationView !== null ? (
-            <CompanionStatusBubble
-              companionType={companionType}
-              onDismiss={() => void dismissRecommendation().catch(() => undefined)}
-              onOpen={() => void openRecommendation().catch(() => undefined)}
-              pendingAction={recommendationPending}
-            />
-          ) : null}
-          {recommendationError !== null ? (
-            <p
-              className="basis-full rounded-xl border border-garden-danger/25 bg-garden-paper px-4 py-2 text-sm font-semibold text-garden-danger"
-              role="alert"
-            >
-              {recommendationError}
-            </p>
-          ) : null}
         </div>
       ) : null}
 
@@ -527,69 +363,33 @@ export function CompanionExperience({
       />
 
       {companionType !== null ? (
-        <CompanionChatPanel
+        <CompanionNpcDialog
           companionType={companionType}
-          companionAiMode={companionAiMode}
-          errorMessage={
-            linkImportFlow.errorMessage ??
-            (messagesState.status === "error"
-              ? CHAT_HISTORY_QUERY_ERROR
-              : recommendationState.status === "error"
-                ? RECOMMENDATION_QUERY_ERROR
-                : (turnErrorMessage ?? recommendationError ?? openAiDisclosureError))
-          }
-          isLoading={messagesState.status === "loading" || recommendationState.status === "loading"}
+          dormantState={{
+            status: dormantState.status,
+            items: dormantState.value.items,
+            remainingCount: dormantState.value.remainingCount,
+          }}
+          dormantOpenError={dormantOpenError}
+          gardenSummary={gardenSummary}
+          gardenSummaryStatus={gardenSummaryStatus}
           isOpen={isChatOpen}
-          isPending={turnPending || recommendationPending !== null || linkImportFlow.isPending}
-          messages={messagesState.status === "ready" ? messagesState.value : []}
-          onClose={() => onChatOpenChange(false)}
-          onDismissRecommendation={dismissRecommendation}
-          onOpenLinkedFragment={openLinkedFragment}
-          onOpenRecommendation={openRecommendation}
-          onSend={sendMessage}
-          onRequestAiMode={requestAiMode}
-          onUseLocalMode={useLocalModeAndRetry}
-          onRetry={retryLastMessage}
-          recommendation={recommendationView}
+          initialScreen={initialNpcScreen}
+          key={companionOpenGeneration}
+          isPending={recommendationPending !== null || recommendationState.status === "loading"}
+          onClose={closeNpc}
+          onCreateFragment={requestCreateFragment}
+          onDismissRecommendation={() => void dismissRecommendation()}
+          onOpenDormantFragment={(fragmentId, triggerElement) =>
+            void openDormantFragment(fragmentId, triggerElement)
+          }
+          onOpenRecommendation={() => void openRecommendation()}
+          onRequestRecommendation={() => void requestRecommendation()}
+          onRetryDormant={() => setDormantAttempt((attempt) => attempt + 1)}
+          recommendationPending={recommendationPending}
+          recommendationState={recommendationState}
         />
       ) : null}
-
-      <OpenAiDisclosureDialog
-        errorMessage={openAiDisclosureError}
-        isOpen={isOpenAiDisclosureOpen}
-        isPending={isOpenAiDisclosurePending}
-        onAccept={() => void acceptAiDisclosure()}
-        onCancel={() => {
-          if (!isOpenAiDisclosurePending) {
-            setIsOpenAiDisclosureOpen(false);
-            setOpenAiDisclosureError(null);
-          }
-        }}
-        onUseLocal={() => {
-          if (!isOpenAiDisclosurePending) {
-            setIsOpenAiDisclosureOpen(false);
-            void switchAiMode("local");
-          }
-        }}
-      />
-
-      <GetNoteDisclosureDialog
-        errorMessage={linkImportFlow.disclosureErrorMessage}
-        isOpen={linkImportFlow.isDisclosureOpen}
-        isPending={linkImportFlow.isPending}
-        onAccept={() => void linkImportFlow.acceptDisclosure()}
-        onCancel={linkImportFlow.cancelDisclosure}
-      />
-
-      <DuplicateLinkDialog
-        errorMessage={linkImportFlow.errorMessage}
-        existingTitle={linkImportFlow.duplicateLink?.existingTitle ?? "已有链接碎片"}
-        isOpen={linkImportFlow.duplicateLink !== null}
-        isPending={linkImportFlow.isPending}
-        onCancel={linkImportFlow.cancelDuplicate}
-        onCreateDuplicate={() => void linkImportFlow.createDuplicate()}
-        onOpenExisting={(triggerElement) => void linkImportFlow.openExisting(triggerElement)}
-      />
     </>
   );
 }

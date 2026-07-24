@@ -21,12 +21,8 @@ const LOADING_RECOMMENDATION: CompanionQueryState<CurrentRecommendationView | nu
   status: "loading",
 };
 
-export function useCompanionData(settingsAttempt: number): Readonly<{
-  messagesState: CompanionQueryState<ChatMessage[]>;
-  recommendationState: CompanionQueryState<CurrentRecommendationView | null>;
-  settingsState: CompanionQueryState<Settings>;
-}> {
-  const settingsState: CompanionQueryState<Settings> = useLiveQuery(
+export function useCompanionSettings(settingsAttempt: number): CompanionQueryState<Settings> {
+  return useLiveQuery(
     async (): Promise<CompanionQueryState<Settings>> => {
       try {
         return { status: "ready", value: await queryLocalSettings() };
@@ -37,6 +33,14 @@ export function useCompanionData(settingsAttempt: number): Readonly<{
     [settingsAttempt],
     LOADING_SETTINGS,
   );
+}
+
+export function useCompanionData(settingsAttempt: number): Readonly<{
+  messagesState: CompanionQueryState<ChatMessage[]>;
+  recommendationState: CompanionQueryState<CurrentRecommendationView | null>;
+  settingsState: CompanionQueryState<Settings>;
+}> {
+  const settingsState = useCompanionSettings(settingsAttempt);
   const messagesState: CompanionQueryState<ChatMessage[]> = useLiveQuery(
     async (): Promise<CompanionQueryState<ChatMessage[]>> => {
       try {

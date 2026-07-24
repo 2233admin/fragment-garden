@@ -24,7 +24,7 @@ export async function queryGardenSummary(
 ): Promise<GardenSummary> {
   const fragmentRepository = new FragmentRepository(database);
   return database.transaction("r", database.fragments, async () => {
-    const fragments = await fragmentRepository.list();
+    const fragments = await fragmentRepository.listVisibleFragments();
     return {
       activeCount: fragments.filter((fragment) => fragment.lifecycleStatus === "active").length,
       dormantCount: fragments.filter((fragment) => fragment.lifecycleStatus === "dormant").length,

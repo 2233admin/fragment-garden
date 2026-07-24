@@ -18,7 +18,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev",
+    command:
+      process.platform === "win32" ? "node node_modules/next/dist/bin/next dev" : "npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
   },

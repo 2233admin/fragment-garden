@@ -52,7 +52,7 @@
 | 7A | 链接碎片与 GetNoteConnector | 链接先本地保存，再异步读取并可恢复 |
 | 7B | 真实 AI 花园伙伴（技术实现完成，过渡） | Responses API、受限工具与本地降级已验证 |
 | 8 | 规则型 NPC（已完成） | 固定选项、本地花园数据与现有 Service 形成 NPC 闭环 |
-| 9 | 思维发芽（尚未实现） | 待明确领域模型和受限 AI 分析边界后开发 |
+| 9 | 思维发芽（已完成并通过真实服务验收） | 单 Fragment 的本地检查、结构化 AI 建议与确认保存形成闭环 |
 | 后续候选 | 图片与语音 | 待重新规划 |
 | 后续候选 | 相似碎片与花丛 | 待重新规划 |
 | 收口候选 | 备份、回归与一周自测 | 待重新排序与验收 |
@@ -62,8 +62,11 @@
 模式字段和三个受限工具仍作为过渡/开发调试基础设施保留；这不是阶段 7B 失败，也不代表普通 NPC 菜单会
 直接请求 OpenAI 或 GetNote。用户从 NPC 进入现有链接创建表单并同意 7A 披露后，链接导入仍可请求 GetNote。
 
-下一阶段是尚未实现的阶段 9“思维发芽”。它必须绑定一个明确 Fragment，并在本地信息充分性规则后才可选
-使用 AI；图片、语音、Embedding、相似碎片和花丛仍是待重新规划的后续候选。
+阶段 9 已完成绑定明确 Fragment 的“思维发芽”代码、Mock 验证与真实服务验收，包括本地信息充分性规则、
+独立 OpenAI 披露、结构化单方向建议和用户确认保存。真实验收最终使用服务端配置的
+`gpt-4.1-mini-2025-04-14`，不发送 reasoning 参数，保持 700 token 输出上限；六次正式请求全部完成并通过
+Zod。阶段 10 尚未开始；图片、语音、Embedding、相似碎片和花丛仍是待重新规划的后续候选，本计划不把
+它们提前定义为阶段 10 实现任务。
 
 ---
 
@@ -605,8 +608,8 @@ docs: document real companion architecture
 
 ## 完成边界
 
-阶段 8 不包含“思维发芽”。发芽仍是下一阶段的绑定 Fragment 分析能力；当前不新增发芽按钮、API、事件或
-数据库字段，也不修改成长分和生命周期规则。
+阶段 8 完成时不包含“思维发芽”，也没有在该阶段新增发芽按钮、API、事件、数据库字段或成长规则。随后
+阶段 9 在保持 NPC 普通入口不变的前提下，独立实现了绑定 Fragment 的分析与确认保存闭环。
 
 ## 建议 commits
 
@@ -617,33 +620,76 @@ test: cover companion NPC menus and local actions
 
 ---
 
-# 13. 阶段 9：思维发芽（尚未实现）
+# 13. 阶段 9：思维发芽（已完成并通过真实服务验收）
 
-本节只记录边界和顺序，不开始编码，也不提供新的阶段 Prompt。实现前需要单独确认领域模型、UI、AI 披露、
-错误降级和测试范围。
+阶段 9 已在共享 Fragment 详情中完成绑定单条内容的思维发芽闭环。它复用阶段 7B 已验证的服务端 OpenAI
+基础能力，但使用独立 Route、Prompt、Schema、披露和本地保存事务，不恢复普通用户开放聊天。
 
 ## 目标
 
 从共享 Fragment 详情发起一次绑定当前内容的“思维发芽”，先由本地规则判断信息是否足够，再可选调用 AI
 返回一个结构化建议。AI 不修改原文、植物阶段或其他碎片；用户确认后才保存建议。
 
-## 计划边界
+## 实现范围
 
-- active、dormant、completed、archived 和无槽位的未删除 Fragment 可使用，deleted 不可使用；
-- AI 只读取当前 Fragment 的标题、原文、补充历史、链接摘要/原文、生命周期、完成状态和植物阶段；
-- 信息不足时返回固定提示，不调用 AI、不生成引导问题；
-- 信息足够时最多返回一个具体化方向、一个引导问题和一个允许动作；
-- 建议是可能性，不代表用户真实想法；AI 不直接执行动作；
-- 只有用户确认保存才写入补充历史并标记“伙伴建议”；未来 `partner_suggestion_saved` 的成长规则另行确认；
-- OpenAI 不可用时 NPC 和本地基础结果仍可用，不显示技术堆栈；
-- 正式角色走到植物旁、观察动画、发芽特效、图片和语音不属于本阶段。
+- 入口位于共享 Fragment 详情，active、dormant、completed、archived 和无槽位的未删除 Fragment 均可使用，
+  deleted 不可使用；
+- 上下文只包含当前 Fragment 的标题、原文、补充历史、已保存伙伴建议、链接摘要/原文、生命周期、完成状态
+  和植物阶段，不读取整个花园、其他 Fragment 或旧 ChatMessage；
+- 本地纯规则先识别只有 URL、占位/平台通用标题或没有可理解内容等明显不足情况，直接返回固定提示，不调用
+  AI；短但明确的想法不会仅因字数少而被拒绝；
+- `buildSproutContext` 确定性裁剪当前内容，总计最多 16,000 个 Unicode 字符，优先保留标题、原文和最新用户
+  补充，不调用模型总结上下文；
+- 首次发送当前 Fragment 前显示独立 OpenAI 发芽披露，并保存 `sproutAiDisclosureAcceptedAt`；它不继承
+  GetNote 或阶段 7B 开放聊天披露，普通 Settings 字段扩展不升级数据库，Dexie 保持 V3；
+- 固定 `POST /api/sprout/analyze` 使用官方 OpenAI Responses API、服务端 `OPENAI_MODEL`、45 秒超时、700 token
+  输出上限、`store: false` 和 strict JSON Schema Structured Output；SDK 自动重试关闭，Route 将客户端取消信号
+  继续传给上游请求，失败后的重试只由用户明确触发；
+- 发芽 Route 不注册工具，不使用 function calling、Conversation API、`previous_response_id`、远端会话、
+  Streaming、background mode 或 Agent Loop，也不返回原始 provider 响应；
+- 版本化 `sprout-v1` Developer Prompt 与不可信 Fragment user 数据分离，网页正文和用户内容不能覆盖 Prompt 或
+  输出 Schema；
+- 一次只返回一个具体化方向、一个引导问题和一个允许动作，或者统一的信息不足结果；completed 内容不能推荐
+  再次标记完成，服务端和客户端均复验动作兼容性；
+- “换个方向”只在当前临时会话携带最近最多 3 个未采纳方向，每次仍是单独请求；旧方向不写库、不创建
+  ChatMessage、不增加成长分；
+- OpenAI 未启用、未配置、超时、限流、模型不可用或响应无效时显示固定本地引导；NPC、详情和原始内容继续
+  可用，不暴露错误堆栈或把失败伪装成已生成建议；
+- “按建议继续”只打开现有补充、发展新想法或完成确认流程，不自动执行推荐动作。
 
-## 尚未决定或不在本次范围
+## 建议保存与成长
 
-- 思维发芽 Prompt、最终视觉稿和具体模型策略；
-- 是否最终删除旧开放聊天代码、旧 ChatMessage 数据或 7B Route；
-- 伙伴是否真实走到植物旁边、正式角色素材、像素动画、观察动画和发芽特效；
-- 声音、每日主动提醒、图片、语音、相似碎片、花丛和像素视觉升级。
+- 建议在用户确认前只存在于当前界面，不写入用户内容；
+- 点击“保存这条建议”后才在现有 `fragmentEvents` 中写入 `partner_suggestion_saved`，并由事件投影为来源明确的
+  “伙伴建议”补充历史；payload 保存方向、问题、推荐动作、`source: "partner"`、Prompt 版本和本地日期键；
+- suggestion id 同时作为事件 id，重复保存同一建议幂等；冲突 id、deleted 状态或不兼容动作会被拒绝；
+- 同一 Fragment 按浏览器本地日期每天最多由保存伙伴建议增加一次成长分（+1），同日其他建议仍可保存；打开、
+  生成和换方向都不计分；
+- Fragment、Plant、`partner_suggestion_saved` 和必要的 `restored` Event 在同一事务中更新，失败完整回滚；
+- active 保持 active；dormant 恢复 active；completed 保持完成和永久盛开；archived 保持封存、`slotId = null`，
+  不重新占用花园槽位；deleted 不允许分析或保存；
+- 保存不覆盖原文或标题，不自动创建子碎片、执行动作、完成、封存或删除。
+
+## 验收与测试
+
+- 单元测试覆盖 readiness、上下文裁剪、Prompt、Responses API Client、Route、独立披露、错误规范化、动作兼容、
+  建议保存幂等、每日成长去重和各生命周期状态；
+- Playwright 使用 Route Mock 覆盖信息不足不调用 AI、首次披露、结构化建议、换方向、确认保存、状态保持和
+  AI 失败降级；
+- 自动化测试不调用真实 OpenAI 或 GetNote，不依赖阶段 7B 的开放 Chat UI；
+- 阶段 7B 的旧 Chat UI、`/api/companion/respond`、ChatMessage 和三个受限工具继续隐藏保留，没有被删除或
+  重新暴露给普通用户；
+- 真实 OpenAI 冒烟与自动化验证分开：正式六次 `/api/sprout/analyze` 请求均 HTTP 200，端到端约 2.2～4.6
+  秒，输出 65～97 tokens、reasoning tokens 为 0；空链接额外请求为 0，旧 companion 与 GetNote 路径为 0；
+- `gpt-5-mini-2025-08-07` 的原失败由 700 个输出额度中的 640 tokens 全部被 reasoning 消耗导致，仅返回
+  reasoning item 而没有 `output_text`；最终改用无需 reasoning 参数的 `gpt-4.1-mini-2025-04-14`，没有通过
+  放大 token 上限掩盖问题。
+
+## 阶段边界
+
+阶段 9 不包含伙伴真实走到植物旁、正式角色素材、像素动画、观察动画、发芽特效、声音、图片、语音、
+Embedding、相似碎片或花丛，也不决定是否删除旧开放聊天代码和 ChatMessage 数据。阶段 10 尚未开始，后续
+候选仍需单独重新规划。
 
 ---
 

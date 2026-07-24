@@ -66,6 +66,9 @@ export type FragmentRelationStatus = "suggested" | "confirmed" | "ignored";
 
 export type RecommendationReason = "dormant" | "not_reviewed" | "related_to_recent";
 export type ChatMessageRole = "user" | "assistant";
+export type CompanionAiMode = "local" | "openai";
+export type ChatMessageSource = "local" | "openai" | "tool" | "system";
+export type ChatMessageStatus = "pending" | "completed" | "failed";
 export type LinkImportProvider = "getnote";
 export type LinkImportStatus = "pending" | "processing" | "completed" | "failed";
 export type LinkImportInitiator = "form" | "companion";
@@ -78,6 +81,10 @@ export type Settings = {
   lastOpenedAt: string | null;
   lastRecommendationDate: string | null;
   getNoteDisclosureAcceptedAt: string | null;
+  /** Optional for V3 records; queryLocalSettings supplies the local default. */
+  openAiDisclosureAcceptedAt?: string | null;
+  /** Optional for V3 records; missing values are treated as local mode. */
+  companionAiMode?: CompanionAiMode;
   schemaVersion: number;
 };
 
@@ -175,6 +182,10 @@ export type ChatMessage = {
   role: ChatMessageRole;
   content: string;
   createdAt: string;
+  source?: ChatMessageSource;
+  status?: ChatMessageStatus;
+  clientRequestId?: string;
+  errorCode?: string | null;
 };
 
 export type ExternalLinkImport = {

@@ -1,7 +1,8 @@
 import { parseExternalUrl } from "../links/external-url";
 
 export type CompanionAction =
-  Readonly<{ type: "RECOMMEND_FRAGMENT" }> | Readonly<{ type: "IMPORT_LINK"; url: string }>;
+  | Readonly<{ type: "RECOMMEND_FRAGMENT" }>
+  | Readonly<{ type: "IMPORT_LINK"; url: string; title?: string | null; requestId?: string }>;
 
 export type CompanionResponse = Readonly<{
   message: string;

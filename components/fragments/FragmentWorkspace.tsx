@@ -23,6 +23,7 @@ import {
   setAudioLocalOnly,
 } from "@/services/audio-media-processing";
 import { queryLocalSettings } from "@/data/queries/companion-query";
+import { MVP_VOICE_INPUT_ENABLED } from "@/lib/product-capabilities";
 
 import { CreateFragmentDialog, type CreatedFragmentNotice } from "./CreateFragmentDialog";
 import { ImageDisclosureDialog } from "./ImageDisclosureDialog";
@@ -605,7 +606,7 @@ export function FragmentWorkspace({
           if (notice.contentType === "image") {
             void startImageProcessingFlow(notice.mediaAssetId, notice.fragmentId);
           }
-          if (notice.contentType === "audio") {
+          if (MVP_VOICE_INPUT_ENABLED && notice.contentType === "audio") {
             void startVoiceProcessingFlow(notice.mediaAssetId, notice.fragmentId);
           }
           if (isExternalCreateRequestRef.current) {

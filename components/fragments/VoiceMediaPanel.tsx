@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { Fragment, MediaAsset } from "@/domain";
 import { queryLocalSettings } from "@/data/queries/companion-query";
+import { MVP_VOICE_INPUT_ENABLED } from "@/lib/product-capabilities";
 import { acceptVoiceDisclosure } from "@/services/accept-voice-disclosure";
 import {
   processAudioTranscription,
@@ -224,10 +225,14 @@ export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) 
             {STATUS_LABELS[mediaAsset.processingStatus]}
           </span>
         </div>
-        {mediaAsset.errorCode === "request_interrupted" ? (
+        {MVP_VOICE_INPUT_ENABLED && mediaAsset.errorCode === "request_interrupted" ? (
           <p aria-live="polite" className="mt-2 text-sm text-garden-muted" role="status">
             上次处理未完成，可以重试。
           </p>
+        ) : null}
+
+        {!MVP_VOICE_INPUT_ENABLED ? (
+          <p className="mt-2 text-sm leading-6 text-garden-muted">当前版本暂不提供新的语音转写。</p>
         ) : null}
 
         {audioUrl !== null ? (
@@ -291,7 +296,9 @@ export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) 
             />
           ) : (
             <p className="mt-2 rounded-xl border border-dashed border-garden-line px-4 py-4 text-sm leading-6 text-garden-muted">
-              还没有转写文字。你可以稍后同意发送当前录音进行转写，也可以只保存在本地。
+              {MVP_VOICE_INPUT_ENABLED
+                ? "还没有转写文字。你可以稍后同意发送当前录音进行转写，也可以只保存在本地。"
+                : "还没有转写文字。原始录音仍保存在本地。"}
             </p>
           )}
 
@@ -326,7 +333,7 @@ export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) 
           </p>
         ) : null}
 
-        {!isDeleted && !isProcessing ? (
+        {MVP_VOICE_INPUT_ENABLED && !isDeleted && !isProcessing ? (
           <AsyncButton
             className="mt-5 rounded-full border border-garden-accent px-4 py-2.5 text-sm font-semibold text-garden-accent hover:bg-garden-soft disabled:opacity-50"
             disabled={isPending}
@@ -340,34 +347,38 @@ export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) 
         ) : null}
       </section>
 
-      <VoiceDisclosureDialog
-        errorMessage={errorMessage}
-        isOpen={isDisclosureOpen}
-        isPending={isPending}
-        onAccept={() => void acceptDisclosureAndTranscribe()}
-        onCancel={() => {
-          if (!isPending) {
-            setIsDisclosureOpen(false);
-            setReplaceEditedTranscript(false);
-          }
-        }}
-        onLocalOnly={() => void chooseLocalOnly()}
-      />
+      {MVP_VOICE_INPUT_ENABLED ? (
+        <>
+          <VoiceDisclosureDialog
+            errorMessage={errorMessage}
+            isOpen={isDisclosureOpen}
+            isPending={isPending}
+            onAccept={() => void acceptDisclosureAndTranscribe()}
+            onCancel={() => {
+              if (!isPending) {
+                setIsDisclosureOpen(false);
+                setReplaceEditedTranscript(false);
+              }
+            }}
+            onLocalOnly={() => void chooseLocalOnly()}
+          />
 
-      <VoiceReplaceTranscriptDialog
-        isOpen={isReplaceConfirmOpen}
-        isPending={isPending}
-        onCancel={() => {
-          if (!isPending) {
-            setIsReplaceConfirmOpen(false);
-            setReplaceEditedTranscript(false);
-          }
-        }}
-        onConfirm={() => {
-          setIsReplaceConfirmOpen(false);
-          void startTranscriptionFlow(true);
-        }}
-      />
+          <VoiceReplaceTranscriptDialog
+            isOpen={isReplaceConfirmOpen}
+            isPending={isPending}
+            onCancel={() => {
+              if (!isPending) {
+                setIsReplaceConfirmOpen(false);
+                setReplaceEditedTranscript(false);
+              }
+            }}
+            onConfirm={() => {
+              setIsReplaceConfirmOpen(false);
+              void startTranscriptionFlow(true);
+            }}
+          />
+        </>
+      ) : null}
     </>
   );
 }

@@ -3,6 +3,7 @@
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import { queryLocalSettings } from "@/data/queries/companion-query";
+import { MVP_VOICE_INPUT_ENABLED } from "@/lib/product-capabilities";
 import { acceptGetNoteDisclosure } from "@/services/accept-getnote-disclosure";
 import { createMediaFragment } from "@/services/create-media-fragment";
 import { createLocalFragment } from "@/services/create-local-fragment";
@@ -142,7 +143,7 @@ export function CreateFragmentDialog({
   }
 
   function selectVoiceMode(): void {
-    if (isPending || mode === "voice") {
+    if (!MVP_VOICE_INPUT_ENABLED || isPending || mode === "voice") {
       return;
     }
 
@@ -505,19 +506,21 @@ export function CreateFragmentDialog({
             >
               图片
             </button>
-            <button
-              aria-pressed={isVoiceMode}
-              className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                isVoiceMode
-                  ? "bg-garden-paper text-garden-accent shadow-sm"
-                  : "text-garden-muted hover:text-garden-ink"
-              }`}
-              disabled={isPending}
-              onClick={selectVoiceMode}
-              type="button"
-            >
-              语音
-            </button>
+            {MVP_VOICE_INPUT_ENABLED ? (
+              <button
+                aria-pressed={isVoiceMode}
+                className={`rounded-full px-4 py-2 text-sm font-semibold ${
+                  isVoiceMode
+                    ? "bg-garden-paper text-garden-accent shadow-sm"
+                    : "text-garden-muted hover:text-garden-ink"
+                }`}
+                disabled={isPending}
+                onClick={selectVoiceMode}
+                type="button"
+              >
+                语音
+              </button>
+            ) : null}
           </div>
 
           {selectionError !== null ? (

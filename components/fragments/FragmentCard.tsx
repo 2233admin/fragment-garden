@@ -70,11 +70,11 @@ function resolveExcerpt(fragment: FragmentCardViewModel): string {
       case "processing":
         return "语音已经先保存在本地，正在等待转写结果。";
       case "failed":
-        return "语音仍保留在本地，转写失败后可以重新尝试。";
+        return "语音仍保留在本地。当前版本暂不提供新的语音转写。";
       case "local_only":
         return "语音只保存在本地，没有发送给 OpenAI。";
       default:
-        return "语音已经保存在本地。";
+        return "语音已经保存在本地。当前版本暂不提供新的语音转写。";
     }
   }
   if (fragment.excerpt.length > 0) {

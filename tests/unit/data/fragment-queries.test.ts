@@ -3,7 +3,7 @@ import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ExternalLinkImport } from "../../../domain";
+import type { ExternalLinkImport, MediaAsset } from "../../../domain";
 import { FragmentGardenDatabase } from "../../../data/db";
 import { listFragmentCardViewModels } from "../../../data/queries/fragment-card-query";
 import { getFragmentDetailViewModel } from "../../../data/queries/fragment-detail-query";
@@ -150,6 +150,60 @@ describe("listFragmentCardViewModels", () => {
     await database.fragments.add(createStageTwoFragment({ id: "fragment-without-plant" }));
 
     await expect(listFragmentCardViewModels(database)).rejects.toThrow("Plant not found");
+  });
+
+  it("keeps historical voice fragments and their local media available", async () => {
+    const fragment = createStageTwoFragment({
+      id: "voice-fragment",
+      contentType: "audio",
+      title: "一段旧录音",
+      rawText: null,
+    });
+    const plant = createStageTwoPlant({ id: "voice-plant", fragmentId: fragment.id });
+    const mediaAsset: MediaAsset = {
+      id: "voice-asset",
+      fragmentId: fragment.id,
+      kind: "audio",
+      blob: new Blob(["historical voice"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      fileName: "voice-recording.webm",
+      sizeBytes: 16,
+      width: null,
+      height: null,
+      durationMs: 12_000,
+      processingStatus: "completed",
+      processingRequestId: null,
+      errorCode: null,
+      temporaryTitle: null,
+      generatedTitle: null,
+      summary: null,
+      visibleText: null,
+      contentKind: null,
+      transcript: "这是已经保存的转写。",
+      originalTranscript: "这是已经保存的转写。",
+      transcriptEditedAt: null,
+      createdAt: fragment.createdAt,
+      updatedAt: fragment.updatedAt,
+    };
+
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+    await database.mediaAssets.add(mediaAsset);
+
+    await expect(listFragmentCardViewModels(database)).resolves.toEqual([
+      expect.objectContaining({
+        id: fragment.id,
+        contentType: "audio",
+        mediaKind: "audio",
+        mediaDurationMs: 12_000,
+        mediaProcessingStatus: "completed",
+      }),
+    ]);
+
+    const detail = await getFragmentDetailViewModel(fragment.id, database);
+    expect(detail?.mediaAsset).toEqual(mediaAsset);
+    await expect(detail?.mediaAsset?.blob.text()).resolves.toBe("historical voice");
+    expect(detail?.mediaAsset?.transcript).toBe("这是已经保存的转写。");
   });
 });
 

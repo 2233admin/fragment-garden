@@ -1,18 +1,26 @@
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page, type Route } from "@playwright/test";
 
 import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
 import { clearFragmentGardenIndexedDb, readFragmentGardenPersistence } from "./helpers/indexed-db";
 
-const TRANSCRIPT = "今天记录一个可以慢慢整理的想法。";
+const VOICE_TITLE = "留在花园里的语音想法";
+const ORIGINAL_TRANSCRIPT = "今天记录一个可以慢慢整理的想法。";
+const EDITED_TRANSCRIPT = "今天先整理这个想法最重要的第一步。";
 
-declare global {
-  interface Window {
-    __voiceRecorderTestState?: {
-      getUserMediaCalls: number;
-      stoppedTracks: number;
-    };
-  }
-}
+type CapturedSproutRequest = {
+  avoidDirections: string[];
+  fragment: {
+    additions: Array<{ content: string; source: "partner" | "user" }>;
+    body: string | null;
+    linkSummary: string | null;
+    linkText: string | null;
+    mediaContentKind?: string | null;
+    mediaSummary?: string;
+    mediaTranscript?: string;
+    mediaVisibleText?: string;
+    title: string;
+  };
+};
 
 function baseUrl(): string {
   const value = test.info().project.use.baseURL;
@@ -20,237 +28,281 @@ function baseUrl(): string {
   return value;
 }
 
-async function installRecorderStub(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    class FakeTrack {
-      stopped = false;
-
-      stop(): void {
-        this.stopped = true;
-      }
-    }
-
-    class FakeStream {
-      private readonly tracks = [new FakeTrack()];
-
-      getTracks(): FakeTrack[] {
-        return this.tracks;
-      }
-    }
-
-    class FakeMediaRecorder {
-      static isTypeSupported(type: string): boolean {
-        return type === "audio/webm;codecs=opus";
-      }
-
-      readonly mimeType = "audio/webm;codecs=opus";
-      state: "inactive" | "recording" = "inactive";
-      ondataavailable: ((event: { data: Blob }) => void) | null = null;
-      onerror: (() => void) | null = null;
-      onstop: (() => void) | null = null;
-
-      constructor() {}
-
-      start(): void {
-        this.state = "recording";
-      }
-
-      stop(): void {
-        if (this.state === "inactive") return;
-        this.ondataavailable?.({
-          data: new Blob(["controlled voice recording"], { type: this.mimeType }),
-        });
-        this.state = "inactive";
-        this.onstop?.();
-      }
-    }
-
-    const state = { getUserMediaCalls: 0, stoppedTracks: 0 };
-    Object.defineProperty(window, "__voiceRecorderTestState", {
-      configurable: true,
-      value: state,
-    });
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        getUserMedia: async () => {
-          state.getUserMediaCalls += 1;
-          const stream = new FakeStream();
-          const originalGetTracks = stream.getTracks.bind(stream);
-          stream.getTracks = () =>
-            originalGetTracks().map((track) => {
-              const originalStop = track.stop.bind(track);
-              track.stop = () => {
-                if (!track.stopped) state.stoppedTracks += 1;
-                originalStop();
-              };
-              return track;
-            });
-          return stream;
-        },
-      },
-    });
-    Object.defineProperty(window, "MediaRecorder", {
-      configurable: true,
-      value: FakeMediaRecorder,
-    });
-  });
-}
-
 async function initializeGarden(context: BrowserContext, page: Page): Promise<void> {
   await clearFragmentGardenIndexedDb(context, page, baseUrl());
-  await installRecorderStub(page);
   await page.goto("/garden");
   await completeCompanionOnboardingIfNeeded(page);
   await page.getByRole("button", { name: "卡片模式", exact: true }).click();
+  await expect(page.getByRole("button", { name: "卡片模式", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 }
 
-test("creates a local voice fragment before disclosure and restores its transcript", async ({
+async function seedHistoricalVoiceFragment(page: Page): Promise<void> {
+  await page.evaluate(
+    async ({ originalTranscript, title }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("fragment-garden");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+      const transaction = database.transaction(
+        ["settings", "fragments", "plants", "mediaAssets"],
+        "readwrite",
+      );
+      const completion = new Promise<void>((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      const timestamp = "2026-07-25T08:00:00.000Z";
+      const fragmentId = "historical-voice-fragment";
+
+      const sampleRate = 8_000;
+      const sampleCount = 2_000;
+      const bytesPerSample = 2;
+      const dataLength = sampleCount * bytesPerSample;
+      const waveBuffer = new ArrayBuffer(44 + dataLength);
+      const view = new DataView(waveBuffer);
+      const writeAscii = (offset: number, value: string): void => {
+        for (let index = 0; index < value.length; index += 1) {
+          view.setUint8(offset + index, value.charCodeAt(index));
+        }
+      };
+      writeAscii(0, "RIFF");
+      view.setUint32(4, 36 + dataLength, true);
+      writeAscii(8, "WAVE");
+      writeAscii(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * bytesPerSample, true);
+      view.setUint16(32, bytesPerSample, true);
+      view.setUint16(34, 16, true);
+      writeAscii(36, "data");
+      view.setUint32(40, dataLength, true);
+      const blob = new Blob([waveBuffer], { type: "audio/wav" });
+
+      const settingsStore = transaction.objectStore("settings");
+      const settings = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const request = settingsStore.get("local-user");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          if (request.result === undefined) {
+            reject(new Error("Local settings were not initialized"));
+            return;
+          }
+          resolve(request.result as Record<string, unknown>);
+        };
+      });
+      settingsStore.put({
+        ...settings,
+        sproutAiDisclosureAcceptedAt: timestamp,
+      });
+
+      transaction.objectStore("fragments").put({
+        id: fragmentId,
+        contentType: "audio",
+        title,
+        rawText: null,
+        sourceUrl: null,
+        summary: null,
+        keywords: [],
+        lifecycleStatus: "active",
+        completionStatus: "open",
+        analysisStatus: "completed",
+        embedding: null,
+        parentFragmentId: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastInteractedAt: timestamp,
+        completedAt: null,
+      });
+      transaction.objectStore("plants").put({
+        id: "plant-historical-voice",
+        fragmentId,
+        speciesId: null,
+        stage: "seedling",
+        vitality: "active",
+        growthScore: 0,
+        slotId: "slot-01",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      transaction.objectStore("mediaAssets").put({
+        id: "asset-historical-voice",
+        fragmentId,
+        kind: "audio",
+        blob,
+        mimeType: "audio/wav",
+        fileName: "historical-voice.wav",
+        sizeBytes: blob.size,
+        width: null,
+        height: null,
+        durationMs: 250,
+        processingStatus: "completed",
+        processingRequestId: null,
+        errorCode: null,
+        temporaryTitle: null,
+        generatedTitle: null,
+        summary: null,
+        visibleText: null,
+        contentKind: null,
+        transcript: originalTranscript,
+        originalTranscript,
+        transcriptEditedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+
+      await completion;
+      database.close();
+    },
+    { originalTranscript: ORIGINAL_TRANSCRIPT, title: VOICE_TITLE },
+  );
+}
+
+async function fulfillSproutSuggestion(route: Route): Promise<void> {
+  await route.fulfill({
+    body: JSON.stringify({
+      type: "suggestion",
+      direction: "先把语音里提到的第一步写成一句可以执行的话。",
+      guidingQuestion: "完成这一步时，你希望看到什么具体结果？",
+      recommendedAction: "record_next_step",
+    }),
+    contentType: "application/json",
+    status: 200,
+  });
+}
+
+test("keeps the default create dialog limited to text, link, and image", async ({
   context,
   page,
 }) => {
+  let transcriptionRequests = 0;
+  await page.route("**/api/media/audio/transcribe", async (route) => {
+    transcriptionRequests += 1;
+    await route.fulfill({ body: "{}", contentType: "application/json", status: 500 });
+  });
   await initializeGarden(context, page);
 
   await page.getByRole("button", { name: "种下碎片", exact: true }).click();
   const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
-  await createDialog.getByRole("button", { name: "语音", exact: true }).click();
-  const voiceDialog = page.getByRole("dialog", { name: "种下语音碎片" });
-  await expect(
-    voiceDialog.getByText("点击开始后才会申请麦克风权限。", { exact: false }),
-  ).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => window.__voiceRecorderTestState?.getUserMediaCalls))
-    .toBe(0);
+  await expect(createDialog).toBeVisible();
 
-  await voiceDialog.getByRole("button", { name: "开始录音", exact: true }).click();
-  await expect(voiceDialog.getByText("正在录音", { exact: false })).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => window.__voiceRecorderTestState?.getUserMediaCalls))
-    .toBe(1);
-  await page.waitForTimeout(300);
-  await voiceDialog.getByRole("button", { name: "停止录音", exact: true }).click();
-  await expect(voiceDialog.getByText("录音已经准备好", { exact: true })).toBeVisible();
-  await voiceDialog.getByLabel("标题（可选）").fill("一段语音想法");
-  await voiceDialog.getByRole("button", { name: "种下语音", exact: true }).click();
+  const modeGroup = createDialog.getByRole("group", { name: "碎片类型" });
+  const modeButtons = modeGroup.getByRole("button");
+  await expect(modeButtons).toHaveCount(3);
+  await expect(modeButtons).toHaveText(["文字", "链接", "图片"]);
+  await expect(modeGroup.getByRole("button", { name: "语音", exact: true })).toHaveCount(0);
+  await expect(createDialog.getByRole("button", { name: "开始录音", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "种下语音碎片" })).toHaveCount(0);
 
-  await expect(voiceDialog).toBeHidden();
-  await expect(page.getByText("语音已经先种下了。", { exact: true })).toBeVisible();
-  await expect
-    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets.length)
-    .toBe(1);
-  let persistence = await readFragmentGardenPersistence(page);
-  expect(persistence.fragments).toHaveLength(1);
-  expect(persistence.fragments[0]?.contentType).toBe("audio");
-  expect(persistence.mediaAssets[0]).toMatchObject({
-    kind: "audio",
-    mimeType: "audio/webm",
-    processingStatus: "pending",
-  });
-  expect(persistence.mediaAssets[0]?.blobSize).toBeGreaterThan(0);
+  const textButton = modeGroup.getByRole("button", { name: "文字", exact: true });
+  const linkButton = modeGroup.getByRole("button", { name: "链接", exact: true });
+  const imageButton = modeGroup.getByRole("button", { name: "图片", exact: true });
+  await textButton.focus();
+  await page.keyboard.press("Tab");
+  await expect(linkButton).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(imageButton).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(createDialog.getByLabel("标题（可选）")).toBeFocused();
 
-  const disclosure = page.getByRole("dialog", { name: "发送当前录音前，请先确认" });
-  await expect(disclosure).toBeVisible();
+  await imageButton.click();
+  const imageDialog = page.getByRole("dialog", { name: "种下图片碎片" });
+  await expect(imageDialog.locator('input[type="file"]')).toBeVisible();
+  await expect(imageDialog.getByRole("button", { name: "开始录音", exact: true })).toHaveCount(0);
+  await imageDialog.getByRole("button", { name: "文字", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "种下文字碎片" }).getByLabel("内容")).toBeVisible();
 
-  let requestCount = 0;
-  await page.route("**/api/media/audio/transcribe", async (route) => {
-    requestCount += 1;
-    const clientRequestId = route.request().headers()["x-client-request-id"] ?? "voice-e2e-request";
-    await route.fulfill({
-      body: JSON.stringify({
-        requestId: "00000000-0000-4000-8000-000000000002",
-        clientRequestId,
-        transcription: { transcript: TRANSCRIPT },
-      }),
-      contentType: "application/json",
-      status: 200,
-    });
-  });
-  await disclosure.getByRole("button", { name: "同意并转写", exact: true }).click();
-
-  await expect.poll(() => requestCount).toBe(1);
-  await expect
-    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets[0]?.processingStatus)
-    .toBe("completed");
-  expect(await page.evaluate(() => window.__voiceRecorderTestState?.stoppedTracks)).toBe(1);
-
-  await page.getByRole("button", { name: "打开碎片：一段语音想法" }).click();
-  const detail = page.getByRole("dialog", { name: "一段语音想法" });
-  await expect(detail.getByRole("heading", { name: "语音", exact: true })).toBeVisible();
-  await expect(detail.getByLabel("用户上传的语音：一段语音想法")).toBeVisible();
-  await expect(detail.getByText(TRANSCRIPT, { exact: true })).toBeVisible();
-  await expect(detail.getByLabel("编辑转写文字")).toHaveValue(TRANSCRIPT);
-
-  await detail.getByLabel("编辑转写文字").fill("用户修改后的转写");
-  await detail.getByRole("button", { name: "保存转写修改", exact: true }).click();
-  await expect(detail.getByLabel("编辑转写文字")).toHaveValue("用户修改后的转写");
-
-  await detail.getByRole("button", { name: "关闭详情", exact: true }).click();
-  await page.reload();
-  await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-  await page.getByRole("button", { name: "打开碎片：一段语音想法" }).click();
-  const refreshedDetail = page.getByRole("dialog", { name: "一段语音想法" });
-  await expect(refreshedDetail.getByLabel("编辑转写文字")).toHaveValue("用户修改后的转写");
-  persistence = await readFragmentGardenPersistence(page);
-  expect(persistence.mediaAssets[0]?.transcript).toBe("用户修改后的转写");
-  expect(requestCount).toBe(1);
+  expect(transcriptionRequests).toBe(0);
   expect(await page.locator("canvas").count()).toBeLessThanOrEqual(1);
 });
 
-test("permission denial does not create a voice fragment", async ({ context, page }) => {
-  await clearFragmentGardenIndexedDb(context, page, baseUrl());
-  await page.addInitScript(() => {
-    class UnsupportedRecorder {
-      static isTypeSupported(): boolean {
-        return true;
-      }
-    }
-    Object.defineProperty(window, "MediaRecorder", {
-      configurable: true,
-      value: UnsupportedRecorder,
-    });
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        getUserMedia: async () => {
-          throw new DOMException("permission denied", "NotAllowedError");
-        },
-      },
-    });
-  });
-  await page.goto("/garden");
-  await completeCompanionOnboardingIfNeeded(page);
-  await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-  await page.getByRole("button", { name: "种下碎片", exact: true }).click();
-  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
-  await createDialog.getByRole("button", { name: "语音", exact: true }).click();
-  const voiceDialog = page.getByRole("dialog", { name: "种下语音碎片" });
-  await voiceDialog.getByRole("button", { name: "开始录音", exact: true }).click();
-  await expect(voiceDialog.getByRole("alert")).toContainText("没有获得麦克风权限");
-  const persistence = await readFragmentGardenPersistence(page);
-  expect(persistence.fragments).toHaveLength(0);
-  expect(persistence.mediaAssets).toHaveLength(0);
-});
-
-test("closing a recording dialog stops the microphone without creating media", async ({
+test("keeps historical voice playback and transcript editing without exposing retranscription", async ({
   context,
   page,
 }) => {
+  let transcriptionRequests = 0;
+  const sproutRequests: CapturedSproutRequest[] = [];
+  let sproutRequestBody = "";
+  await page.route("**/api/media/audio/transcribe", async (route) => {
+    transcriptionRequests += 1;
+    await route.fulfill({ body: "{}", contentType: "application/json", status: 500 });
+  });
+  await page.route("**/api/sprout/analyze", async (route) => {
+    sproutRequestBody = route.request().postData() ?? "";
+    sproutRequests.push(route.request().postDataJSON() as CapturedSproutRequest);
+    await fulfillSproutSuggestion(route);
+  });
+
   await initializeGarden(context, page);
+  await seedHistoricalVoiceFragment(page);
+  await page.reload();
+  await page.getByRole("button", { name: "卡片模式", exact: true }).click();
 
-  await page.getByRole("button", { name: "种下碎片", exact: true }).click();
-  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
-  await createDialog.getByRole("button", { name: "语音", exact: true }).click();
-  const voiceDialog = page.getByRole("dialog", { name: "种下语音碎片" });
+  const cardButton = page.getByRole("button", { name: `打开碎片：${VOICE_TITLE}` });
+  await expect(cardButton).toBeVisible();
+  await expect(
+    cardButton.locator("xpath=ancestor::article").getByText("语音", { exact: true }),
+  ).toBeVisible();
+  await cardButton.click();
 
-  await voiceDialog.getByRole("button", { name: "开始录音", exact: true }).click();
-  await expect(voiceDialog.getByText("正在录音", { exact: false })).toBeVisible();
-  await voiceDialog.press("Escape");
-  await expect(voiceDialog).toBeHidden();
+  const detail = page.getByRole("dialog", { name: VOICE_TITLE });
+  const audio = detail.getByLabel(`用户上传的语音：${VOICE_TITLE}`);
+  await expect(audio).toBeVisible();
+  await expect(audio).toHaveAttribute("src", /^blob:/u);
+  const localAudio = await audio.evaluate(async (element) => {
+    const response = await fetch((element as HTMLAudioElement).src);
+    const blob = await response.blob();
+    return { size: blob.size, type: blob.type };
+  });
+  expect(localAudio).toEqual({ size: 4_044, type: "audio/wav" });
+
+  await expect(detail.getByText("当前版本暂不提供新的语音转写。", { exact: true })).toBeVisible();
+  await expect(detail.getByRole("button", { name: "重新转写", exact: true })).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "转写录音", exact: true })).toHaveCount(0);
+  const transcriptInput = detail.getByLabel("编辑转写文字");
+  await expect(transcriptInput).toHaveValue(ORIGINAL_TRANSCRIPT);
+
+  await transcriptInput.fill(EDITED_TRANSCRIPT);
+  await detail.getByRole("button", { name: "保存转写修改", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__voiceRecorderTestState?.stoppedTracks))
-    .toBe(1);
+    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets[0]?.transcript)
+    .toBe(EDITED_TRANSCRIPT);
+  await expect(detail.getByText("查看原始转写", { exact: true })).toBeVisible();
 
-  const persistence = await readFragmentGardenPersistence(page);
-  expect(persistence.fragments).toHaveLength(0);
-  expect(persistence.mediaAssets).toHaveLength(0);
+  await detail.getByRole("button", { name: "让伙伴帮它发芽", exact: true }).click();
+  const sproutDialog = page.getByRole("dialog", { name: "思维发芽" });
+  await expect(sproutDialog.getByRole("heading", { name: "伙伴建议" })).toBeVisible();
+  await expect(
+    sproutDialog.getByText("先把语音里提到的第一步写成一句可以执行的话。", { exact: true }),
+  ).toBeVisible();
+
+  expect(sproutRequests).toHaveLength(1);
+  const sproutRequest = sproutRequests[0];
+  expect(sproutRequest).toBeDefined();
+  if (sproutRequest === undefined) {
+    throw new Error("Expected the historical voice fragment to request thought sprouting");
+  }
+  expect(sproutRequest.fragment).toMatchObject({
+    additions: [],
+    body: null,
+    linkSummary: null,
+    linkText: null,
+    mediaTranscript: EDITED_TRANSCRIPT,
+    title: VOICE_TITLE,
+  });
+  expect(sproutRequest.fragment).not.toHaveProperty("mediaSummary");
+  expect(sproutRequest.fragment).not.toHaveProperty("mediaVisibleText");
+  expect(sproutRequest.fragment).not.toHaveProperty("mediaContentKind");
+  expect(sproutRequest.fragment).not.toHaveProperty("blob");
+  expect(sproutRequestBody).not.toContain("audio/wav");
+  expect(sproutRequestBody).not.toContain("historical-voice.wav");
+  expect(sproutRequestBody).not.toContain("RIFF");
+  expect(transcriptionRequests).toBe(0);
+  expect(await page.locator("canvas").count()).toBeLessThanOrEqual(1);
 });

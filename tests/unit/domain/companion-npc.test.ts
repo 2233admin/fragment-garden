@@ -147,8 +147,11 @@ describe("companion NPC fixed copy", () => {
 
     expect(growth).toHaveLength(2);
     expect(growth.join("\n")).toContain("同类行为在同一天只计一次");
+    expect(growth.join("\n")).toContain("添加图片");
+    expect(growth.join("\n")).toContain("添加语音");
     expect(growth.join("\n")).toContain("写下一步");
-    expect(growth.join("\n")).toContain("图片与语音尚未完成");
+    expect(growth.join("\n")).toContain("不会增加成长分");
+    expect(growth.join("\n")).toContain("不会自动改变植物阶段");
     expect(lifecycle.join("\n")).toContain("72 小时");
     expect(lifecycle.join("\n")).toContain("不会死亡");
     expect(lifecycle.join("\n")).toContain("永久盛开");

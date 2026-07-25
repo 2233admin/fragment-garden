@@ -107,6 +107,10 @@ describe("listFragmentCardViewModels", () => {
       analysisStatus: visibleFragment.analysisStatus,
       linkImportStatus: null,
       linkImportErrorMessage: null,
+      mediaKind: null,
+      mediaProcessingStatus: null,
+      mediaSizeBytes: null,
+      mediaDurationMs: null,
       createdAt: visibleFragment.createdAt,
       lastInteractedAt: visibleFragment.lastInteractedAt,
       lifecycleStatus: visibleFragment.lifecycleStatus,
@@ -128,6 +132,10 @@ describe("listFragmentCardViewModels", () => {
       analysisStatus: "completed",
       linkImportStatus: "completed",
       linkImportErrorMessage: null,
+      mediaKind: null,
+      mediaProcessingStatus: null,
+      mediaSizeBytes: null,
+      mediaDurationMs: null,
       createdAt: linkFragment.createdAt,
       lastInteractedAt: linkFragment.lastInteractedAt,
       lifecycleStatus: linkFragment.lifecycleStatus,
@@ -251,6 +259,7 @@ describe("getFragmentDetailViewModel", () => {
       ],
       sourceFragment: null,
       childFragments: [],
+      mediaAsset: null,
     });
   });
 

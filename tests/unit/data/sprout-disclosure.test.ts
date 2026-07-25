@@ -55,6 +55,8 @@ describe("sprout AI disclosure", () => {
       getNoteDisclosureAcceptedAt: "2026-07-22T08:00:00.000Z",
       openAiDisclosureAcceptedAt: "2026-07-23T08:00:00.000Z",
       companionAiMode: "local",
+      imageAiDisclosureAcceptedAt: null,
+      voiceAiDisclosureAcceptedAt: null,
       schemaVersion: 1,
     };
     await database.settings.add(stored);

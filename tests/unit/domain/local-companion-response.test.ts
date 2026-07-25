@@ -23,7 +23,7 @@ describe("LocalCompanionResponseEngine", () => {
   );
 
   it.each(["植物为什么长大？", "怎么让它开花？", "成长分是什么？"])(
-    "answers growth intent without claiming unfinished inputs are available for %s",
+    "answers growth intent with the current media inputs for %s",
     (message) => {
       const response = engine.respond({ message });
 
@@ -31,8 +31,8 @@ describe("LocalCompanionResponseEngine", () => {
         message: COMPANION_GROWTH_RESPONSE,
         action: null,
       });
-      expect(response.message).toContain("当前版本支持文字补充和链接碎片");
-      expect(response.message).toContain("图片与语音将在后续版本加入");
+      expect(response.message).toContain("图片或语音");
+      expect(response.message).toContain("不会自动改变植物阶段");
     },
   );
 

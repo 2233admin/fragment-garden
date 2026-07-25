@@ -38,6 +38,8 @@ describe("acceptGetNoteDisclosure", () => {
       openAiDisclosureAcceptedAt: null,
       companionAiMode: "local",
       sproutAiDisclosureAcceptedAt: null,
+      imageAiDisclosureAcceptedAt: null,
+      voiceAiDisclosureAcceptedAt: null,
       schemaVersion: 1,
     });
     await expect(database.settings.get("local-user")).resolves.toEqual(settings);

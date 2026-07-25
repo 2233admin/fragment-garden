@@ -45,8 +45,24 @@ export type StoredChatMessage = {
   role: string;
 };
 
+export type StoredMediaAsset = {
+  id: string;
+  fragmentId: string;
+  kind: string;
+  mimeType: string;
+  sizeBytes: number;
+  processingStatus: string;
+  processingRequestId: string | null;
+  summary: string | null;
+  visibleText: string | null;
+  generatedTitle: string | null;
+  transcript: string | null;
+  blobSize: number;
+};
+
 export type FragmentGardenPersistenceState = {
   chatMessages: StoredChatMessage[];
+  mediaAssets: StoredMediaAsset[];
   externalLinkImports: StoredExternalLinkImport[];
   fragmentEvents: StoredFragmentEvent[];
   fragments: StoredFragment[];
@@ -54,6 +70,8 @@ export type FragmentGardenPersistenceState = {
   openAiDisclosureAcceptedAt: string | null;
   plants: StoredPlant[];
   sproutAiDisclosureAcceptedAt: string | null;
+  imageAiDisclosureAcceptedAt: string | null;
+  voiceAiDisclosureAcceptedAt: string | null;
 };
 
 export async function clearFragmentGardenIndexedDb(
@@ -76,10 +94,16 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
-    const transaction = database.transaction(
-      ["settings", "fragments", "plants", "fragmentEvents", "externalLinkImports", "chatMessages"],
-      "readonly",
-    );
+    const storeNames = [
+      "settings",
+      "fragments",
+      "plants",
+      "fragmentEvents",
+      "externalLinkImports",
+      "chatMessages",
+      "mediaAssets",
+    ].filter((name) => database.objectStoreNames.contains(name));
+    const transaction = database.transaction(storeNames, "readonly");
     const readAll = <T>(storeName: string): Promise<T[]> =>
       new Promise<T[]>((resolve, reject) => {
         const request = transaction.objectStore(storeName).getAll();
@@ -91,6 +115,8 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
           getNoteDisclosureAcceptedAt?: string | null;
           openAiDisclosureAcceptedAt?: string | null;
           sproutAiDisclosureAcceptedAt?: string | null;
+          imageAiDisclosureAcceptedAt?: string | null;
+          voiceAiDisclosureAcceptedAt?: string | null;
         }
       | undefined
     > =>
@@ -104,23 +130,62 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
                   getNoteDisclosureAcceptedAt?: string | null;
                   openAiDisclosureAcceptedAt?: string | null;
                   sproutAiDisclosureAcceptedAt?: string | null;
+                  imageAiDisclosureAcceptedAt?: string | null;
+                  voiceAiDisclosureAcceptedAt?: string | null;
                 }
               | undefined,
           );
       });
-    const [settings, fragments, plants, fragmentEvents, externalLinkImports, chatMessages] =
-      await Promise.all([
-        readSettings(),
-        readAll<StoredFragment>("fragments"),
-        readAll<StoredPlant>("plants"),
-        readAll<StoredFragmentEvent>("fragmentEvents"),
-        readAll<StoredExternalLinkImport>("externalLinkImports"),
-        readAll<StoredChatMessage>("chatMessages"),
-      ]);
+    const [
+      settings,
+      fragments,
+      plants,
+      fragmentEvents,
+      externalLinkImports,
+      chatMessages,
+      mediaAssets,
+    ] = await Promise.all([
+      readSettings(),
+      readAll<StoredFragment>("fragments"),
+      readAll<StoredPlant>("plants"),
+      readAll<StoredFragmentEvent>("fragmentEvents"),
+      readAll<StoredExternalLinkImport>("externalLinkImports"),
+      readAll<StoredChatMessage>("chatMessages"),
+      database.objectStoreNames.contains("mediaAssets")
+        ? readAll<{
+            id: string;
+            fragmentId: string;
+            kind: string;
+            mimeType: string;
+            sizeBytes: number;
+            processingStatus: string;
+            processingRequestId: string | null;
+            summary: string | null;
+            visibleText: string | null;
+            generatedTitle: string | null;
+            transcript: string | null;
+            blob: Blob;
+          }>("mediaAssets")
+        : Promise.resolve([]),
+    ]);
 
     database.close();
     return {
       chatMessages,
+      mediaAssets: mediaAssets.map((asset) => ({
+        id: asset.id,
+        fragmentId: asset.fragmentId,
+        kind: asset.kind,
+        mimeType: asset.mimeType,
+        sizeBytes: asset.sizeBytes,
+        processingStatus: asset.processingStatus,
+        processingRequestId: asset.processingRequestId,
+        summary: asset.summary,
+        visibleText: asset.visibleText,
+        generatedTitle: asset.generatedTitle,
+        transcript: asset.transcript,
+        blobSize: asset.blob.size,
+      })),
       externalLinkImports,
       fragmentEvents,
       fragments,
@@ -128,6 +193,8 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
       openAiDisclosureAcceptedAt: settings?.openAiDisclosureAcceptedAt ?? null,
       plants,
       sproutAiDisclosureAcceptedAt: settings?.sproutAiDisclosureAcceptedAt ?? null,
+      imageAiDisclosureAcceptedAt: settings?.imageAiDisclosureAcceptedAt ?? null,
+      voiceAiDisclosureAcceptedAt: settings?.voiceAiDisclosureAcceptedAt ?? null,
     };
   });
 }

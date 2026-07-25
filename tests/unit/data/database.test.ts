@@ -3,12 +3,21 @@ import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { ChatMessage, ExternalLinkImport, Fragment, Plant, Settings } from "../../../domain";
+import type {
+  ChatMessage,
+  ExternalLinkImport,
+  Fragment,
+  FragmentEvent,
+  Plant,
+  Settings,
+} from "../../../domain";
 import { FragmentGardenDatabase } from "../../../data/db";
 import {
   FRAGMENT_GARDEN_DATABASE_VERSION,
   FRAGMENT_GARDEN_DATABASE_VERSION_V2,
+  FRAGMENT_GARDEN_DATABASE_VERSION_V3,
   FRAGMENT_GARDEN_SCHEMA_V1,
+  FRAGMENT_GARDEN_SCHEMA_V3,
 } from "../../../data/schema";
 
 const databaseInstances: FragmentGardenDatabase[] = [];
@@ -83,6 +92,7 @@ describe("FragmentGardenDatabase", () => {
         "externalLinkImports",
         "fragmentEvents",
         "fragments",
+        "mediaAssets",
         "plants",
         "recommendations",
         "relations",
@@ -131,6 +141,65 @@ describe("FragmentGardenDatabase", () => {
       database.externalLinkImports.schema.indexes.find((index) => index.name === "normalizedUrl")
         ?.unique,
     ).toBe(false);
+    expect(database.mediaAssets.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["fragmentId", "kind", "processingStatus", "createdAt"]),
+    );
+  });
+
+  it("upgrades a V3 database without changing old records and starts with no media assets", async () => {
+    const databaseName = `fragment-garden-v3-media-upgrade-${crypto.randomUUID()}`;
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase
+      .version(FRAGMENT_GARDEN_DATABASE_VERSION_V3)
+      .stores({ ...FRAGMENT_GARDEN_SCHEMA_V1, ...FRAGMENT_GARDEN_SCHEMA_V3 });
+    await legacyDatabase.open();
+
+    const fragment = createFragment("v3-fragment");
+    const plant = createPlant("v3-plant", fragment.id, "slot-04");
+    const event: FragmentEvent = {
+      id: "v3-created-event",
+      fragmentId: fragment.id,
+      type: "created",
+      payload: null,
+      occurredAt: fragment.createdAt,
+      ruleVersion: 1,
+    };
+    const settings: Settings = {
+      id: "local-user",
+      onboardingCompleted: true,
+      companionType: "dog",
+      lastOpenedAt: null,
+      lastRecommendationDate: null,
+      getNoteDisclosureAcceptedAt: null,
+      openAiDisclosureAcceptedAt: null,
+      companionAiMode: "local",
+      sproutAiDisclosureAcceptedAt: null,
+      schemaVersion: 3,
+    };
+    const message: ChatMessage = {
+      id: "v3-message",
+      fragmentId: fragment.id,
+      role: "assistant",
+      content: "legacy message",
+      createdAt: fragment.createdAt,
+    };
+
+    await legacyDatabase.table<Fragment>("fragments").add(fragment);
+    await legacyDatabase.table<Plant>("plants").add(plant);
+    await legacyDatabase.table<FragmentEvent>("fragmentEvents").add(event);
+    await legacyDatabase.table<Settings>("settings").add(settings);
+    await legacyDatabase.table<ChatMessage>("chatMessages").add(message);
+    legacyDatabase.close();
+
+    const upgradedDatabase = createTestDatabase(databaseName);
+    await upgradedDatabase.open();
+
+    await expect(upgradedDatabase.fragments.get(fragment.id)).resolves.toEqual(fragment);
+    await expect(upgradedDatabase.plants.get(plant.id)).resolves.toEqual(plant);
+    await expect(upgradedDatabase.fragmentEvents.get(event.id)).resolves.toEqual(event);
+    await expect(upgradedDatabase.settings.get(settings.id)).resolves.toEqual(settings);
+    await expect(upgradedDatabase.chatMessages.get(message.id)).resolves.toEqual(message);
+    await expect(upgradedDatabase.mediaAssets.count()).resolves.toBe(0);
   });
 
   it("upgrades V1 data without loss and releases retired fragment slots", async () => {

@@ -6,9 +6,12 @@
 
 1. 完成可以真实使用一周的本地 MVP；
 2. 花园具有人物移动和植物交互；
-3. 文字、链接、图片、语音、规则型 NPC 和绑定 Fragment 的思维发芽边界清晰可靠；
+3. 当前激活的文字、链接、图片、规则型 NPC 和绑定 Fragment 的思维发芽边界清晰可靠；
 4. 原始媒体先本地保存，再进行可选的服务端 AI 处理；
 5. 后续增加云端能力时，不需要推翻核心业务逻辑。
+
+语音录制、audio MediaAsset、转写 Route、transcript 编辑和 voice-to-sprout 兼容作为保留但未激活的 Post-MVP /
+Experimental 技术能力存在，不参与当前普通创建流程。
 
 核心职责：
 
@@ -86,7 +89,7 @@ MVP 阶段锁定 Phaser 3.90.0，不升级到 Phaser 4，不混用不同版本 A
 Next.js Route Handlers（当前实现与后续候选）
 ├── 内容分析（历史/候选）
 ├── 图片理解 `POST /api/media/image/analyze`（阶段 10A）
-├── 语音转写 `POST /api/media/audio/transcribe`（阶段 10B）
+├── 语音转写 `POST /api/media/audio/transcribe`（阶段 10B 保留，Post-MVP 未激活）
 ├── Embedding（后续关联候选）
 ├── 伙伴过渡 AI Route（阶段 7B 当前实现）
 ├── 单 Fragment 思维发芽 Route（阶段 9 当前实现）
@@ -119,7 +122,8 @@ Sprout Analysis Service
 
 思维发芽只读取当前选中的 Fragment，AI 不访问 Dexie、不修改 Fragment；用户确认后由本地事务保存伙伴建议，
 Phaser 只负责伙伴显示和点击事件。
-图片和语音已在阶段 10 接入本地媒体流程；Embedding、相似碎片和花丛仍属于待重新规划的后续候选。
+图片已在阶段 10 接入当前本地媒体流程。语音底层实现与历史内容兼容继续保留，但普通创建和重新转写入口未激活；
+Embedding、相似碎片和花丛仍属于待重新规划的后续候选。
 
 ---
 
@@ -137,7 +141,7 @@ Phaser 只负责伙伴显示和点击事件。
 - 规则型 NPC 固定对话面板、选项和模板数据；
 - Fragment 详情中的思维发芽结果、等待、披露和错误状态；
 - 图片选择/粘贴、Blob 预览、图片披露与分析状态；
-- 语音录制状态、原始播放、语音披露、转写编辑与重试；
+- 历史语音的原始播放、已有转写查看与编辑；保留但未激活的录音状态、语音披露和重新转写实现；
 - 数据导入导出；
 - AI 状态反馈；
 - 通过 GameBridge 向 Phaser 发送数据。
@@ -217,7 +221,7 @@ Domain 不依赖 React、Phaser 或 Dexie。
 - 原子创建本地链接碎片并检查重复；
 - 原子创建图片或音频 Fragment、Plant、MediaAsset 和 `created` Event；
 - 编排 GetNote 提交、轮询、恢复和重试；
-- 编排图片分析和语音转写的披露、request id、结果写回、标题保护和手动重试；
+- 编排当前图片分析，以及保留但未激活的语音转写披露、request id、结果写回、标题保护和手动重试；
 - 后台 AI 分析（历史/后续候选，思维发芽除外）；
 - 相似候选生成（后续候选）；
 - 备份恢复。
@@ -430,7 +434,7 @@ type Attachment = {
 };
 ```
 
-`Attachment` 是历史附件结构，阶段 10 的主要图片和语音输入使用独立的 `MediaAsset`，以便保留原始 Blob 和处理状态。
+`Attachment` 是历史附件结构。当前图片输入和保留的语音技术基础使用独立的 `MediaAsset`，以便保留原始 Blob 和处理状态。
 代码中的语音 Fragment 使用 `contentType: "audio"`，产品层仍称“语音”，不另建 `voice` 枚举：
 
 ```ts
@@ -1184,23 +1188,27 @@ Sprout Analysis 使用独立 server-only Client、Prompt、Schema、错误规范
 → 本地校验
 → 写入 Fragment
 → 写入 Plant
-→ （图片/语音）写入 MediaAsset
+→ （图片）写入 MediaAsset
 → 写入 created Event
-→ 花园立即显示幼苗，详情立即预览或播放
-→ 用户单独同意后执行对应的可选媒体分析/转写
+→ 花园立即显示幼苗，详情立即预览
+→ 用户单独同意后执行可选图片分析
 ```
 
-文字、链接、图片和语音均先完成本地保存；媒体创建在一个 Dexie 事务中同时写入 Fragment、Plant、MediaAsset 和
+当前普通创建流程支持文字、链接和图片，图片先完成本地保存；媒体创建在一个 Dexie 事务中同时写入 Fragment、Plant、MediaAsset 和
 `created` Event，不等待 OpenAI，也不因无槽位、未配置 AI 或用户拒绝披露而失败。媒体处理使用同一 MediaAsset 的
 `processingRequestId` 做幂等和晚到响应保护。断网、AI、链接或媒体处理失败时，原始内容和植物仍然存在。
 思维发芽是用户随后在明确 Fragment 详情中主动发起的独立分析，不是创建碎片的隐式步骤。
+
+语音原子创建实现仍遵循完全相同的本地优先规则，但当前普通创建入口关闭。已有 audio Fragment、Plant、MediaAsset 和事件
+不受影响，仍可在卡片与详情读取、播放和编辑 transcript；不得因产品入口收敛删除或迁移这些数据。
 
 ---
 
 ## 11. AI 接口
 
-通用内容分析和 Embedding Route 仍是历史/后续候选，阶段 10 的图片和语音使用下列独立 Route；创建流程不会隐式调用
-OpenAI，新的发芽能力仍必须通过 11.6 的 Sprout Analysis Service 绑定明确 Fragment。
+通用内容分析和 Embedding Route 仍是历史/后续候选。阶段 10 的图片使用独立 Route；语音 Route 作为 Post-MVP 基础保留，
+当前普通创建流程不会调用。创建流程不会隐式调用 OpenAI，新的发芽能力仍必须通过 11.6 的 Sprout Analysis Service
+绑定明确 Fragment。
 
 ### 11.1 内容分析（历史/后续候选）
 
@@ -1264,7 +1272,7 @@ Prompt 明确要求只描述图片可支持的内容，不识别人物身份、�
 `file_too_large`、`invalid_image`、`authentication_failed`、`rate_limited`、`model_unavailable`、`request_timeout`、
 `response_incomplete`、`invalid_model_response` 和 `provider_error` 统一为安全错误码。
 
-### 11.3 语音转写（阶段 10B 当前实现）
+### 11.3 语音转写（阶段 10B 保留实现，Post-MVP 未激活）
 
 固定接口：
 
@@ -1276,14 +1284,15 @@ POST /api/media/audio/transcribe
 webm、ogg、wav、mp3、m4a/mp4 MIME，限制 15 MB 和产品 3 分钟上限，拒绝空文件、客户端 model、Prompt、Base URL、任意路径
 和未配置能力。
 
-服务端从 `OPENAI_TRANSCRIPTION_MODEL` 读取模型，调用 `client.audio.transcriptions.create`，使用 `response_format: "json"`，
+该 Route 与客户端处理服务继续保留，`OPENAI_TRANSCRIPTION_ENABLED` 默认关闭；当前普通创建与历史语音详情都不提供
+可触发转写的入口。服务端从 `OPENAI_TRANSCRIPTION_MODEL` 读取模型，调用 `client.audio.transcriptions.create`，使用 `response_format: "json"`，
 不使用 Streaming、翻译、说话人分离或词级时间戳。公共响应只保留经过 Zod 校验的非空 `{ transcript: string }`，不保存 provider
 body、usage、远端文件或音频正文。`transcription_disabled`、`missing_configuration`、`microphone_permission_denied`、
 `microphone_unavailable`、`recording_unsupported`、`recording_failed`、`empty_recording`、`unsupported_media_type`、
 `file_too_large`、`authentication_failed`、`rate_limited`、`model_unavailable`、`request_timeout`、`invalid_transcription` 和
 `provider_error` 统一为安全错误码。
 
-图片与语音都由本地 Media Processing Service 编排：开始请求时把同一 MediaAsset 标记为 `processing` 并写入 request id，
+图片与保留的语音能力都由本地 Media Processing Service 编排：开始请求时把同一 MediaAsset 标记为 `processing` 并写入 request id，
 成功时原子写回派生结果和 `completed`，失败时写入规范化 error code 和 `failed`。用户选择仅本地时直接写 `local_only`。
 服务初始化会把超时未完成的 `processing` 标记为可重试失败，但不自动重新调用 OpenAI；用户标题保护、deleted 检查、当前 request
 id 检查和晚到响应丢弃均在本地事务内完成。
@@ -1372,9 +1381,12 @@ Route 或 fetch Mock。阶段 9 真实服务验收使用 `gpt-4.1-mini-2025-04-1
 空链接由本地规则拦截为 0 次请求。模型仍通过服务端 `OPENAI_MODEL` 配置，不属于前端协议或硬编码能力。
 
 阶段 10 媒体接入不改变发芽 Route 协议：图片上下文只映射当前 MediaAsset 的 `summary`、`visibleText`、`contentKind`、
-Fragment 标题和用户补充；音频上下文只映射当前 MediaAsset 的 `transcript`、Fragment 标题和用户补充。只有派生文字或
+Fragment 标题和用户补充；历史音频上下文只映射当前 MediaAsset 的 `transcript`、Fragment 标题和用户补充。只有派生文字或
 用户补充满足本地 readiness 时才允许发芽；原始 Blob、MediaAsset id、其他 Fragment 和媒体分析请求体不会发送到
 `/api/sprout/analyze`，也不会在每次发芽时重复调用媒体 Route。
+
+因此已有有效 transcript 的历史 audio Fragment 仍可发芽；没有 transcript 且没有用户文字时仍判定信息不足。发芽路径
+从不发送原始音频，也不会为了发芽重新调用转写 Route。
 
 ---
 
@@ -1653,9 +1665,11 @@ MVP 只支持完整覆盖恢复，不做复杂合并。
 键盘打开休眠内容、刷新持久化和 Canvas 单实例。阶段 9 E2E 验收范围包括从详情发起发芽、信息不足时不调用
 AI、用户确认后才保存建议，以及 AI 不可用时本地发芽降级仍可用；自动化必须使用 Route Mock。
 
-阶段 10 E2E 使用浏览器文件、剪贴板和受控 MediaRecorder 替身覆盖图片本地先保存、独立披露、分析失败重试、刷新恢复、
-语音权限/取消/播放/转写/编辑/重试，以及图片和语音进入思维发芽时不发送原始媒体。自动化仍只使用 OpenAI/GetNote Mock，
-真实图片和真实麦克风冒烟与自动化分开。
+阶段 10 默认产品 E2E 覆盖图片本地先保存、独立披露、分析失败重试和刷新恢复，并验证创建 Dialog 只有文字、链接、图片，
+不会请求语音转写 Route。历史语音兼容 E2E 直接准备已有 audio 数据，验证播放、已有 transcript 查看与编辑、隐藏重新转写，
+以及有 transcript 时可进入思维发芽且不发送原始 Blob。受控 MediaRecorder 替身保留为显式 Post-MVP E2E 基础设施，
+不由默认产品套件启用；MediaRecorder、Route、处理竞态和错误边界继续由底层自动测试覆盖。这些 Mock 结果不代表真实
+语音链路已通过验收。自动化仍只使用 OpenAI/GetNote Mock。
 
 GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，避免创建远端笔记、依赖真实账号、
 产生费用或引入平台波动。真实 AI 冒烟测试不属于自动化测试。
@@ -1664,7 +1678,8 @@ GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，�
 
 ## 17. 开发顺序与重新规划状态
 
-当前实现顺序已经推进到阶段 10；10A/10B 的代码、自动化测试和构建已完成，真实图片与真实麦克风冒烟仍待人工验收：
+当前实现顺序已经推进并收敛到阶段 10：图片输入与真实分析已经可用；10B 的语音代码、自动化测试和构建已完成，
+但真实语音链路尚未稳定通过，因此延期为 Post-MVP / Experimental。阶段 11 尚未开始：
 
 1. 项目初始化与 Dexie；
 2. 文字碎片和卡片模式；
@@ -1675,15 +1690,17 @@ GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，�
 7. 7A GetNote 链接导入；7B 受限真实 AI 花园伙伴；
 8. 规则型 NPC 固定对话与本地花园 Action；
 9. 绑定单个 Fragment 的思维发芽、独立披露、结构化 AI 建议与确认保存。
-10. 图片本地媒体基础与分析、语音录制与转写；两者均先保存原始媒体，再由用户单独同意 AI 处理。
+10. 图片本地媒体基础与分析；语音录制与转写技术实现保留但未激活，历史 audio 数据继续兼容。
 
 阶段 7B 验证了服务端 AI、安全边界、受限工具和本地持久化能力；产品验证后已将伙伴定位校准为规则型
 NPC。阶段 8 已隐藏普通用户的开放聊天入口并实现固定对话、固定选项和本地 Action；阶段 7B 的服务层与
 持久化代码继续作为过渡基础设施保留。阶段 9 已实现单 Fragment 信息充分性判断、独立 OpenAI 披露、
 `/api/sprout/analyze`、结构化建议、换方向和本地确认保存；`partner_suggestion_saved` 已进入既有 Event 表并按
-本地日期执行成长去重。阶段 10 已新增 V4 `mediaAssets` 表、图片分析和语音转写 Route、独立披露、状态恢复、手动重试及
-发芽派生文本接入；媒体 AI 自动完成不增加成长分。阶段 9/10 自动化不调用真实 OpenAI；阶段 9 独立真实服务冒烟已完成六次受控
+本地日期执行成长去重。阶段 10 已新增 V4 `mediaAssets` 表并完成图片分析；语音转写 Route、独立披露、状态恢复、手动重试及
+发芽派生文本接入作为未激活基础保留。媒体 AI 自动完成不增加成长分。阶段 9/10 自动化不调用真实 OpenAI；阶段 9 独立真实服务冒烟已完成六次受控
 请求，验证结构化输出、内容边界、单请求并发、保存幂等和生命周期保持。
 
-Embedding、相似碎片、花丛、云端媒体、正式伙伴移动/像素动画和阶段 11 尚未开始。导入导出已有基础实现，后续只在 MVP
+语音延期是为了避免浏览器录音、媒体编码、权限与转写兼容成本影响 MVP 稳定展示，并不代表底层实现无效。未经重新规划和
+真实麦克风/provider 验收，不得恢复普通语音入口。阶段 10 收敛不创建 `m3-ai-inputs` 或替代 Tag。Embedding、相似碎片、花丛、
+云端媒体、正式伙伴移动/像素动画和阶段 11 尚未开始。导入导出已有基础实现，后续只在 MVP
 收口/回归需要时再评估增强。每个新阶段仍须先获得明确范围、测试和文档确认。

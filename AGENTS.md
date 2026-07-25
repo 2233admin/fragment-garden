@@ -197,16 +197,19 @@ AI：
 本地校验
 → 立即保存 Fragment
 → 立即保存 Plant
-→ （图片/语音）立即保存 MediaAsset 原始 Blob
+→ （图片）立即保存 MediaAsset 原始 Blob
 → 立即写入 created Event
-→ UI 显示幼苗并预览/播放媒体
+→ UI 显示幼苗并预览图片
 → （链接）按阶段 7A 规则异步读取
-→ （图片/语音）用户单独同意后才异步分析/转写
+→ （图片）用户单独同意后才异步分析
 ```
 
-当前创建流程不等待通用 AI，也不自动计算 Embedding 或相似候选。图片和语音必须先本地保存，之后才可由用户分别
-同意图片分析或语音转写；思维发芽只能由用户在共享详情中明确选中 Fragment 后主动发起。Embedding、相似候选和花丛
+当前普通 MVP 创建流程支持文字、链接和图片，不等待通用 AI，也不自动计算 Embedding 或相似候选。图片必须先本地保存，
+之后才可由用户单独同意图片分析；思维发芽只能由用户在共享详情中明确选中 Fragment 后主动发起。Embedding、相似候选和花丛
 仍属于待重新规划的后续能力。
+
+语音创建作为 Post-MVP / Experimental 技术能力保留但未激活。未来重新启用时，仍必须先在一个事务中保存 Fragment、Plant、
+audio MediaAsset 原始 Blob 和 `created` Event，再允许独立披露后的转写；不得等待 AI 成功才保存。
 
 禁止：
 
@@ -457,6 +460,9 @@ npm run test
 MediaRecorder 资源清理、语音转写编辑、独立披露、重试和媒体发芽文字边界。真实 AI 继续只用 Mock 测试，真实图片/麦克风
 冒烟必须与自动化分开并明确记录。
 
+语音相关单元、Route 和实验 E2E 通过只代表保留的技术基础可回归，不等于真实麦克风、浏览器编码或 provider 语音链路
+已经验收通过；任何文档和汇报都必须明确区分自动测试与真实语音验收。
+
 真实 AI 调用不进入普通自动化测试，使用 Mock。
 
 ---
@@ -540,18 +546,25 @@ MediaRecorder 资源清理、语音转写编辑、独立披露、重试和媒体
 - 阶段 9 已使用独立 `POST /api/sprout/analyze`、版本化 Prompt、strict Structured Output 和
   `store: false` 实现单 Fragment 发芽；它不使用工具调用、远端会话、`previous_response_id`、Streaming 或
   Agent Loop；
-- 阶段 10 已使用 Dexie V4 `mediaAssets` 实现图片和 audio 媒体输入：原始 Blob 必须先本地保存，Fragment、Plant、MediaAsset
-  和 `created` Event 必须原子创建；图片只走 `POST /api/media/image/analyze`，语音只走
-  `POST /api/media/audio/transcribe`；两者各自独立披露、状态、request id、失败保留和手动重试；
+- 阶段 10 已使用 Dexie V4 `mediaAssets` 实现当前图片输入和保留的 audio 技术基础：原始 Blob 必须先本地保存，Fragment、
+  Plant、MediaAsset 和 `created` Event 必须原子创建；图片只走 `POST /api/media/image/analyze`；语音代码只走
+  `POST /api/media/audio/transcribe`，但当前普通创建与重新转写入口均隐藏；两者各自独立披露、状态、request id 和失败保留；
 - 图片和语音分析/转写不得写入 ChatMessage、不得保存 provider 原始 Response、远端 file id 或 API Key；媒体完成不增加成长分，
   deleted 内容不能开始新请求，迟到响应不能写回；
-- 阶段 10 的思维发芽只能读取当前图片的摘要/可见文字/contentKind 或当前语音 transcript 与用户补充，不得发送原始 Blob、
+- 阶段 10 的思维发芽只能读取当前图片的摘要/可见文字/contentKind 或历史语音 transcript 与用户补充，不得发送原始 Blob、
   MediaAsset 以外的媒体或其他 Fragment；未有有效派生文字/补充时必须本地判定信息不足；
 - 旧 ChatMessage、`/api/companion/respond` 和三个受限工具继续作为不可见的过渡/调试基础设施保留，不得让
   普通用户重新进入开放聊天；阶段 11 尚未开始，不得提前开发 Embedding、相似碎片、花丛、伙伴移动/动画、云端媒体或像素视觉升级；
 - 猫和狗永远共用同一套固定对话、选项、服务、Prompt 和分析逻辑。
 
-阶段 10 的实现边界：图片只接受 PNG/JPEG/WebP、单张且不超过 10 MB；语音只允许用户点击后申请麦克风，使用
-`MediaRecorder`，最长 3 分钟且不超过 15 MB。必须通过 Blob URL 预览并在卸载时释放，录音的所有结束路径都必须停止
+阶段 10 的实现边界：图片只接受 PNG/JPEG/WebP、单张且不超过 10 MB。保留的语音实现只允许用户点击后申请麦克风，使用
+`MediaRecorder`，最长 3 分钟且不超过 15 MB；必须通过 Blob URL 预览并在卸载时释放，录音的所有结束路径都必须停止
 `stream.getTracks()`、清理计时器和监听器。转写的 `originalTranscript` 与可编辑 `transcript` 必须分开保存，重新转写不得
-静默覆盖用户编辑。不得实现图片相册、视频、音频文件上传、实时语音、Embedding、相似碎片、花丛、云同步、社交或阶段 11。
+静默覆盖用户编辑。
+
+语音收敛硬规则：未经重新规划并完成真实麦克风、浏览器媒体编码和 provider 验收，不得恢复普通用户语音创建入口或
+重新转写入口；不得删除 MediaRecorder、audio MediaAsset、V4 字段、Repository、转写 Route、provider client、转写编辑、
+voice-to-sprout 兼容或相关测试；已有 audio Fragment 必须继续可播放、查看和编辑 transcript，有有效 transcript 或用户
+补充时仍可发芽且不得发送原始 Blob。不得把 Mock 或自动测试通过表述为真实语音验收通过。
+
+不得实现图片相册、视频、音频文件上传、实时语音、Embedding、相似碎片、花丛、云同步、社交或阶段 11。

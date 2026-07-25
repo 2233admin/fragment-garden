@@ -20,15 +20,16 @@
 阶段 7A 已完成链接碎片、本地异步导入状态和受限的 GetNoteConnector。阶段 7B 已完成可降级的真实 AI
 花园伙伴、安全边界和三个受限工具。阶段 8 已完成规则型 NPC 入口：伙伴使用固定台词、固定选项和本地
 花园数据，不通过开放聊天工作。阶段 9 已实现绑定单个 Fragment 的“思维发芽”代码与 Mock 验证：先进行本地信息充分性
-检查，再在独立披露同意后可选调用 OpenAI，并且只有用户确认后才保存结构化伙伴建议。阶段 10 的图片与语音
-代码和自动化验证已经完成，真实图片与真实麦克风冒烟仍待人工验收：原始 Blob 先保存到 IndexedDB，再按用户分别
-同意的图片分析或语音转写披露调用服务端
-Route。阶段 7B 的开放聊天服务仍作为不可见的过渡和开发调试基础设施保留；阶段 11 尚未开始，Embedding、
+检查，再在独立披露同意后可选调用 OpenAI，并且只有用户确认后才保存结构化伙伴建议。阶段 10 的图片输入与真实
+分析已经可用：原始 Blob 先保存到 IndexedDB，再按独立图片披露调用服务端 Route。语音录制、audio MediaAsset、
+转写 Route、转写编辑和自动化测试等技术基础已经实现，但真实语音链路尚未稳定通过；普通 MVP 暂时隐藏新建语音和
+重新转写入口，后续作为 Post-MVP / Experimental 能力重新验证。阶段 7B 的开放聊天服务仍作为不可见的过渡和开发
+调试基础设施保留；阶段 11 尚未开始，Embedding、
 相似碎片、花丛、云同步和伙伴动画仍未实现。
 
 ## 第一版能力范围（当前实现与目标）
 
-- 当前可用文字、链接、图片和语音碎片的本地优先保存；原始图片和录音在任何 AI 请求前都已保存在当前浏览器；
+- 当前 MVP 可用文字、链接和图片碎片的本地优先保存；原始图片在任何 AI 请求前都已保存在当前浏览器；
 - 新碎片先生成一株统一幼苗；
 - 链接由受限 GetNoteConnector 异步读取，失败时保留原始 URL 和本地内容；
 - 用户可在固定花园地图中通过鼠标点击移动人物；
@@ -44,12 +45,11 @@ Route。阶段 7B 的开放聊天服务仍作为不可见的过渡和开发调�
   结构化建议，并且不直接修改原文、执行建议动作或切换植物成长阶段；
 - 图片支持 PNG、JPEG、WebP（单张、最大 10 MB），可选择文件或从剪贴板粘贴；图片详情使用 Blob URL 预览，
   分析状态和结果保存在本地，并可手动重试；
-- 语音支持浏览器 `MediaRecorder` 录制（最长 3 分钟、最大 15 MB），原始录音可立即播放；转写结果与用户编辑
-  版本分开保存，失败或拒绝 AI 时仍保留录音；
-- 图片分析和语音转写分别使用独立披露与固定 Route（`/api/media/image/analyze`、
-  `/api/media/audio/transcribe`），处理失败不会删除 Fragment、Plant 或原始媒体；
+- 图片分析使用独立披露与固定 Route（`/api/media/image/analyze`），处理失败不会删除 Fragment、Plant 或原始媒体；
+- 语音技术基础作为 Post-MVP / Experimental 能力保留：已有 audio Fragment 仍可从卡片和详情读取、播放原始录音、
+  查看或编辑已有 transcript，并可在有有效 transcript 或用户补充时进入思维发芽；普通 MVP 不提供新建语音或重新转写入口；
 - 阶段 7B 的开放输入、AI/基础模式和三个受限工具目前仍是技术过渡能力，不是校准后的普通用户入口；
-- 图片和语音不会因为分析或转写自动增加成长分或改变植物阶段；Embedding、相似碎片和花丛属于待重新规划的
+- 图片分析不会自动增加成长分或改变植物阶段；保留的语音转写实现也遵守同一边界。Embedding、相似碎片和花丛属于待重新规划的
   后续能力；
 - 数据保存在当前浏览器，不提供注册、登录和云端同步；
 - 支持本地数据导出与导入。
@@ -173,7 +173,8 @@ strict JSON Schema Structured Output 只返回一个具体化方向、一个引�
 保持封存且不重新占用槽位。AI 不覆盖原文，也不自动执行推荐动作。
 
 阶段 7B 的开放 Chat UI、Route、ChatMessage、OpenAI 服务层和三个受限工具仍保留为不可见的开发调试/过渡
-基础设施，不参与普通 NPC 或思维发芽路径。阶段 10 的图片和语音媒体能力已经接入共享创建和详情流程；正式伙伴
+基础设施，不参与普通 NPC 或思维发芽路径。阶段 10 的图片能力已经接入共享创建和详情流程；语音底层实现与历史
+内容兼容继续保留，但不参与当前普通创建流程。正式伙伴
 移动动画、Embedding、相似碎片和花丛不属于当前阶段，阶段 11 尚未开始。
 
 真实服务验收最终使用服务端 `OPENAI_MODEL` 配置的 `gpt-4.1-mini`（响应快照
@@ -214,28 +215,34 @@ npm run dev
 
 实际脚本以项目初始化后的 `package.json` 为准。
 
-## 阶段 10 媒体输入（代码与自动化验证完成，人工冒烟待验收）
+## 阶段 10 收敛：图片完成，语音延期
 
-阶段 10 将最初 MVP 的四种输入补齐为文字、链接、图片和语音。图片与语音都遵循“先本地保存，再可选 AI 处理”原则：
+当前 MVP 的输入范围是文字、链接和图片，AI 核心能力是思维发芽。图片遵循“先本地保存，再可选 AI 处理”原则：
 
 ```text
-选择/录制媒体
+选择图片
 → 本地校验
 → 一个事务创建 Fragment、Plant、MediaAsset 和 created Event
-→ 立即预览或播放
-→ 用户分别决定是否发送当前媒体给 OpenAI
+→ 立即预览
+→ 用户决定是否发送当前图片给 OpenAI
 → 结果写回同一 MediaAsset
 ```
 
 Dexie 已从 V3 升级到 V4，新增 `mediaAssets` 表，原始 `Blob`、MIME、大小、处理状态、请求 ID 和派生结果分开保存。
 V3 的 Fragment、Plant、事件、Settings、ChatMessage、GetNote 状态和伙伴建议均保留，刷新后媒体仍可读取。媒体状态为
-`pending`、`processing`、`completed`、`failed` 或 `local_only`；页面不会因刷新自动重复请求，过期的 processing 记录可由用户
-手动重试。删除内容不能开始新的处理，迟到响应也不能复活或覆盖已删除内容。
+`pending`、`processing`、`completed`、`failed` 或 `local_only`；页面不会因刷新自动重复请求。删除内容不能开始新的处理，
+迟到响应也不能复活或覆盖已删除内容。
 
-图片只接受 PNG、JPEG 和 WebP，最大 10 MB；语音录制使用浏览器 MediaRecorder，最长 3 分钟、最大 15 MB。图片披露与语音
-披露独立保存（`imageAiDisclosureAcceptedAt`、`voiceAiDisclosureAcceptedAt`），旧 Chat 或思维发芽同意不会代替它们。
-图片发芽只使用已保存的摘要、可见文字和用户补充；语音发芽只使用当前转写和用户补充，发芽 Route 不接收原始 Blob，也不读取
-其他 Fragment。媒体分析和转写完成本身不增加成长分、不切换植物阶段；用户后续编辑或确认建议仍遵循既有成长规则。
+图片只接受 PNG、JPEG 和 WebP，最大 10 MB。图片披露独立保存为 `imageAiDisclosureAcceptedAt`，旧 Chat 或思维发芽
+同意不会代替它。图片发芽只使用已保存的摘要、可见文字和用户补充；发芽 Route 不接收原始 Blob，也不读取其他 Fragment。
+图片分析完成本身不增加成长分、不切换植物阶段；用户后续编辑或确认建议仍遵循既有成长规则。
 
-图片和语音能力默认关闭，服务端只从 `.env.local` 读取 `OPENAI_IMAGE_ANALYSIS_ENABLED`、`OPENAI_IMAGE_MODEL`、
-`OPENAI_TRANSCRIPTION_ENABLED` 和 `OPENAI_TRANSCRIPTION_MODEL`；这些变量不使用 `NEXT_PUBLIC_` 前缀，模型不能由客户端提交。
+语音不是验证核心产品闭环的必要输入；文字、链接、图片与思维发芽已经能完成稳定、可展示的闭环，而浏览器录音、
+媒体编码、权限和转写存在更高的兼容成本。因此语音延期到 Post-MVP，并非删除或判定实现无效。V4 audio 数据、
+`MediaRecorder` 状态机、`/api/media/audio/transcribe`、独立披露字段、转写编辑和相关自动测试继续保留；已有录音和
+transcript 仍可读取、播放、编辑，有有效 transcript 的历史语音仍可发芽且不会发送原始 Blob。普通 MVP 创建 Dialog
+不显示语音，历史语音详情不显示重新转写，只显示“当前版本暂不提供新的语音转写。”
+
+图片分析由服务端从 `.env.local` 读取 `OPENAI_IMAGE_ANALYSIS_ENABLED` 和 `OPENAI_IMAGE_MODEL`。保留的转写 Route 继续读取
+默认关闭的 `OPENAI_TRANSCRIPTION_ENABLED` 和 `OPENAI_TRANSCRIPTION_MODEL`；普通用户路径不调用它。以上变量都不使用
+`NEXT_PUBLIC_` 前缀，模型不能由客户端提交。阶段 10 收敛不创建 `m3-ai-inputs` 或替代 Tag；阶段 11 尚未开始。

@@ -8,6 +8,12 @@ export type FragmentAnalysisStatus = "not_required" | "pending" | "completed" | 
 
 export type AttachmentKind = "image" | "audio";
 
+/** Media records keep the original browser Blob separate from derived text. */
+export type MediaAssetKind = "image" | "audio";
+export type MediaProcessingStatus =
+  "local_only" | "pending" | "processing" | "completed" | "failed";
+export type ImageContentKind = "screenshot" | "document" | "photo" | "diagram" | "other";
+
 export type FragmentEventType =
   | "created"
   | "viewed"
@@ -111,6 +117,10 @@ export type Settings = {
   companionAiMode?: CompanionAiMode;
   /** Optional for V3 records; queryLocalSettings supplies the local default. */
   sproutAiDisclosureAcceptedAt?: string | null;
+  /** Optional for pre-media records; media analysis asks for its own consent. */
+  imageAiDisclosureAcceptedAt?: string | null;
+  /** Optional for pre-media records; transcription asks for its own consent. */
+  voiceAiDisclosureAcceptedAt?: string | null;
   schemaVersion: number;
 };
 
@@ -150,6 +160,38 @@ export type Attachment = {
   transcript: string | null;
   extractedText: string | null;
   createdAt: string;
+};
+
+export type MediaAsset = {
+  id: string;
+  fragmentId: string;
+  kind: MediaAssetKind;
+
+  blob: Blob;
+  mimeType: string;
+  fileName: string | null;
+  sizeBytes: number;
+
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+
+  processingStatus: MediaProcessingStatus;
+  processingRequestId: string | null;
+  errorCode: string | null;
+
+  temporaryTitle: string | null;
+  generatedTitle: string | null;
+  summary: string | null;
+  visibleText: string | null;
+  contentKind: ImageContentKind | null;
+
+  transcript: string | null;
+  originalTranscript: string | null;
+  transcriptEditedAt: string | null;
+
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type FragmentEvent = {

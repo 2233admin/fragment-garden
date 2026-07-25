@@ -8,6 +8,7 @@ import type {
   Fragment,
   FragmentEvent,
   FragmentRelation,
+  MediaAsset,
   Plant,
   Recommendation,
   Settings,
@@ -30,6 +31,7 @@ export class FragmentGardenDatabase extends Dexie {
   recommendations!: Table<Recommendation, string>;
   chatMessages!: Table<ChatMessage, string>;
   externalLinkImports!: Table<ExternalLinkImport, string>;
+  mediaAssets!: Table<MediaAsset, string>;
 
   constructor(databaseName = FRAGMENT_GARDEN_DATABASE_NAME) {
     super(databaseName);

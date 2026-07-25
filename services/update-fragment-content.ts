@@ -61,7 +61,7 @@ export async function updateFragmentContent(
       const editedFields = input.editedFields ?? { title: true, rawText: true };
       const submittedRawText = input.rawText.trim().length === 0 ? null : input.rawText;
       const rawText = editedFields.rawText ? submittedRawText : fragment.rawText;
-      if (fragment.contentType !== "link" && rawText === null) {
+      if (fragment.contentType === "text" && rawText === null) {
         throw new Error("Fragment text cannot be empty");
       }
 

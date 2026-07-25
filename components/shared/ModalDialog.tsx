@@ -46,12 +46,17 @@ export function ModalDialog({
       className={`${className ?? ""} [&:not([open])]:hidden`}
       onCancel={(event) => {
         event.preventDefault();
+        // Nested dialogs can be rendered through a React portal while remaining
+        // in the same React event tree. Keep their cancellation local so an
+        // inner disclosure/preview cannot close its parent dialog.
+        event.stopPropagation();
 
         if (!isPending) {
           onRequestClose();
         }
       }}
-      onClose={() => {
+      onClose={(event) => {
+        event.stopPropagation();
         if (isOpen && !isPending) {
           onRequestClose();
         }

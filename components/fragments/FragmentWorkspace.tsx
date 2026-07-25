@@ -10,8 +10,23 @@ import {
   type FragmentCardSort,
   type FragmentCardViewModel,
 } from "@/data/queries/fragment-card-query";
+import { acceptImageDisclosure } from "@/services/accept-image-disclosure";
+import { acceptVoiceDisclosure } from "@/services/accept-voice-disclosure";
+import {
+  markStaleImageProcessing,
+  processImageAnalysis,
+  setImageLocalOnly,
+} from "@/services/image-media-processing";
+import {
+  markStaleAudioProcessing,
+  processAudioTranscription,
+  setAudioLocalOnly,
+} from "@/services/audio-media-processing";
+import { queryLocalSettings } from "@/data/queries/companion-query";
 
 import { CreateFragmentDialog, type CreatedFragmentNotice } from "./CreateFragmentDialog";
+import { ImageDisclosureDialog } from "./ImageDisclosureDialog";
+import { VoiceDisclosureDialog } from "./VoiceDisclosureDialog";
 import { EmptyFragmentState } from "./EmptyFragmentState";
 import { FragmentList } from "./FragmentList";
 import { FragmentSearchBar } from "./FragmentSearchBar";
@@ -20,7 +35,13 @@ import { FragmentStatusFilter } from "./FragmentStatusFilter";
 type CardQueryState =
   { status: "loading" } | { status: "error" } | { status: "ready"; cards: FragmentCardViewModel[] };
 
+type MediaDisclosureRequest = Readonly<{
+  assetId: string;
+  fragmentId: string;
+}>;
+
 const LOADING_CARD_STATE: CardQueryState = { status: "loading" };
+const MAX_IMAGE_PROCESSING_CONCURRENCY = 2;
 
 const FILTER_EMPTY_MESSAGES: Readonly<Record<FragmentCardFilter, string>> = {
   current: "当前没有可显示的碎片。已封存的内容仍可从“已封存”中找到。",
@@ -55,12 +76,35 @@ export function FragmentWorkspace({
   const [queryAttempt, setQueryAttempt] = useState(0);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [imageDisclosure, setImageDisclosure] = useState<MediaDisclosureRequest | null>(null);
+  const [imageDisclosureDialogKey, setImageDisclosureDialogKey] = useState("image-disclosure");
+  const [imageDisclosureError, setImageDisclosureError] = useState<string | null>(null);
+  const [isImageDisclosurePending, setIsImageDisclosurePending] = useState(false);
+  const [voiceDisclosure, setVoiceDisclosure] = useState<MediaDisclosureRequest | null>(null);
+  const [voiceDisclosureDialogKey, setVoiceDisclosureDialogKey] = useState("voice-disclosure");
+  const [voiceDisclosureError, setVoiceDisclosureError] = useState<string | null>(null);
+  const [isVoiceDisclosurePending, setIsVoiceDisclosurePending] = useState(false);
+  const imageProcessingActiveRef = useRef(new Set<string>());
+  const imageProcessingQueueRef = useRef<string[]>([]);
+  const imageProcessingDrainRef = useRef(false);
+  const voiceProcessingLockRef = useRef(false);
+  const voiceProcessingActiveAssetRef = useRef<string | null>(null);
+  const voiceProcessingQueueRef = useRef<string[]>([]);
+  const imageDisclosureRef = useRef<MediaDisclosureRequest | null>(null);
+  const imageDisclosureQueueRef = useRef<MediaDisclosureRequest[]>([]);
+  const voiceDisclosureRef = useRef<MediaDisclosureRequest | null>(null);
+  const voiceDisclosureQueueRef = useRef<MediaDisclosureRequest[]>([]);
   const seedButtonRef = useRef<HTMLButtonElement>(null);
   const workspaceRootRef = useRef<HTMLDivElement>(null);
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
   const handledOpenCreateRequestRef = useRef(0);
   const isExternalCreateRequestRef = useRef(false);
   const pendingOpenCreateRequestRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    void markStaleImageProcessing(new Date(Date.now() - 15 * 60 * 1000));
+    void markStaleAudioProcessing(new Date(Date.now() - 15 * 60 * 1000));
+  }, []);
 
   useEffect(() => {
     if (
@@ -141,6 +185,264 @@ export function FragmentWorkspace({
     setIsCreateOpen(false);
     isExternalCreateRequestRef.current = false;
     restoreFocus(createTriggerRef.current);
+  }
+
+  function openImageDisclosure(request: MediaDisclosureRequest): void {
+    if (
+      imageDisclosureRef.current?.assetId === request.assetId ||
+      imageDisclosureQueueRef.current.some((queued) => queued.assetId === request.assetId)
+    ) {
+      return;
+    }
+
+    if (imageDisclosureRef.current !== null) {
+      imageDisclosureQueueRef.current.push(request);
+      setFeedback("另一张图片正在等待隐私选择；这张图片稍后可以在详情中开始分析。");
+      return;
+    }
+
+    imageDisclosureRef.current = request;
+    setImageDisclosureDialogKey(request.assetId);
+    setImageDisclosureError(null);
+    setImageDisclosure(request);
+  }
+
+  function closeImageDisclosure(): void {
+    imageDisclosureRef.current = null;
+    setImageDisclosure(null);
+    setImageDisclosureError(null);
+    const next = imageDisclosureQueueRef.current.shift();
+    if (next !== undefined) {
+      imageDisclosureRef.current = next;
+      setImageDisclosureDialogKey(next.assetId);
+      setImageDisclosure(next);
+    }
+  }
+
+  function openVoiceDisclosure(request: MediaDisclosureRequest): void {
+    if (
+      voiceDisclosureRef.current?.assetId === request.assetId ||
+      voiceDisclosureQueueRef.current.some((queued) => queued.assetId === request.assetId)
+    ) {
+      return;
+    }
+
+    if (voiceDisclosureRef.current !== null) {
+      voiceDisclosureQueueRef.current.push(request);
+      setFeedback("另一段语音正在等待隐私选择；这段录音稍后可以在详情中开始转写。");
+      return;
+    }
+
+    voiceDisclosureRef.current = request;
+    setVoiceDisclosureDialogKey(request.assetId);
+    setVoiceDisclosureError(null);
+    setVoiceDisclosure(request);
+  }
+
+  function closeVoiceDisclosure(): void {
+    voiceDisclosureRef.current = null;
+    setVoiceDisclosure(null);
+    setVoiceDisclosureError(null);
+    const next = voiceDisclosureQueueRef.current.shift();
+    if (next !== undefined) {
+      voiceDisclosureRef.current = next;
+      setVoiceDisclosureDialogKey(next.assetId);
+      setVoiceDisclosure(next);
+    }
+  }
+
+  async function executeImageProcessing(assetId: string): Promise<void> {
+    try {
+      const result = await processImageAnalysis(assetId);
+      if (result === null) {
+        setFeedback("这次图片分析结果已过期，原图仍保存在本地，可以在详情中重试。");
+        return;
+      }
+      setFeedback("图片分析已完成，原图和结果都保存在本地。");
+    } catch {
+      setFeedback("图片已经保存在本地，但分析暂时失败，可以在详情中重试。");
+    } finally {
+      imageProcessingActiveRef.current.delete(assetId);
+      if (imageDisclosureRef.current?.assetId === assetId) {
+        closeImageDisclosure();
+      }
+      drainImageProcessingQueue();
+    }
+  }
+
+  function drainImageProcessingQueue(): void {
+    if (imageProcessingDrainRef.current) return;
+
+    imageProcessingDrainRef.current = true;
+    try {
+      while (
+        imageProcessingActiveRef.current.size < MAX_IMAGE_PROCESSING_CONCURRENCY &&
+        imageProcessingQueueRef.current.length > 0
+      ) {
+        const nextAssetId = imageProcessingQueueRef.current.shift();
+        if (nextAssetId === undefined || imageProcessingActiveRef.current.has(nextAssetId)) {
+          continue;
+        }
+
+        imageProcessingActiveRef.current.add(nextAssetId);
+        void executeImageProcessing(nextAssetId);
+      }
+    } finally {
+      imageProcessingDrainRef.current = false;
+    }
+  }
+
+  function runImageProcessing(assetId: string): void {
+    if (
+      imageProcessingActiveRef.current.has(assetId) ||
+      imageProcessingQueueRef.current.includes(assetId)
+    ) {
+      return;
+    }
+
+    imageProcessingQueueRef.current.push(assetId);
+    if (imageProcessingActiveRef.current.size >= MAX_IMAGE_PROCESSING_CONCURRENCY) {
+      setFeedback("图片已经保存在本地，前面的分析完成后会继续处理。");
+    }
+    drainImageProcessingQueue();
+  }
+
+  async function startImageProcessingFlow(assetId: string, fragmentId: string): Promise<void> {
+    try {
+      const settings = await queryLocalSettings();
+      if (settings.imageAiDisclosureAcceptedAt !== null) {
+        setImageDisclosureError(null);
+        runImageProcessing(assetId);
+        return;
+      }
+      openImageDisclosure({ assetId, fragmentId });
+    } catch {
+      if (imageDisclosureRef.current?.assetId === assetId) {
+        closeImageDisclosure();
+      }
+      setFeedback("暂时无法读取图片分析设置。图片仍保存在本地，请稍后重试。");
+    }
+  }
+
+  async function acceptImageProcessing(): Promise<void> {
+    if (imageDisclosure === null || isImageDisclosurePending) return;
+    setIsImageDisclosurePending(true);
+    setImageDisclosureError(null);
+    try {
+      await acceptImageDisclosure({ now: new Date().toISOString() });
+      const request = imageDisclosure;
+      closeImageDisclosure();
+      runImageProcessing(request.assetId);
+    } catch {
+      setImageDisclosureError("这次选择没有保存，图片仍只保存在本地。请重试。");
+    } finally {
+      setIsImageDisclosurePending(false);
+    }
+  }
+
+  async function keepImageLocalOnly(): Promise<void> {
+    if (imageDisclosure === null || isImageDisclosurePending) return;
+    setIsImageDisclosurePending(true);
+    try {
+      await setImageLocalOnly(imageDisclosure.assetId);
+      setFeedback("图片已保存在本地，没有发送给 OpenAI。");
+      closeImageDisclosure();
+    } catch {
+      setImageDisclosureError("暂时无法更新图片处理状态，图片仍然保存在本地。");
+    } finally {
+      setIsImageDisclosurePending(false);
+    }
+  }
+
+  async function executeVoiceProcessing(assetId: string): Promise<void> {
+    try {
+      const result = await processAudioTranscription(assetId);
+      if (result === null) {
+        setFeedback("这次语音转写结果已过期，录音仍保存在本地，可以在详情中重试。");
+        return;
+      }
+      setFeedback("语音转写已完成，录音和文字都保存在本地。");
+    } catch {
+      setFeedback("语音已经保存在本地，但转写暂时失败，可以在详情中重试。");
+    } finally {
+      voiceProcessingLockRef.current = false;
+      voiceProcessingActiveAssetRef.current = null;
+      if (voiceDisclosureRef.current?.assetId === assetId) {
+        closeVoiceDisclosure();
+      }
+      const nextAssetId = voiceProcessingQueueRef.current.shift();
+      if (nextAssetId !== undefined) {
+        voiceProcessingLockRef.current = true;
+        voiceProcessingActiveAssetRef.current = nextAssetId;
+        void executeVoiceProcessing(nextAssetId);
+      }
+    }
+  }
+
+  function runVoiceProcessing(assetId: string): void {
+    if (
+      voiceProcessingActiveAssetRef.current === assetId ||
+      voiceProcessingQueueRef.current.includes(assetId)
+    ) {
+      return;
+    }
+
+    if (voiceProcessingLockRef.current) {
+      voiceProcessingQueueRef.current.push(assetId);
+      setFeedback("语音已经保存在本地，前面的转写完成后会继续处理。");
+      return;
+    }
+
+    voiceProcessingLockRef.current = true;
+    voiceProcessingActiveAssetRef.current = assetId;
+    void executeVoiceProcessing(assetId);
+  }
+
+  async function startVoiceProcessingFlow(assetId: string, fragmentId: string): Promise<void> {
+    try {
+      const settings = await queryLocalSettings();
+      if (settings.voiceAiDisclosureAcceptedAt !== null) {
+        setVoiceDisclosureError(null);
+        runVoiceProcessing(assetId);
+        return;
+      }
+      openVoiceDisclosure({ assetId, fragmentId });
+    } catch {
+      if (voiceDisclosureRef.current?.assetId === assetId) {
+        closeVoiceDisclosure();
+      }
+      setFeedback("暂时无法读取语音转写设置。录音仍保存在本地，请稍后重试。");
+    }
+  }
+
+  async function acceptVoiceProcessing(): Promise<void> {
+    if (voiceDisclosure === null || isVoiceDisclosurePending) return;
+    setIsVoiceDisclosurePending(true);
+    setVoiceDisclosureError(null);
+    try {
+      await acceptVoiceDisclosure({ now: new Date().toISOString() });
+      const request = voiceDisclosure;
+      closeVoiceDisclosure();
+      runVoiceProcessing(request.assetId);
+    } catch {
+      setVoiceDisclosureError("这次选择没有保存，录音仍只保存在本地。请重试。");
+    } finally {
+      setIsVoiceDisclosurePending(false);
+    }
+  }
+
+  async function keepVoiceLocalOnly(): Promise<void> {
+    if (voiceDisclosure === null || isVoiceDisclosurePending) return;
+    setIsVoiceDisclosurePending(true);
+    try {
+      await setAudioLocalOnly(voiceDisclosure.assetId);
+      setFeedback("语音已保存在本地，没有发送给 OpenAI。");
+      closeVoiceDisclosure();
+    } catch {
+      setVoiceDisclosureError("暂时无法更新语音处理状态，录音仍然保存在本地。");
+    } finally {
+      setIsVoiceDisclosurePending(false);
+    }
   }
 
   const WorkspaceRoot = layout === "page" ? "main" : "div";
@@ -300,12 +602,32 @@ export function FragmentWorkspace({
         isOpen={isCreateOpen}
         onClose={closeCreateDialog}
         onCreated={(notice) => {
+          if (notice.contentType === "image") {
+            void startImageProcessingFlow(notice.mediaAssetId, notice.fragmentId);
+          }
+          if (notice.contentType === "audio") {
+            void startVoiceProcessingFlow(notice.mediaAssetId, notice.fragmentId);
+          }
           if (isExternalCreateRequestRef.current) {
             onExternalCreateCompleted?.(notice);
           }
 
-          if (notice.contentType !== "link") {
+          if (
+            notice.contentType !== "link" &&
+            notice.contentType !== "image" &&
+            notice.contentType !== "audio"
+          ) {
             setFeedback(`“${notice.title}”已保存，并出现在卡片列表中。`);
+            return;
+          }
+
+          if (notice.contentType === "image") {
+            setFeedback("图片已经先种下了。");
+            return;
+          }
+
+          if (notice.contentType === "audio") {
+            setFeedback("语音已经先种下了。");
             return;
           }
 
@@ -317,6 +639,34 @@ export function FragmentWorkspace({
         }}
         onOpenExistingFragment={onOpenFragment}
         onStartLinkImport={onStartLinkImport}
+      />
+
+      <ImageDisclosureDialog
+        errorMessage={imageDisclosureError}
+        isOpen={imageDisclosure !== null}
+        isPending={isImageDisclosurePending}
+        key={imageDisclosureDialogKey}
+        onAccept={() => void acceptImageProcessing()}
+        onCancel={() => {
+          if (!isImageDisclosurePending) {
+            closeImageDisclosure();
+          }
+        }}
+        onLocalOnly={() => void keepImageLocalOnly()}
+      />
+
+      <VoiceDisclosureDialog
+        errorMessage={voiceDisclosureError}
+        isOpen={voiceDisclosure !== null}
+        isPending={isVoiceDisclosurePending}
+        key={voiceDisclosureDialogKey}
+        onAccept={() => void acceptVoiceProcessing()}
+        onCancel={() => {
+          if (!isVoiceDisclosurePending) {
+            closeVoiceDisclosure();
+          }
+        }}
+        onLocalOnly={() => void keepVoiceLocalOnly()}
       />
     </WorkspaceRoot>
   );

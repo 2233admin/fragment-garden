@@ -25,6 +25,11 @@ export type SproutContentReadinessInput = Readonly<{
   linkSummary: string | null;
   linkText: string | null;
   sourceUrl: string | null;
+  mediaSummary?: string | null;
+  mediaVisibleText?: string | null;
+  mediaTranscript?: string | null;
+  /** Media titles are labels, not sufficient evidence for a sprout request. */
+  mediaKind?: "image" | "audio";
 }>;
 
 export type SproutContentReadiness =
@@ -62,7 +67,8 @@ function hasMeaningfulText(value: string, isTitle = false): boolean {
 export function evaluateSproutContentReadiness(
   input: SproutContentReadinessInput,
 ): SproutContentReadiness {
-  const hasMeaningfulTitle = hasMeaningfulText(input.title, true);
+  const hasMeaningfulTitle =
+    input.mediaKind === undefined ? hasMeaningfulText(input.title, true) : false;
   const hasMeaningfulBody = hasMeaningfulText(input.body ?? "");
   const hasMeaningfulAddition = input.additions.some((addition) =>
     hasMeaningfulText(addition.content),
@@ -71,6 +77,10 @@ export function evaluateSproutContentReadiness(
   const hasMeaningfulLinkText = hasMeaningfulText(input.linkText ?? "");
   const hasMeaningfulLinkContent =
     hasMeaningfulBody || hasMeaningfulAddition || hasMeaningfulSummary || hasMeaningfulLinkText;
+  const hasMeaningfulMediaContent =
+    hasMeaningfulText(input.mediaSummary ?? "") ||
+    hasMeaningfulText(input.mediaVisibleText ?? "") ||
+    hasMeaningfulText(input.mediaTranscript ?? "");
 
   // Imported titles can look specific even when the provider returned no readable content.
   // A link needs body, summary, extracted text, or an explicit user addition before AI analysis.
@@ -80,7 +90,7 @@ export function evaluateSproutContentReadiness(
       : { isReady: false, reason: "unreadable_link" };
   }
 
-  if (hasMeaningfulTitle || hasMeaningfulLinkContent) {
+  if (hasMeaningfulTitle || hasMeaningfulLinkContent || hasMeaningfulMediaContent) {
     return { isReady: true };
   }
 

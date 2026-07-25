@@ -15,10 +15,12 @@ import { FragmentDetailOverview } from "./FragmentDetailOverview";
 import { FragmentDispositionDialog } from "./FragmentDispositionDialog";
 import { FragmentEditForm } from "./FragmentEditForm";
 import { FragmentLinkDetailPanel } from "./FragmentLinkDetailPanel";
+import { ImageMediaPanel } from "./ImageMediaPanel";
 import { FragmentLifecyclePanel } from "./FragmentLifecyclePanel";
 import { FragmentSproutSection } from "./FragmentSproutSection";
 import { SproutAnalysisDialog } from "./SproutAnalysisDialog";
 import { TextSupplementForm } from "./TextSupplementForm";
+import { VoiceMediaPanel } from "./VoiceMediaPanel";
 import { useFragmentDetailActions } from "./useFragmentDetailActions";
 import { useFragmentDispositionActions } from "./useFragmentDispositionActions";
 import { useFragmentSproutActions } from "./useFragmentSproutActions";
@@ -169,6 +171,22 @@ export function FragmentDetailDialog({
             <div className="space-y-6" key={detailState.detail.fragment.id}>
               <FragmentDetailOverview detail={detailState.detail} />
 
+              {detailState.detail.fragment.contentType === "image" &&
+              detailState.detail.mediaAsset?.kind === "image" ? (
+                <ImageMediaPanel
+                  fragment={detailState.detail.fragment}
+                  mediaAsset={detailState.detail.mediaAsset}
+                />
+              ) : null}
+
+              {detailState.detail.fragment.contentType === "audio" &&
+              detailState.detail.mediaAsset?.kind === "audio" ? (
+                <VoiceMediaPanel
+                  fragment={detailState.detail.fragment}
+                  mediaAsset={detailState.detail.mediaAsset}
+                />
+              ) : null}
+
               {detailState.detail.fragment.contentType === "link" ? (
                 <FragmentLinkDetailPanel
                   externalLinkImport={detailState.detail.externalLinkImport}
@@ -280,6 +298,7 @@ export function FragmentDetailDialog({
           additions={detailState.detail.additions}
           externalLinkImport={detailState.detail.externalLinkImport}
           fragment={detailState.detail.fragment}
+          mediaAsset={detailState.detail.mediaAsset}
           onClose={sprout.closeAndRestoreFocus}
           onContinue={sprout.continueFromSuggestion}
           plant={detailState.detail.plant}

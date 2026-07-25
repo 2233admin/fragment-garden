@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 
-import type { ExternalLinkImport, Fragment, Plant } from "@/domain";
+import type { ExternalLinkImport, Fragment, MediaAsset, Plant } from "@/domain";
 import { isSproutRecommendedActionAllowed } from "@/domain/sprout/recommended-actions";
 import type { SproutAddition, SproutRecommendedAction } from "@/validation/sprout-api";
 
@@ -19,6 +19,7 @@ type SproutAnalysisDialogProps = {
   onClose: () => void;
   onContinue: (action: SproutRecommendedAction) => void;
   plant: Plant;
+  mediaAsset?: MediaAsset | null;
 };
 
 const SECONDARY_BUTTON_CLASS =
@@ -39,11 +40,18 @@ export function SproutAnalysisDialog({
   onClose,
   onContinue,
   plant,
+  mediaAsset = null,
 }: SproutAnalysisDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
-  const analysis = useSproutAnalysis({ additions, externalLinkImport, fragment, plant });
+  const analysis = useSproutAnalysis({
+    additions,
+    externalLinkImport,
+    fragment,
+    plant,
+    mediaAsset,
+  });
   const { state } = analysis;
   const isSaving = state.status === "saving";
   const isDisclosureOpen =

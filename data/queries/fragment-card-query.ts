@@ -5,6 +5,8 @@ import type {
   FragmentLifecycleStatus,
   LinkImportStatus,
   PlantStage,
+  MediaAssetKind,
+  MediaProcessingStatus,
 } from "../../domain";
 export {
   filterAndSortFragmentCards,
@@ -38,6 +40,10 @@ export type FragmentCardViewModel = {
   plantStage: PlantStage;
   growthScore: number;
   isPlacedInGarden: boolean;
+  mediaKind: MediaAssetKind | null;
+  mediaProcessingStatus: MediaProcessingStatus | null;
+  mediaSizeBytes: number | null;
+  mediaDurationMs: number | null;
 };
 
 function deriveFragmentExcerpt(rawText: string): string {
@@ -71,21 +77,36 @@ export function listFragmentCardViewModels(
 
   return database.transaction(
     "r",
-    [database.fragments, database.plants, database.externalLinkImports],
+    [database.fragments, database.plants, database.externalLinkImports, database.mediaAssets],
     async () => {
       const fragments = await fragmentRepository.listVisibleFragments();
-      const [plants, linkImports] = await Promise.all([
+      const [plants, linkImports, mediaAssets] = await Promise.all([
         plantRepository.listByFragmentIds(fragments.map((fragment) => fragment.id)),
         database.externalLinkImports.toArray(),
+        database.mediaAssets
+          .where("fragmentId")
+          .anyOf(fragments.map((fragment) => fragment.id))
+          .toArray(),
       ]);
       const plantByFragmentId = new Map(plants.map((plant) => [plant.fragmentId, plant] as const));
       const linkImportByFragmentId = new Map(
         linkImports.map((linkImport) => [linkImport.fragmentId, linkImport] as const),
       );
+      const mediaByFragmentId = new Map<string, (typeof mediaAssets)[number]>();
+      for (const mediaAsset of mediaAssets.sort((left, right) => {
+        const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
+        return createdAtComparison === 0 ? left.id.localeCompare(right.id) : createdAtComparison;
+      })) {
+        // Legacy databases may contain a duplicate; expose one deterministic primary asset.
+        if (!mediaByFragmentId.has(mediaAsset.fragmentId)) {
+          mediaByFragmentId.set(mediaAsset.fragmentId, mediaAsset);
+        }
+      }
 
       return fragments.map((fragment) => {
         const plant = plantByFragmentId.get(fragment.id);
         const linkImport = linkImportByFragmentId.get(fragment.id);
+        const mediaAsset = mediaByFragmentId.get(fragment.id);
 
         if (plant === undefined) {
           throw new Error(`Plant not found for fragment ${fragment.id}`);
@@ -118,6 +139,10 @@ export function listFragmentCardViewModels(
           plantStage: plant.stage,
           growthScore: plant.growthScore,
           isPlacedInGarden: plant.slotId !== null,
+          mediaKind: mediaAsset?.kind ?? null,
+          mediaProcessingStatus: mediaAsset?.processingStatus ?? null,
+          mediaSizeBytes: mediaAsset?.sizeBytes ?? null,
+          mediaDurationMs: mediaAsset?.durationMs ?? null,
         };
       });
     },

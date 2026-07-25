@@ -5,7 +5,9 @@ import type { ChatMessage, Fragment, Plant, Settings } from "../domain";
 import {
   FRAGMENT_GARDEN_DATABASE_VERSION_V2,
   FRAGMENT_GARDEN_DATABASE_VERSION_V3,
+  FRAGMENT_GARDEN_DATABASE_VERSION_V4,
   FRAGMENT_GARDEN_SCHEMA_V3,
+  FRAGMENT_GARDEN_SCHEMA_V4,
 } from "./schema";
 
 type MigrationRegistrar = (database: Dexie) => void;
@@ -71,7 +73,16 @@ const registerVersion3: MigrationRegistrar = (database) => {
     .upgrade(addVersion3RecordFields);
 };
 
-const DATABASE_MIGRATIONS: readonly MigrationRegistrar[] = [registerVersion2, registerVersion3];
+/** V4 only adds the local media table; all existing V3 records stay untouched. */
+const registerVersion4: MigrationRegistrar = (database) => {
+  database.version(FRAGMENT_GARDEN_DATABASE_VERSION_V4).stores(FRAGMENT_GARDEN_SCHEMA_V4);
+};
+
+const DATABASE_MIGRATIONS: readonly MigrationRegistrar[] = [
+  registerVersion2,
+  registerVersion3,
+  registerVersion4,
+];
 
 /**
  * Version 1 is the initial schema. Later versions are registered in order and

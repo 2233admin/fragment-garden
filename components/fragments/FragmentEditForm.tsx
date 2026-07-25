@@ -59,7 +59,7 @@ export function FragmentEditForm({
       return;
     }
 
-    if (contentType !== "link" && rawText.trim().length === 0) {
+    if (contentType === "text" && rawText.trim().length === 0) {
       setErrorMessage("原始内容不能为空，修改尚未保存。请填写内容后重试。");
       return;
     }
@@ -88,7 +88,9 @@ export function FragmentEditForm({
       onSaved(
         contentType === "link"
           ? "链接标题和正文已保存，不会自动重新读取。"
-          : "标题和原始内容已保存。",
+          : contentType === "text"
+            ? "标题和原始内容已保存。"
+            : "标题和补充说明已保存。",
       );
     } catch {
       setErrorMessage("修改保存失败，本地原文没有被替换。你的输入仍在，可以重试。");
@@ -105,7 +107,9 @@ export function FragmentEditForm({
       id={`edit-fragment-${fragmentId}`}
       onSubmit={handleSubmit}
     >
-      <h3 className="font-display text-xl font-semibold text-garden-ink">编辑原始内容</h3>
+      <h3 className="font-display text-xl font-semibold text-garden-ink">
+        {contentType === "text" ? "编辑原始内容" : "编辑媒体补充说明"}
+      </h3>
       <p className="mt-1 text-xs leading-5 text-garden-muted">
         {contentType === "link"
           ? "手动编辑会保留为你的内容，不会自动重新读取链接，也不会增加成长分。"
@@ -137,7 +141,11 @@ export function FragmentEditForm({
           className="mb-2 block text-sm font-semibold text-garden-ink"
           htmlFor={`edit-content-${fragmentId}`}
         >
-          {contentType === "link" ? "编辑提取正文（可选）" : "编辑原始内容"}
+          {contentType === "link"
+            ? "编辑提取正文（可选）"
+            : contentType === "text"
+              ? "编辑原始内容"
+              : "编辑补充说明（可选）"}
         </label>
         <textarea
           className="min-h-40 w-full resize-y rounded-xl border border-garden-line bg-garden-paper px-4 py-3 text-sm leading-6 text-garden-ink disabled:opacity-60"
@@ -147,7 +155,7 @@ export function FragmentEditForm({
             isRawTextDirtyRef.current = true;
             setRawText(event.target.value);
           }}
-          required={contentType !== "link"}
+          required={contentType === "text"}
           value={rawText}
         />
       </div>

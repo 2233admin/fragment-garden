@@ -4,14 +4,18 @@ import { useId, useRef, useState, type FormEvent } from "react";
 
 import { queryLocalSettings } from "@/data/queries/companion-query";
 import { acceptGetNoteDisclosure } from "@/services/accept-getnote-disclosure";
+import { createMediaFragment } from "@/services/create-media-fragment";
 import { createLocalFragment } from "@/services/create-local-fragment";
 import { createLocalLinkFragment } from "@/services/create-local-link-fragment";
 
 import { DuplicateLinkDialog } from "../link-imports/DuplicateLinkDialog";
 import { GetNoteDisclosureDialog } from "../link-imports/GetNoteDisclosureDialog";
 import { ModalDialog } from "../shared/ModalDialog";
+import { CreateImageFragmentForm, type ImageSelection } from "./CreateImageFragmentForm";
 import { CreateLinkFragmentForm } from "./CreateLinkFragmentForm";
 import { CreateTextFragmentForm } from "./CreateTextFragmentForm";
+import { CreateVoiceFragmentForm } from "./CreateVoiceFragmentForm";
+import type { VoiceRecording } from "./useVoiceRecorder";
 
 export type CreatedFragmentNotice =
   | Readonly<{
@@ -21,6 +25,18 @@ export type CreatedFragmentNotice =
   | Readonly<{
       contentType: "link";
       linkImportStarted: boolean;
+      title: string;
+    }>
+  | Readonly<{
+      contentType: "image";
+      fragmentId: string;
+      mediaAssetId: string;
+      title: string;
+    }>
+  | Readonly<{
+      contentType: "audio";
+      fragmentId: string;
+      mediaAssetId: string;
       title: string;
     }>;
 
@@ -32,12 +48,16 @@ type CreateFragmentDialogProps = {
   onStartLinkImport?: (fragmentId: string) => void;
 };
 
-type CreateMode = "text" | "link";
+type CreateMode = "text" | "link" | "image" | "voice";
 type PendingAction =
   | "checking_disclosure"
   | "accepting_disclosure"
+  | "validating_image"
   | "saving_text"
   | "saving_link"
+  | "saving_image"
+  | "recording_voice"
+  | "saving_voice"
   | "saving_duplicate"
   | null;
 
@@ -60,6 +80,9 @@ export function CreateFragmentDialog({
   const [rawText, setRawText] = useState("");
   const [linkTitle, setLinkTitle] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
+  const [imageTitle, setImageTitle] = useState("");
+  const [imageNote, setImageNote] = useState("");
+  const [imageSelection, setImageSelection] = useState<ImageSelection | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -75,6 +98,9 @@ export function CreateFragmentDialog({
     setRawText("");
     setLinkTitle("");
     setSourceUrl("");
+    setImageTitle("");
+    setImageNote("");
+    setImageSelection(null);
     setPendingAction(null);
     setFormError(null);
     setSelectionError(null);
@@ -85,7 +111,8 @@ export function CreateFragmentDialog({
   }
 
   function resetAndClose(): void {
-    if (submissionLockRef.current || isPending) {
+    const isBlockingPending = isPending && pendingAction !== "recording_voice";
+    if (submissionLockRef.current || isBlockingPending) {
       return;
     }
 
@@ -99,6 +126,28 @@ export function CreateFragmentDialog({
     }
 
     setMode("text");
+    setImageSelection(null);
+    setFormError(null);
+    setSelectionError(null);
+  }
+
+  function selectImageMode(): void {
+    if (isPending || mode === "image") {
+      return;
+    }
+
+    setMode("image");
+    setFormError(null);
+    setSelectionError(null);
+  }
+
+  function selectVoiceMode(): void {
+    if (isPending || mode === "voice") {
+      return;
+    }
+
+    setMode("voice");
+    setImageSelection(null);
     setFormError(null);
     setSelectionError(null);
   }
@@ -110,6 +159,7 @@ export function CreateFragmentDialog({
 
     setPendingAction("checking_disclosure");
     setSelectionError(null);
+    setImageSelection(null);
 
     try {
       const settings = await queryLocalSettings();
@@ -176,6 +226,121 @@ export function CreateFragmentDialog({
       onClose();
     } catch {
       setFormError("保存失败，这条碎片尚未写入本地。你的输入仍在，可以直接重试。");
+    } finally {
+      submissionLockRef.current = false;
+      setPendingAction(null);
+    }
+  }
+
+  function handleImageValidationPending(isValidating: boolean): void {
+    setPendingAction((current) => {
+      if (isValidating) {
+        return "validating_image";
+      }
+
+      return current === "validating_image" ? null : current;
+    });
+  }
+
+  function handleVoiceBusyChange(isBusy: boolean): void {
+    setPendingAction((current) => {
+      if (isBusy) {
+        return current === null || current === "recording_voice" ? "recording_voice" : current;
+      }
+
+      return current === "recording_voice" ? null : current;
+    });
+  }
+
+  async function handleVoiceSubmit(
+    recording: VoiceRecording,
+    title: string,
+    note: string,
+  ): Promise<void> {
+    if (submissionLockRef.current || (isPending && pendingAction !== "recording_voice")) {
+      return;
+    }
+
+    submissionLockRef.current = true;
+    setPendingAction("saving_voice");
+    setFormError(null);
+
+    try {
+      const result = await createMediaFragment({
+        blob: recording.blob,
+        durationMs: recording.durationMs,
+        fileName: deriveVoiceFileName(recording.mimeType),
+        kind: "audio",
+        mimeType: recording.mimeType,
+        optionalNote: note,
+        optionalTitle: title,
+      });
+      const notice: CreatedFragmentNotice = {
+        contentType: "audio",
+        fragmentId: result.fragment.id,
+        mediaAssetId: result.mediaAsset.id,
+        title: result.fragment.title,
+      };
+
+      clearState();
+      onCreated(notice);
+      onClose();
+    } catch {
+      setFormError("语音尚未保存到本地。录音仍在这里，可以直接重试。");
+    } finally {
+      submissionLockRef.current = false;
+      setPendingAction(null);
+    }
+  }
+
+  function deriveVoiceFileName(mimeType: string): string {
+    const baseType = mimeType.toLowerCase().split(";", 1)[0] ?? "audio/webm";
+    if (baseType.includes("ogg")) return "voice-recording.ogg";
+    if (baseType.includes("wav")) return "voice-recording.wav";
+    if (baseType.includes("mpeg") || baseType.includes("mp3")) return "voice-recording.mp3";
+    if (baseType.includes("mp4") || baseType.includes("m4a")) return "voice-recording.m4a";
+    return "voice-recording.webm";
+  }
+
+  async function handleImageSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    if (submissionLockRef.current || isPending) {
+      return;
+    }
+
+    if (imageSelection === null) {
+      setFormError("请先选择一张可以读取的图片，图片尚未保存。");
+      return;
+    }
+
+    submissionLockRef.current = true;
+    setPendingAction("saving_image");
+    setFormError(null);
+
+    try {
+      const result = await createMediaFragment({
+        blob: imageSelection.file,
+        fileName: imageSelection.file.name,
+        height: imageSelection.height,
+        kind: "image",
+        mimeType: imageSelection.mimeType,
+        optionalNote: imageNote,
+        optionalTitle: imageTitle,
+        width: imageSelection.width,
+      });
+      const notice: CreatedFragmentNotice = {
+        contentType: "image",
+        fragmentId: result.fragment.id,
+        mediaAssetId: result.mediaAsset.id,
+        title: result.fragment.title,
+      };
+
+      clearState();
+      onCreated(notice);
+      onClose();
+    } catch {
+      setFormError("图片尚未保存到本地。你的图片和说明仍在这里，可以直接重试。");
     } finally {
       submissionLockRef.current = false;
       setPendingAction(null);
@@ -263,27 +428,35 @@ export function CreateFragmentDialog({
   }
 
   const isTextMode = mode === "text";
+  const isLinkMode = mode === "link";
+  const isImageMode = mode === "image";
+  const isVoiceMode = mode === "voice";
+  const modeLabel = isTextMode ? "文字" : isLinkMode ? "链接" : isImageMode ? "图片" : "语音";
 
   return (
     <>
       <ModalDialog
         className="m-auto max-h-[90vh] w-[min(92vw,38rem)] overflow-y-auto rounded-2xl border border-garden-line bg-garden-paper p-0 shadow-2xl"
         isOpen={isOpen}
-        isPending={isPending}
+        isPending={isPending && pendingAction !== "recording_voice"}
         labelledBy={titleId}
         onRequestClose={resetAndClose}
       >
         <header className="border-b border-garden-line px-6 py-5 sm:px-8">
           <p className="text-xs font-semibold tracking-[0.18em] text-garden-accent uppercase">
-            新的{isTextMode ? "文字" : "链接"}碎片
+            新的{modeLabel}碎片
           </p>
           <h2 className="mt-2 font-display text-3xl font-semibold text-garden-ink" id={titleId}>
-            种下{isTextMode ? "文字" : "链接"}碎片
+            种下{modeLabel}碎片
           </h2>
           <p className="mt-2 text-sm leading-6 text-garden-muted">
             {isTextMode
               ? "先在本地保存内容。标题留空时，会从第一行自动生成。"
-              : "原链接和植物会先在本地保存，不需要等待第三方读取完成。"}
+              : isLinkMode
+                ? "原链接和植物会先在本地保存，不需要等待第三方读取完成。"
+                : isImageMode
+                  ? "图片会先保存在当前浏览器中，不需要等待 AI 分析完成。"
+                  : "录音会先保存在当前浏览器中，不需要等待转写完成。"}
           </p>
 
           <div
@@ -306,9 +479,9 @@ export function CreateFragmentDialog({
             </button>
             <button
               aria-busy={pendingAction === "checking_disclosure"}
-              aria-pressed={!isTextMode}
+              aria-pressed={isLinkMode}
               className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                !isTextMode
+                isLinkMode
                   ? "bg-garden-paper text-garden-accent shadow-sm"
                   : "text-garden-muted hover:text-garden-ink"
               }`}
@@ -317,6 +490,33 @@ export function CreateFragmentDialog({
               type="button"
             >
               {pendingAction === "checking_disclosure" ? "正在准备…" : "链接"}
+            </button>
+            <button
+              aria-busy={pendingAction === "validating_image"}
+              aria-pressed={isImageMode}
+              className={`rounded-full px-4 py-2 text-sm font-semibold ${
+                isImageMode
+                  ? "bg-garden-paper text-garden-accent shadow-sm"
+                  : "text-garden-muted hover:text-garden-ink"
+              }`}
+              disabled={isPending}
+              onClick={selectImageMode}
+              type="button"
+            >
+              图片
+            </button>
+            <button
+              aria-pressed={isVoiceMode}
+              className={`rounded-full px-4 py-2 text-sm font-semibold ${
+                isVoiceMode
+                  ? "bg-garden-paper text-garden-accent shadow-sm"
+                  : "text-garden-muted hover:text-garden-ink"
+              }`}
+              disabled={isPending}
+              onClick={selectVoiceMode}
+              type="button"
+            >
+              语音
             </button>
           </div>
 
@@ -342,7 +542,7 @@ export function CreateFragmentDialog({
             rawText={rawText}
             title={textTitle}
           />
-        ) : (
+        ) : isLinkMode ? (
           <CreateLinkFragmentForm
             errorMessage={formError}
             isPending={isPending}
@@ -355,6 +555,30 @@ export function CreateFragmentDialog({
             onTitleChange={setLinkTitle}
             sourceUrl={sourceUrl}
             title={linkTitle}
+          />
+        ) : isImageMode ? (
+          <CreateImageFragmentForm
+            errorMessage={formError}
+            image={imageSelection}
+            isOpen={isOpen}
+            isPending={isPending && pendingAction !== "validating_image"}
+            note={imageNote}
+            onCancel={resetAndClose}
+            onImageChange={setImageSelection}
+            onNoteChange={setImageNote}
+            onSubmit={(event) => void handleImageSubmit(event)}
+            onTitleChange={setImageTitle}
+            onValidationPendingChange={handleImageValidationPending}
+            title={imageTitle}
+          />
+        ) : (
+          <CreateVoiceFragmentForm
+            errorMessage={formError}
+            isOpen={isOpen}
+            isPending={pendingAction === "saving_voice"}
+            onBusyChange={handleVoiceBusyChange}
+            onCancel={resetAndClose}
+            onSubmit={handleVoiceSubmit}
           />
         )}
       </ModalDialog>

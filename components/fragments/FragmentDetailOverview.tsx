@@ -84,7 +84,7 @@ export function FragmentDetailOverview({ detail }: FragmentDetailOverviewProps) 
         </section>
       ) : null}
 
-      {fragment.contentType !== "link" ? (
+      {fragment.contentType === "text" ? (
         <section>
           <h3 className="font-display text-xl font-semibold text-garden-ink">原始内容</h3>
           <p className="mt-3 whitespace-pre-wrap rounded-2xl border border-garden-line bg-white p-5 text-sm leading-7 text-garden-ink">

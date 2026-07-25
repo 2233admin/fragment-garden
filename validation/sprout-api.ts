@@ -20,6 +20,9 @@ export const SPROUT_MAX_LINK_TEXT_CHARACTERS = 8_000;
 export const SPROUT_MAX_AVOID_DIRECTIONS = 3;
 export const SPROUT_MAX_AVOID_DIRECTION_CHARACTERS = 500;
 export const SPROUT_MAX_TOTAL_CHARACTERS = 16_000;
+export const SPROUT_MAX_MEDIA_SUMMARY_CHARACTERS = 2_000;
+export const SPROUT_MAX_MEDIA_VISIBLE_TEXT_CHARACTERS = 6_000;
+export const SPROUT_MAX_MEDIA_TRANSCRIPT_CHARACTERS = 12_000;
 
 function unicodeLength(value: string): number {
   return Array.from(value).length;
@@ -63,6 +66,19 @@ export const sproutAnalyzeFragmentSchema = z
     growthStage: z
       .enum(["seedling", "growing", "budding", "blooming", "permanent_bloom"])
       .nullable(),
+    mediaSummary: boundedText(SPROUT_MAX_MEDIA_SUMMARY_CHARACTERS, { allowEmpty: true })
+      .nullable()
+      .optional(),
+    mediaVisibleText: boundedText(SPROUT_MAX_MEDIA_VISIBLE_TEXT_CHARACTERS, { allowEmpty: true })
+      .nullable()
+      .optional(),
+    mediaTranscript: boundedText(SPROUT_MAX_MEDIA_TRANSCRIPT_CHARACTERS, { allowEmpty: true })
+      .nullable()
+      .optional(),
+    mediaContentKind: z
+      .enum(["screenshot", "document", "photo", "diagram", "other"])
+      .nullable()
+      .optional(),
   })
   .strict()
   .superRefine((fragment, context) => {
@@ -98,6 +114,9 @@ export const sproutAnalyzeRequestSchema = z
       ...request.fragment.additions.map((addition) => addition.content),
       request.fragment.linkSummary ?? "",
       request.fragment.linkText ?? "",
+      request.fragment.mediaSummary ?? "",
+      request.fragment.mediaVisibleText ?? "",
+      request.fragment.mediaTranscript ?? "",
       ...request.avoidDirections,
     ].reduce((total, value) => total + unicodeLength(value), 0);
 

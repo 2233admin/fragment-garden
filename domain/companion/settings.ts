@@ -13,6 +13,8 @@ export function createDefaultSettings(): Settings {
     openAiDisclosureAcceptedAt: null,
     companionAiMode: "local",
     sproutAiDisclosureAcceptedAt: null,
+    imageAiDisclosureAcceptedAt: null,
+    voiceAiDisclosureAcceptedAt: null,
     schemaVersion: 1,
   };
 }

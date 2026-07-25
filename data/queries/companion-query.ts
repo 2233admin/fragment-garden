@@ -22,6 +22,8 @@ export async function queryLocalSettings(
     openAiDisclosureAcceptedAt: stored?.openAiDisclosureAcceptedAt ?? null,
     companionAiMode: stored?.companionAiMode === "openai" ? "openai" : "local",
     sproutAiDisclosureAcceptedAt: stored?.sproutAiDisclosureAcceptedAt ?? null,
+    imageAiDisclosureAcceptedAt: stored?.imageAiDisclosureAcceptedAt ?? null,
+    voiceAiDisclosureAcceptedAt: stored?.voiceAiDisclosureAcceptedAt ?? null,
   };
 }
 

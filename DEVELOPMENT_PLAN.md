@@ -53,11 +53,11 @@
 | 7B | 真实 AI 花园伙伴（技术实现完成，过渡） | Responses API、受限工具与本地降级已验证 |
 | 8 | 规则型 NPC（已完成） | 固定选项、本地花园数据与现有 Service 形成 NPC 闭环 |
 | 9 | 思维发芽（已完成并通过真实服务验收） | 单 Fragment 的本地检查、结构化 AI 建议与确认保存形成闭环 |
-| 后续候选 | 图片与语音 | 待重新规划 |
+| 10 | 图片与语音输入 | 10A/10B 代码与自动化验证完成，真实媒体冒烟待人工验收 |
 | 后续候选 | 相似碎片与花丛 | 待重新规划 |
 | 收口候选 | 备份、回归与一周自测 | 待重新排序与验收 |
 
-阶段 8 的规则型 NPC 已完成，浏览器数据库仍为 V3。普通用户当前通过固定台词、固定选项和本地花园数据
+阶段 8 的规则型 NPC 已完成，普通用户当前通过固定台词、固定选项和本地花园数据
 与伙伴互动，不再看到开放输入框或 AI/基础模式切换。阶段 7B 的 OpenAI Route、开放 Chat 组件、ChatMessage、
 模式字段和三个受限工具仍作为过渡/开发调试基础设施保留；这不是阶段 7B 失败，也不代表普通 NPC 菜单会
 直接请求 OpenAI 或 GetNote。用户从 NPC 进入现有链接创建表单并同意 7A 披露后，链接导入仍可请求 GetNote。
@@ -65,8 +65,8 @@
 阶段 9 已完成绑定明确 Fragment 的“思维发芽”代码、Mock 验证与真实服务验收，包括本地信息充分性规则、
 独立 OpenAI 披露、结构化单方向建议和用户确认保存。真实验收最终使用服务端配置的
 `gpt-4.1-mini-2025-04-14`，不发送 reasoning 参数，保持 700 token 输出上限；六次正式请求全部完成并通过
-Zod。阶段 10 尚未开始；图片、语音、Embedding、相似碎片和花丛仍是待重新规划的后续候选，本计划不把
-它们提前定义为阶段 10 实现任务。
+Zod。阶段 10 的 10A/10B 代码、自动测试和构建已经完成；真实图片冒烟与真实麦克风录音冒烟尚未执行，仍需按本计划
+完成人工验收后才能把阶段 10 标记为完成并创建 `m3-ai-inputs`。Embedding、相似碎片和花丛仍是后续候选，阶段 11 尚未开始。
 
 ---
 
@@ -641,7 +641,7 @@ test: cover companion NPC menus and local actions
 - `buildSproutContext` 确定性裁剪当前内容，总计最多 16,000 个 Unicode 字符，优先保留标题、原文和最新用户
   补充，不调用模型总结上下文；
 - 首次发送当前 Fragment 前显示独立 OpenAI 发芽披露，并保存 `sproutAiDisclosureAcceptedAt`；它不继承
-  GetNote 或阶段 7B 开放聊天披露，普通 Settings 字段扩展不升级数据库，Dexie 保持 V3；
+  GetNote 或阶段 7B 开放聊天披露；阶段 9 本身不升级数据库，后续阶段 10 再以显式迁移升级到 V4；
 - 固定 `POST /api/sprout/analyze` 使用官方 OpenAI Responses API、服务端 `OPENAI_MODEL`、45 秒超时、700 token
   输出上限、`store: false` 和 strict JSON Schema Structured Output；SDK 自动重试关闭，Route 将客户端取消信号
   继续传给上游请求，失败后的重试只由用户明确触发；
@@ -688,49 +688,63 @@ test: cover companion NPC menus and local actions
 ## 阶段边界
 
 阶段 9 不包含伙伴真实走到植物旁、正式角色素材、像素动画、观察动画、发芽特效、声音、图片、语音、
-Embedding、相似碎片或花丛，也不决定是否删除旧开放聊天代码和 ChatMessage 数据。阶段 10 尚未开始，后续
-候选仍需单独重新规划。
+Embedding、相似碎片或花丛，也不决定是否删除旧开放聊天代码和 ChatMessage 数据。阶段 10 随后独立实施，
+不改变 NPC 入口或开放聊天过渡基础设施。
 
 ---
 
-# 14. 图片与语音（原阶段 8 候选，暂缓）
+# 14. 阶段 10：图片与语音输入（10A/10B）
 
-这是原阶段 8 的媒体计划，已让位于规则型 NPC，当前不应直接进入。
+阶段 10 补齐最初 MVP 的四种输入方式中的图片和语音。10A 必须先完成自动测试、构建和真实图片冒烟，才能进入 10B；
+10B 通过后阶段 10 才算完成。阶段 11 尚未开始。
 
-## 目标
+## 14.1 共同本地优先边界
 
-完成 PRD 规定的四种输入类型。
+- 先在浏览器校验并保存原始 Blob，再在一个 Dexie 事务中创建 Fragment、Plant、MediaAsset 和 `created` Event；
+- V3 → V4 迁移只新增 `mediaAssets` 表，保留旧 Fragment、Plant、事件、Settings、ChatMessage、GetNote 和伙伴建议；
+- MediaAsset 状态为 `pending`、`processing`、`completed`、`failed`、`local_only`，使用 `clientRequestId` 和
+  `processingRequestId` 丢弃晚到响应；刷新不会自动重发，用户可手动重试；
+- OpenAI 失败、未配置、用户拒绝披露、无槽位或断网都不能删除媒体、Fragment 或 Plant；媒体分析/转写完成不增加成长分；
+- 图片与语音各自保存独立披露同意，不继承旧 Chat、GetNote 或思维发芽同意；原始 Blob 不进入 ChatMessage、Fragment Base64
+  或服务端长期存储；
+- 图片发芽只读取当前媒体的摘要/可见文字/contentKind 与用户补充，语音发芽只读取当前 transcript 与用户补充；发芽 Route
+  不接收原始媒体或其他 Fragment。
 
-## 范围
+## 14.2 10A 图片（当前实施）
 
-- 图片上传；
-- 文件类型和大小限制；
-- 客户端压缩；
-- Blob 存储；
-- 图片理解；
-- 浏览器录音；
-- 音频时长限制；
-- 语音转写；
-- 转写编辑；
-- 媒体失败时保留原始附件；
-- 本地容量错误提示。
+- 单张 PNG/JPEG/WebP，最大 10 MB；通过文件选择或剪贴板粘贴，验证实际可解码，不接受 GIF、SVG、HEIC 或远程 URL；
+- 创建界面显示本地预览、文件名、大小、可选标题和补充说明；详情用 Blob URL 预览并在卸载时释放；
+- 固定 `POST /api/media/image/analyze`，服务端使用 `OPENAI_IMAGE_MODEL`、Responses API、`input_image`、`store: false`、
+  strict Structured Output 和 Zod 二次校验，输出标题、摘要、可见文字和 contentKind；
+- 首次发送前显示独立图片披露，可选择同意分析、仅本地或取消；失败和 local-only 均保留原图；系统临时标题才允许被结果更新；
+- 10A 验收包括 migration、Blob repository、校验、事务回滚、请求竞态、删除边界、Route 安全、UI 预览/粘贴、刷新恢复和
+  至少一次真实自制图片冒烟。通过后创建本地 commit，再开始 10B。
 
-## 验收
+## 14.3 10B 语音（当前实施）
 
-- 图片保存、刷新和预览正常；
-- 图片分析失败不丢失原图；
-- 录音可以开始、停止和保存；
-- 转写结果可以编辑；
-- 权限拒绝时有明确提示；
-- 超出限制时不会假装保存成功；
-- 大媒体不会使用 Base64 写入普通字段。
+- 只有点击开始录音时才申请麦克风；使用 `getUserMedia` 和 `MediaRecorder.isTypeSupported`，优先 webm/opus、webm、ogg/opus；
+- 状态机覆盖 idle、requesting_permission、recording、stopping、preview、saving、error；最长 3 分钟、最大 15 MB；
+- 取消、权限失败、空录音、设备错误、Dialog 关闭和卸载都停止 tracks、清理计时器/监听器/Blob URL，且不创建数据；
+- 固定 `POST /api/media/audio/transcribe`，服务端使用 `OPENAI_TRANSCRIPTION_MODEL` 和 JSON 转写，只保留非空 transcript；
+- `originalTranscript` 保留 provider 原文，`transcript` 可编辑，编辑后重转写必须确认是否覆盖；转写不自动生成第二次 AI 标题；
+- 10B 验收包括受控 MediaRecorder 单元/E2E、权限/取消/播放、转写失败重试、编辑与刷新、独立披露、发芽文字边界，以及人工
+  真实麦克风冒烟。无法访问真实麦克风时必须明确记录“未执行”，不能用 Mock 冒充。
 
-## 建议 commits
+## 14.4 阶段 10 完成门槛
+
+按顺序运行 `format:check`、`lint`、`typecheck`、`test`、两次连续 `test:e2e`、`build`、`npm ls phaser`、`npm ls openai` 和
+`git diff --check`。自动测试只使用 OpenAI/GetNote Mock；不得提交测试图片、音频、用户数据、报告或 `.env.local`。图片真实
+冒烟和语音真实录音冒烟均通过、工作区干净后，才允许创建本地 `m3-ai-inputs` Tag；在此之前不得开始阶段 11、Embedding、
+相似碎片、花丛、云端媒体、伙伴动画或像素视觉升级。
+
+建议 commits：
 
 ```text
-feat: add image fragment support
-feat: add audio recording and transcription
-test: cover media validation and failure states
+feat: add local media storage
+feat: add image fragment processing
+feat: add voice recording and transcription
+test: cover image and voice input flows
+docs: document local-first media inputs
 ```
 
 ---
@@ -823,13 +837,12 @@ docs: update MVP run and backup guide
 
 ## 自测要求
 
-以下是旧阶段的收口记录，当前方向校准只执行文字/链接、固定 NPC 和思维发芽相关验证；图片、语音和相似
-碎片要求待重新规划后再启用。
+以下是阶段 10 后的收口记录，当前自测应覆盖文字、链接、图片和语音；相似碎片和花丛仍待重新规划。
 
 一周内：
 
 - 保存不少于 10 条碎片；
-- 覆盖文字和链接；
+- 覆盖文字、链接、图片和语音；至少确认媒体失败时原始内容仍可用；
 - 至少 3 天进入花园；
 - 回看至少 3 条旧碎片；
 - 至少补充 1 条；
@@ -879,8 +892,8 @@ chore: tag MVP v0.1
 m0-foundation       阶段 1 完成
 m1-card-loop        阶段 2 完成
 m2-garden-loop      阶段 5 完成
-m3-ai-inputs        原媒体阶段 8 候选（当前不创建）
-m4-complete-mvp     原阶段 10 完成（待重新规划）
+m3-ai-inputs        阶段 10 图片与语音通过全部验收后创建
+m4-complete-mvp     阶段 11 及 MVP 收口完成后重新规划
 v0.1                一周自测收口（待重新规划）
 ```
 

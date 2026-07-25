@@ -197,13 +197,16 @@ AI：
 本地校验
 → 立即保存 Fragment
 → 立即保存 Plant
+→ （图片/语音）立即保存 MediaAsset 原始 Blob
 → 立即写入 created Event
-→ UI 显示幼苗
+→ UI 显示幼苗并预览/播放媒体
 → （链接）按阶段 7A 规则异步读取
+→ （图片/语音）用户单独同意后才异步分析/转写
 ```
 
-当前创建流程不调用通用 AI，也不自动计算 Embedding 或相似候选。思维发芽只能由用户在共享详情中明确选中
-Fragment 后主动发起；图片、语音、Embedding 和相似候选属于待重新规划的后续能力。
+当前创建流程不等待通用 AI，也不自动计算 Embedding 或相似候选。图片和语音必须先本地保存，之后才可由用户分别
+同意图片分析或语音转写；思维发芽只能由用户在共享详情中明确选中 Fragment 后主动发起。Embedding、相似候选和花丛
+仍属于待重新规划的后续能力。
 
 禁止：
 
@@ -224,7 +227,11 @@ Fragment 后主动发起；图片、语音、Embedding 和相似候选属于待�
 - 生命周期状态与完成状态分开；
 - 休眠不是成长阶段；
 - “生长自”使用关系或 `parentFragmentId`；
-- 附件使用 Blob，不使用 Base64 长字符串；
+- 附件和 `MediaAsset` 使用 Blob，不使用 Base64 长字符串；
+- `MediaAsset` 统一承载 image/audio 原始 Blob、MIME、大小、尺寸/时长、处理状态、request id 和派生结果；
+- Dexie V4 的 `mediaAssets` 只通过 Repository/Service 访问；一个媒体 Fragment 只能有一个主要 MediaAsset；
+- V3 → V4 迁移只能新增媒体表，必须保留旧 Fragment、Plant、Event、Settings、ChatMessage、GetNote 和伙伴建议；
+- 图片与语音披露字段 `imageAiDisclosureAcceptedAt`、`voiceAiDisclosureAcceptedAt` 为非索引可选字段，不能被旧披露替代；
 - 成长依据事件计算；
 - AI 建议关系使用 `suggested` 状态；
 - 用户确认后才能变为 `confirmed`；
@@ -261,10 +268,10 @@ completed → permanent_bloom
 
 同类成长事件同一天只计一次。
 
-表中的图片、语音和花丛事件是既有领域规则或未来候选；当前已开放文字/链接行为和阶段 9 实现的
-`partner_suggestion_saved`，不得借此提前开发阶段 10、图片、语音、Embedding 或相似碎片。
+图片分析和语音转写本身不增加成长分，也不自动切换植物阶段；图片/语音 Fragment 的后续用户补充和编辑沿用既有
+成长事件。花丛和相似关系仍是未来候选，不能借此提前实现 Embedding 或其他阶段能力。
 
-`partner_suggestion_saved` 已复用现有 `fragmentEvents` 实现，不新增表或索引，数据库保持 V3。打开思维发芽、
+`partner_suggestion_saved` 已复用现有 `fragmentEvents` 实现，不新增表或索引。打开思维发芽、
 生成建议和换方向不增加成长分；只有用户明确确认保存建议时才记录事件并增加 +1，同一碎片按浏览器本地日期
 每天最多因该事件计分一次。同一天保存多条建议可以保留记录，但不得重复计分。保存内容必须标记
 `source: "partner"`，不得覆盖原文或自动执行推荐动作。
@@ -445,9 +452,10 @@ npm run test
 - 创建碎片失败降级；
 - GameBridge 类型。
 
-阶段 8 与阶段 9 后还必须优先覆盖：固定 NPC 选项、动态花园模板、Fragment 详情发芽入口、信息不足的本地
-判断、AI 不可用时的本地降级、建议保存的状态规则，以及猫狗行为一致性。相似度、图片和语音只有在未来
-重新纳入范围后才测试。自动化中的 AI 调用继续只使用 Mock；真实服务验证必须与自动化分开执行。
+阶段 8、阶段 9 与阶段 10 后还必须优先覆盖：固定 NPC 选项、动态花园模板、Fragment 详情发芽入口、信息不足的本地
+判断、AI 不可用时的本地降级、建议保存的状态规则、猫狗行为一致性、V3 → V4 迁移、媒体 Blob/事务、图片校验与分析、
+MediaRecorder 资源清理、语音转写编辑、独立披露、重试和媒体发芽文字边界。真实 AI 继续只用 Mock 测试，真实图片/麦克风
+冒烟必须与自动化分开并明确记录。
 
 真实 AI 调用不进入普通自动化测试，使用 Mock。
 
@@ -532,6 +540,18 @@ npm run test
 - 阶段 9 已使用独立 `POST /api/sprout/analyze`、版本化 Prompt、strict Structured Output 和
   `store: false` 实现单 Fragment 发芽；它不使用工具调用、远端会话、`previous_response_id`、Streaming 或
   Agent Loop；
+- 阶段 10 已使用 Dexie V4 `mediaAssets` 实现图片和 audio 媒体输入：原始 Blob 必须先本地保存，Fragment、Plant、MediaAsset
+  和 `created` Event 必须原子创建；图片只走 `POST /api/media/image/analyze`，语音只走
+  `POST /api/media/audio/transcribe`；两者各自独立披露、状态、request id、失败保留和手动重试；
+- 图片和语音分析/转写不得写入 ChatMessage、不得保存 provider 原始 Response、远端 file id 或 API Key；媒体完成不增加成长分，
+  deleted 内容不能开始新请求，迟到响应不能写回；
+- 阶段 10 的思维发芽只能读取当前图片的摘要/可见文字/contentKind 或当前语音 transcript 与用户补充，不得发送原始 Blob、
+  MediaAsset 以外的媒体或其他 Fragment；未有有效派生文字/补充时必须本地判定信息不足；
 - 旧 ChatMessage、`/api/companion/respond` 和三个受限工具继续作为不可见的过渡/调试基础设施保留，不得让
-  普通用户重新进入开放聊天；阶段 10 未开始，也不得提前开发图片、语音或像素视觉升级；
+  普通用户重新进入开放聊天；阶段 11 尚未开始，不得提前开发 Embedding、相似碎片、花丛、伙伴移动/动画、云端媒体或像素视觉升级；
 - 猫和狗永远共用同一套固定对话、选项、服务、Prompt 和分析逻辑。
+
+阶段 10 的实现边界：图片只接受 PNG/JPEG/WebP、单张且不超过 10 MB；语音只允许用户点击后申请麦克风，使用
+`MediaRecorder`，最长 3 分钟且不超过 15 MB。必须通过 Blob URL 预览并在卸载时释放，录音的所有结束路径都必须停止
+`stream.getTracks()`、清理计时器和监听器。转写的 `originalTranscript` 与可编辑 `transcript` 必须分开保存，重新转写不得
+静默覆盖用户编辑。不得实现图片相册、视频、音频文件上传、实时语音、Embedding、相似碎片、花丛、云同步、社交或阶段 11。

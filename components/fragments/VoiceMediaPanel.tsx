@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { useBlobObjectUrl } from "../media/useBlobObjectUrl";
 import type { Fragment, MediaAsset } from "@/domain";
-import { updateAudioTranscript } from "@/services/audio-media-processing";
+import { updateAudioTranscript } from "../../services/audio-media-processing";
+import { localPersistenceErrorMessage } from "../../services/local-persistence-error";
 
 import { AsyncButton } from "../shared/AsyncButton";
 
@@ -12,42 +14,8 @@ type VoiceMediaPanelProps = Readonly<{
   mediaAsset: MediaAsset;
 }>;
 
-function useBlobUrl(blob: Blob | null): string | null {
-  const [resource, setResource] = useState<{ blob: Blob | null; url: string | null }>({
-    blob: null,
-    url: null,
-  });
-
-  useEffect(() => {
-    let nextUrl: string | null = null;
-    if (blob !== null && typeof URL.createObjectURL === "function") {
-      try {
-        nextUrl = URL.createObjectURL(blob);
-      } catch {
-        nextUrl = null;
-      }
-    }
-
-    let isActive = true;
-    Promise.resolve().then(() => {
-      if (isActive) {
-        setResource({ blob, url: nextUrl });
-      }
-    });
-
-    return () => {
-      isActive = false;
-      if (nextUrl !== null) {
-        URL.revokeObjectURL(nextUrl);
-      }
-    };
-  }, [blob]);
-
-  return resource.blob === blob ? resource.url : null;
-}
-
 export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) {
-  const audioUrl = useBlobUrl(mediaAsset.blob);
+  const audioUrl = useBlobObjectUrl(mediaAsset.blob);
   const [failedAudioUrl, setFailedAudioUrl] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [draftTranscript, setDraftTranscript] = useState(mediaAsset.transcript ?? "");
@@ -77,8 +45,10 @@ export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) 
       }
       setDraftTranscript(updated.transcript ?? draftTranscript);
       setIsEditing(false);
-    } catch {
-      setErrorMessage("转写修改没有保存。你的输入仍在，可以重试。");
+    } catch (error) {
+      setErrorMessage(
+        localPersistenceErrorMessage(error, "转写修改没有保存。你的输入仍在，可以重试。"),
+      );
     } finally {
       setIsPending(false);
     }
@@ -93,7 +63,7 @@ export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) 
         >
           原始录音
         </h3>
-        {audioUrl !== null ? (
+        {audioUrl !== null && !isAudioLoadFailed ? (
           <audio
             aria-label={`用户录制的语音：${fragment.title}`}
             className="w-full"
@@ -106,14 +76,9 @@ export function VoiceMediaPanel({ fragment, mediaAsset }: VoiceMediaPanelProps) 
           </audio>
         ) : (
           <p className="border-y border-dashed border-garden-line py-5 text-sm text-garden-muted">
-            录音暂时无法播放，原始记录仍保存在本地。
+            原录音暂时无法播放。已有转写和其他内容仍可使用。
           </p>
         )}
-        {isAudioLoadFailed ? (
-          <p aria-live="polite" className="mt-2 text-sm text-garden-muted" role="status">
-            录音暂时无法播放，原始记录仍保存在本地。
-          </p>
-        ) : null}
       </div>
 
       <div className="border-t border-garden-line pt-5">

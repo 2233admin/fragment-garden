@@ -4,7 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import { ContentProcessingJobRepository } from "@/data/repositories/content-processing-job-repository";
-import { dismissCompletedContentProcessingJob } from "@/services/content-processing-job-lifecycle";
+import {
+  cleanupSettledContentProcessingJobs,
+  dismissCompletedContentProcessingJob,
+} from "@/services/content-processing-job-lifecycle";
+import { localPersistenceErrorMessage } from "@/services/local-persistence-error";
 import {
   cancelImageProcessingJob,
   markStaleImageProcessingJobs,
@@ -138,13 +142,16 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
             message: "新笔记已经整理好了。",
           });
         }
-      } catch {
+      } catch (error) {
         if (!isDisposedRef.current && !controller.signal.aborted) {
           reportEvent({
             type: "failed",
             jobId: item.jobId,
             fragmentId: null,
-            message: "图片暂时没能整理完成，原图仍保存在任务中，可以手动重试。",
+            message: localPersistenceErrorMessage(
+              error,
+              "图片暂时没能整理完成，原图仍保存在任务中，可以手动重试。",
+            ),
           });
         }
       } finally {
@@ -190,6 +197,7 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
     const manager = new LinkProcessingJobManager({ onEvent: handleLinkEvent });
     linkManagerRef.current = manager;
 
+    void cleanupSettledContentProcessingJobs().catch(() => undefined);
     void markStaleImageProcessingJobs(new Date()).catch(() => {
       reportEvent({
         type: "failed",
@@ -299,8 +307,13 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
         } else {
           throw new Error("Processing job was not found");
         }
-      } catch {
-        setErrorMessage("这次重试没有开始，任务和原始内容仍然保留。请稍后再试。");
+      } catch (error) {
+        setErrorMessage(
+          localPersistenceErrorMessage(
+            error,
+            "这次重试没有开始，任务和原始内容仍然保留。请稍后再试。",
+          ),
+        );
       } finally {
         busyJobIdRef.current = null;
         setBusyJobId(null);

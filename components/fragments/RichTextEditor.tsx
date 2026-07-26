@@ -17,6 +17,7 @@ import {
   LINK,
   ORDERED_LIST,
   QUOTE,
+  type TextMatchTransformer,
   type Transformer,
   UNORDERED_LIST,
 } from "@lexical/markdown";
@@ -50,14 +51,41 @@ type RichTextEditorProps = Readonly<{
   placeholder?: string;
 }>;
 
-const MVP_MARKDOWN_TRANSFORMERS: Transformer[] = [
+function normalizeLinkUrl(value: string): string | null {
+  const candidate = value.trim();
+  if (candidate.length === 0 || candidate.length > 2_048) {
+    return null;
+  }
+
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const SAFE_LINK: TextMatchTransformer = {
+  ...LINK,
+  replace: (textNode, match) => {
+    const rawUrl = match[2];
+    if (rawUrl === undefined || normalizeLinkUrl(rawUrl) === null) {
+      return;
+    }
+    return LINK.replace?.(textNode, match);
+  },
+};
+
+export const MVP_MARKDOWN_TRANSFORMERS: Transformer[] = [
   HEADING,
   QUOTE,
   UNORDERED_LIST,
   ORDERED_LIST,
   BOLD_STAR,
   BOLD_UNDERSCORE,
-  LINK,
+  SAFE_LINK,
 ];
 
 function EditableStatePlugin({ disabled }: { disabled: boolean }) {
@@ -80,22 +108,6 @@ function AutoFocusOncePlugin({ shouldFocus }: { shouldFocus: boolean }) {
   }, [editor, shouldFocus]);
 
   return null;
-}
-
-function normalizeLinkUrl(value: string): string | null {
-  const candidate = value.trim();
-  if (candidate.length === 0) {
-    return null;
-  }
-
-  try {
-    const url = new URL(candidate);
-    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:"
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function ToolbarButton({

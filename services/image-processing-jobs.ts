@@ -32,6 +32,7 @@ import {
   requireRecordUpdated,
   resolveLocalServiceDependencies,
 } from "./local-service-dependencies";
+import { isQuotaExceededError, LOCAL_STORAGE_FULL_MESSAGE } from "./local-persistence-error";
 
 export type CreateImageProcessingJobInput = Readonly<{
   blob: Blob;
@@ -69,7 +70,8 @@ function optionalTrimmed(value: string | null | undefined): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-function normalizeErrorCode(errorCode: unknown): ImageAnalysisApiErrorCode {
+function normalizeErrorCode(errorCode: unknown): ImageAnalysisApiErrorCode | "local_storage_full" {
+  if (errorCode === "local_storage_full") return errorCode;
   const parsed = imageAnalysisApiErrorCodeSchema.safeParse(errorCode);
   return parsed.success ? parsed.data : "provider_error";
 }
@@ -152,7 +154,7 @@ export async function beginImageProcessingJob(
   jobId: string,
   clientRequestId: string,
   dependencies: LocalServiceDependencies = {},
-): Promise<ContentProcessingJob> {
+): Promise<ContentProcessingJob | null> {
   const requestId = imageClientRequestIdSchema.parse(clientRequestId);
   const { database, timestamp } = resolveLocalServiceDependencies(dependencies);
   const repository = new ContentProcessingJobRepository(database);
@@ -160,7 +162,7 @@ export async function beginImageProcessingJob(
   return database.transaction("rw", database.contentProcessingJobs, async () => {
     const current = requireImageJob(await repository.getById(jobId), jobId);
     if (current.status !== "pending") {
-      throw new Error(`Image processing job ${jobId} is not pending`);
+      return null;
     }
     if (current.sourceBlob === null) {
       throw new Error(`Image processing job ${jobId} has no source Blob`);
@@ -349,12 +351,14 @@ export async function failImageProcessingJob(
     ) {
       return false;
     }
+    const normalizedErrorCode = normalizeErrorCode(errorCode);
     requireRecordUpdated(
       await jobs.update(jobId, {
         status: "failed",
         processingRequestId: null,
-        errorCode: normalizeErrorCode(errorCode),
-        errorMessage: null,
+        errorCode: normalizedErrorCode,
+        errorMessage:
+          normalizedErrorCode === "local_storage_full" ? LOCAL_STORAGE_FULL_MESSAGE : null,
         updatedAt: timestamp,
       }),
       "Content processing job",
@@ -370,6 +374,7 @@ async function processImageProcessingJobWithoutLock(
 ): Promise<FinalizedImageProcessingJob | null> {
   const clientRequestId = options.clientRequestId ?? createUuid();
   const job = await beginImageProcessingJob(jobId, clientRequestId, { database });
+  if (job === null) return null;
   if (job.sourceBlob === null) {
     throw new Error(`Image processing job ${jobId} has no source Blob`);
   }
@@ -384,7 +389,7 @@ async function processImageProcessingJobWithoutLock(
       await failImageProcessingJob(jobId, clientRequestId, "invalid_model_response", { database });
       return null;
     }
-    return finalizeImageProcessingJob(
+    return await finalizeImageProcessingJob(
       { jobId, clientRequestId, result: response.analysis },
       { database },
     );
@@ -393,7 +398,11 @@ async function processImageProcessingJobWithoutLock(
       await failImageProcessingJob(jobId, clientRequestId, "request_interrupted", { database });
       throw error;
     }
-    const code = error instanceof Error && "code" in error ? error.code : undefined;
+    const code = isQuotaExceededError(error)
+      ? "local_storage_full"
+      : error instanceof Error && "code" in error
+        ? error.code
+        : undefined;
     await failImageProcessingJob(jobId, clientRequestId, code, { database });
     throw error;
   }

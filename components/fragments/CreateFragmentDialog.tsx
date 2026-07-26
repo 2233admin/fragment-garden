@@ -12,6 +12,7 @@ import { createLinkProcessingJob } from "@/services/create-link-processing-job";
 import { createImageProcessingJob } from "@/services/image-processing-jobs";
 import { createMediaFragment } from "@/services/create-media-fragment";
 import { createLocalFragment } from "@/services/create-local-fragment";
+import { localPersistenceErrorMessage } from "@/services/local-persistence-error";
 import { externalUrlSchema } from "@/validation/external-url";
 
 import { DuplicateLinkDialog } from "../link-imports/DuplicateLinkDialog";
@@ -192,11 +193,21 @@ export function CreateFragmentDialog({
       setIsDisclosureOpen(false);
       setPendingLinkAllowDuplicate(null);
       await createAndFinishLinkJob(allowDuplicate);
-    } catch {
+    } catch (error) {
       if (didAcceptDisclosure) {
-        setFormError("链接整理任务暂时没能创建。链接仍在表单中，可以直接重试。");
+        setFormError(
+          localPersistenceErrorMessage(
+            error,
+            "链接整理任务暂时没能创建。链接仍在表单中，可以直接重试。",
+          ),
+        );
       } else {
-        setDisclosureError("这次选择没有保存，因此没有发送链接，也没有创建整理任务。请重试。");
+        setDisclosureError(
+          localPersistenceErrorMessage(
+            error,
+            "这次选择没有保存，因此没有发送链接，也没有创建整理任务。请重试。",
+          ),
+        );
       }
     } finally {
       submissionLockRef.current = false;
@@ -230,8 +241,13 @@ export function CreateFragmentDialog({
       clearState();
       onCreated(notice);
       onClose();
-    } catch {
-      setFormError("保存失败，这条碎片尚未写入本地。你的输入仍在，可以直接重试。");
+    } catch (error) {
+      setFormError(
+        localPersistenceErrorMessage(
+          error,
+          "保存失败，这条碎片尚未写入本地。你的输入仍在，可以直接重试。",
+        ),
+      );
     } finally {
       submissionLockRef.current = false;
       setPendingAction(null);
@@ -291,8 +307,10 @@ export function CreateFragmentDialog({
       clearState();
       onCreated(notice);
       onClose();
-    } catch {
-      setFormError("语音尚未保存到本地。录音仍在这里，可以直接重试。");
+    } catch (error) {
+      setFormError(
+        localPersistenceErrorMessage(error, "语音尚未保存到本地。录音仍在这里，可以直接重试。"),
+      );
     } finally {
       submissionLockRef.current = false;
       setPendingAction(null);
@@ -334,8 +352,13 @@ export function CreateFragmentDialog({
 
       setPendingAction("saving_image");
       await createAndFinishImageJob(imageSelection);
-    } catch {
-      setFormError("暂时无法开始整理。图片和说明仍在这里，没有创建卡片，可以直接重试。");
+    } catch (error) {
+      setFormError(
+        localPersistenceErrorMessage(
+          error,
+          "暂时无法开始整理。图片和说明仍在这里，没有创建卡片，可以直接重试。",
+        ),
+      );
     } finally {
       submissionLockRef.current = false;
       setPendingAction(null);
@@ -381,11 +404,21 @@ export function CreateFragmentDialog({
       setIsImageDisclosureOpen(false);
       setPendingAction("saving_image");
       await createAndFinishImageJob(selection);
-    } catch {
+    } catch (error) {
       if (didAcceptDisclosure) {
-        setFormError("图片整理任务暂时没能创建。图片和说明仍在表单中，可以直接重试。");
+        setFormError(
+          localPersistenceErrorMessage(
+            error,
+            "图片整理任务暂时没能创建。图片和说明仍在表单中，可以直接重试。",
+          ),
+        );
       } else {
-        setImageDisclosureError("这次选择没有保存，因此没有发送图片，也没有创建整理任务。请重试。");
+        setImageDisclosureError(
+          localPersistenceErrorMessage(
+            error,
+            "这次选择没有保存，因此没有发送图片，也没有创建整理任务。请重试。",
+          ),
+        );
       }
     } finally {
       submissionLockRef.current = false;
@@ -484,8 +517,11 @@ export function CreateFragmentDialog({
       }
 
       await createAndFinishLinkJob(allowDuplicate);
-    } catch {
-      const message = "暂时无法开始整理。链接仍在表单中，没有创建卡片，可以直接重试。";
+    } catch (error) {
+      const message = localPersistenceErrorMessage(
+        error,
+        "暂时无法开始整理。链接仍在表单中，没有创建卡片，可以直接重试。",
+      );
       if (allowDuplicate) {
         setDuplicateError(message);
       } else {

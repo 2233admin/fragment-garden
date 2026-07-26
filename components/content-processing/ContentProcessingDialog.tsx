@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 
 import type { ContentProcessingJob } from "@/domain";
+import { LOCAL_STORAGE_FULL_MESSAGE } from "../../services/local-persistence-error";
 
 import { AsyncButton } from "../shared/AsyncButton";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
@@ -60,6 +61,9 @@ function resolveStatusCopy(job: ContentProcessingJob): string {
       : "正在整理这条内容。完成前不会创建卡片或植物。";
   }
   if (job.status === "failed") {
+    if (job.errorCode === "local_storage_full") {
+      return LOCAL_STORAGE_FULL_MESSAGE;
+    }
     if (job.kind === "image") {
       return "这张图片暂时没能整理完成，原图仍保存在本地任务中。";
     }

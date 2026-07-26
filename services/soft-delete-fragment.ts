@@ -1,4 +1,5 @@
 import type { Fragment, FragmentEvent, Plant } from "../domain";
+import { ContentProcessingJobRepository } from "../data/repositories/content-processing-job-repository";
 import { ExternalLinkImportRepository } from "../data/repositories/external-link-import-repository";
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
@@ -40,15 +41,23 @@ export async function softDeleteFragment(
   const plantRepository = new PlantRepository(database);
   const fragmentEventRepository = new FragmentEventRepository(database);
   const externalLinkImportRepository = new ExternalLinkImportRepository(database);
+  const contentProcessingJobRepository = new ContentProcessingJobRepository(database);
 
   return database.transaction(
     "rw",
-    [database.fragments, database.plants, database.fragmentEvents, database.externalLinkImports],
+    [
+      database.fragments,
+      database.plants,
+      database.fragmentEvents,
+      database.externalLinkImports,
+      database.contentProcessingJobs,
+    ],
     async () => {
-      const [fragment, plant, externalLinkImport] = await Promise.all([
+      const [fragment, plant, externalLinkImport, processingJobs] = await Promise.all([
         fragmentRepository.getById(input.fragmentId),
         plantRepository.getByFragmentId(input.fragmentId),
         externalLinkImportRepository.getByFragmentId(input.fragmentId),
+        contentProcessingJobRepository.list(),
       ]);
 
       if (fragment === undefined) {
@@ -57,6 +66,34 @@ export async function softDeleteFragment(
 
       if (plant === undefined) {
         throw new Error(`Plant for fragment ${input.fragmentId} was not found`);
+      }
+
+      for (const job of processingJobs) {
+        if (job.status === "completed" && job.createdFragmentId === fragment.id) {
+          await contentProcessingJobRepository.delete(job.id);
+          continue;
+        }
+        if (
+          job.kind === "sprout" &&
+          job.sourceFragmentId === fragment.id &&
+          job.status !== "completed" &&
+          job.status !== "cancelled"
+        ) {
+          requireRecordUpdated(
+            await contentProcessingJobRepository.update(job.id, {
+              status: "cancelled",
+              sourceSnapshot: null,
+              providerTaskId: null,
+              processingRequestId: null,
+              resultTitle: null,
+              resultMarkdown: null,
+              errorCode: "source_missing",
+              errorMessage: "源笔记已不存在。",
+              updatedAt: timestamp,
+            }),
+            "Content processing job",
+          );
+        }
       }
 
       if (

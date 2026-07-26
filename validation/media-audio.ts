@@ -45,6 +45,8 @@ export type ValidatedAudioMediaMetadata = Readonly<{
   durationMs: number | null;
 }>;
 
+export type AudioBlobLike = Pick<Blob, "arrayBuffer" | "size" | "type">;
+
 const MIME_ALIASES: Readonly<Record<string, SupportedAudioMimeType>> = {
   "audio/webm": "audio/webm",
   "audio/ogg": "audio/ogg",
@@ -103,6 +105,62 @@ export function validateAudioMediaMetadata(
   }
 
   return { mimeType, sizeBytes: input.sizeBytes, durationMs };
+}
+
+function ascii(bytes: Uint8Array, offset: number, length: number): string {
+  return String.fromCharCode(...bytes.subarray(offset, offset + length));
+}
+
+function hasAudioContainerSignature(bytes: Uint8Array, mimeType: SupportedAudioMimeType): boolean {
+  switch (mimeType) {
+    case "audio/webm":
+      return (
+        bytes.length >= 4 &&
+        bytes[0] === 0x1a &&
+        bytes[1] === 0x45 &&
+        bytes[2] === 0xdf &&
+        bytes[3] === 0xa3
+      );
+    case "audio/ogg":
+      return bytes.length >= 4 && ascii(bytes, 0, 4) === "OggS";
+    case "audio/wav":
+      return bytes.length >= 12 && ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE";
+    case "audio/mpeg":
+      return (
+        (bytes.length >= 3 && ascii(bytes, 0, 3) === "ID3") ||
+        (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0)
+      );
+    case "audio/mp4":
+      return bytes.length >= 12 && ascii(bytes, 4, 4) === "ftyp";
+  }
+}
+
+/** Checks that persisted audio bytes still match their declared browser container. */
+export async function validateAudioBlob(
+  blob: AudioBlobLike,
+  durationMs?: number | null,
+): Promise<ValidatedAudioMediaMetadata> {
+  const metadata = validateAudioMediaMetadata({
+    mimeType: blob.type,
+    sizeBytes: blob.size,
+    durationMs,
+  });
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await blob.arrayBuffer());
+  } catch {
+    throw new AudioMediaValidationError("empty_recording", "The recording could not be read");
+  }
+  if (
+    bytes.byteLength !== metadata.sizeBytes ||
+    !hasAudioContainerSignature(bytes, metadata.mimeType)
+  ) {
+    throw new AudioMediaValidationError(
+      "unsupported_media_type",
+      "The recording data does not match its declared format",
+    );
+  }
+  return metadata;
 }
 
 function stripUnsafeControls(value: string): string {

@@ -6,10 +6,15 @@ type MarkdownContentProps = Readonly<{
   emptyMessage?: string;
 }>;
 
+const MAX_RENDERED_URL_LENGTH = 2_048;
+
 function transformSafeUrl(url: string): string | null {
+  if (url.length > MAX_RENDERED_URL_LENGTH) {
+    return null;
+  }
   const transformedUrl = defaultUrlTransform(url);
 
-  if (transformedUrl.length === 0) {
+  if (transformedUrl.length === 0 || transformedUrl.length > MAX_RENDERED_URL_LENGTH) {
     return null;
   }
 

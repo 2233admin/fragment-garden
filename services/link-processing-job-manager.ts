@@ -22,6 +22,7 @@ import {
   type LinkImportApi,
 } from "./link-import-api-client";
 import type { LocalServiceDependencies } from "./local-service-dependencies";
+import { isQuotaExceededError, LOCAL_STORAGE_FULL_MESSAGE } from "./local-persistence-error";
 
 export const LINK_PROCESSING_JOB_POLL_INTERVAL_MS = 10_000;
 export const LINK_PROCESSING_JOB_MAX_DURATION_MS = 10 * 60 * 1000;
@@ -645,6 +646,13 @@ export class LinkProcessingJobManager {
     message: string;
     requestId: string | null;
   }> {
+    if (isQuotaExceededError(error)) {
+      return {
+        code: "local_storage_full",
+        message: LOCAL_STORAGE_FULL_MESSAGE,
+        requestId: null,
+      };
+    }
     if (error instanceof LinkNoteContentError) {
       return { code: error.code, message: error.message, requestId: null };
     }
@@ -680,7 +688,10 @@ export class LinkProcessingJobManager {
         type: "failed",
         jobId: job.id,
         fragmentId: null,
-        message: "暂时没能整理这条链接。任务已经保留，可以稍后重试。",
+        message:
+          errorCode === "local_storage_full"
+            ? LOCAL_STORAGE_FULL_MESSAGE
+            : "暂时没能整理这条链接。任务已经保留，可以稍后重试。",
       });
     }
   }

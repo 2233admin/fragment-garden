@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 
 import type { FragmentContentType } from "@/domain";
+import { localPersistenceErrorMessage } from "@/services/local-persistence-error";
 import { updateFragmentContent } from "@/services/update-fragment-content";
 
 import { AsyncButton } from "../shared/AsyncButton";
@@ -74,8 +75,13 @@ export function FragmentEditForm({
         title,
       });
       onSaved("标题和主体内容已保存。");
-    } catch {
-      setErrorMessage("修改保存失败，原内容没有被替换。你的输入仍在，可以重试。");
+    } catch (error) {
+      setErrorMessage(
+        localPersistenceErrorMessage(
+          error,
+          "修改保存失败，原内容没有被替换。你的输入仍在，可以重试。",
+        ),
+      );
     } finally {
       submissionLockRef.current = false;
       setIsPending(false);

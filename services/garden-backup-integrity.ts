@@ -17,6 +17,8 @@ import type {
 } from "../domain";
 import { FRAGMENT_GARDEN_TABLE_NAMES, type FragmentGardenTableName } from "../data/schema";
 import { BACKUP_TABLE_ROW_SCHEMAS } from "../validation/garden-backup";
+import { validateAudioBlob } from "../validation/media-audio";
+import { validateImageBlob } from "../validation/media-image";
 
 export type GardenBackupRows = {
   settings: Settings[];
@@ -71,6 +73,7 @@ export async function readAndValidateBackupRows(database: Dexie): Promise<Garden
 
   const rows = Object.fromEntries(entries) as GardenBackupRows;
   validateBackupReferences(rows);
+  await validateBackupMedia(rows);
   return rows;
 }
 
@@ -84,9 +87,53 @@ function assertReferences(
   }
 }
 
-function validateBlob(blob: Blob, expectedSize: number, expectedType: string, label: string): void {
+function validateBlobMetadata(
+  blob: Blob,
+  expectedSize: number,
+  expectedType: string,
+  label: string,
+): void {
   if (blob.size !== expectedSize || blob.type !== expectedType) {
     throw backupIntegrityError(`${label} contains unreadable media`);
+  }
+}
+
+async function validateMediaBlob(
+  kind: "image" | "audio",
+  blob: Blob,
+  durationMs: number | null,
+  label: string,
+): Promise<void> {
+  try {
+    if (kind === "image") {
+      await validateImageBlob(blob);
+    } else {
+      await validateAudioBlob(blob, durationMs);
+    }
+  } catch {
+    throw backupIntegrityError(`${label} contains unreadable media`);
+  }
+}
+
+async function validateBackupMedia(rows: GardenBackupRows): Promise<void> {
+  for (const asset of rows.mediaAssets) {
+    await validateMediaBlob(asset.kind, asset.blob, asset.durationMs, "A media item");
+    if (asset.kind === "image" && asset.width !== null && asset.height !== null) {
+      const dimensions = await validateImageBlob(asset.blob);
+      if (dimensions.width !== asset.width || dimensions.height !== asset.height) {
+        throw backupIntegrityError("A media item contains inconsistent dimensions");
+      }
+    }
+  }
+  for (const attachment of rows.attachments) {
+    await validateMediaBlob(attachment.kind, attachment.blob, null, "A legacy attachment");
+  }
+  for (const job of rows.contentProcessingJobs) {
+    if (job.sourceBlob === null) continue;
+    if (job.kind !== "image" || job.sourceMimeType === null) {
+      throw backupIntegrityError("A processing task contains unexpected media");
+    }
+    await validateMediaBlob("image", job.sourceBlob, null, "A processing task");
   }
 }
 
@@ -183,10 +230,15 @@ export function validateBackupReferences(rows: GardenBackupRows): void {
       throw backupIntegrityError("A note has more than one primary media item");
     }
     mediaFragmentIds.add(asset.fragmentId);
-    validateBlob(asset.blob, asset.sizeBytes, asset.mimeType, "A media item");
+    validateBlobMetadata(asset.blob, asset.sizeBytes, asset.mimeType, "A media item");
   }
   for (const attachment of rows.attachments) {
-    validateBlob(attachment.blob, attachment.sizeBytes, attachment.mimeType, "A legacy attachment");
+    validateBlobMetadata(
+      attachment.blob,
+      attachment.sizeBytes,
+      attachment.mimeType,
+      "A legacy attachment",
+    );
   }
   for (const job of rows.contentProcessingJobs) {
     if (

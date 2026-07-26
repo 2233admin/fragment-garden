@@ -89,3 +89,41 @@ export async function dismissCompletedContentProcessingJob(
     return true;
   });
 }
+
+/** Removes transient payloads only after a task can no longer need them for retry or preview. */
+export async function cleanupSettledContentProcessingJobs(
+  dependencies: LocalServiceDependencies = {},
+): Promise<number> {
+  const { database } = resolveLocalServiceDependencies(dependencies);
+  const repository = new ContentProcessingJobRepository(database);
+
+  return database.transaction("rw", database.contentProcessingJobs, async () => {
+    const jobs = await repository.listByStatuses(["completed", "cancelled"]);
+    let cleanedCount = 0;
+
+    for (const job of jobs) {
+      const shouldClearBlob = job.sourceBlob !== null;
+      const shouldClearSproutPreview =
+        job.kind === "sprout" &&
+        (job.sourceSnapshot !== null ||
+          job.resultMarkdown !== null ||
+          (job.status === "cancelled" && job.resultTitle !== null));
+      if (!shouldClearBlob && !shouldClearSproutPreview) continue;
+
+      cleanedCount += await repository.update(job.id, {
+        ...(shouldClearBlob ? { sourceBlob: null } : {}),
+        ...(shouldClearSproutPreview
+          ? {
+              sourceSnapshot: null,
+              resultMarkdown: null,
+              resultTitle: job.status === "cancelled" ? null : job.resultTitle,
+            }
+          : {}),
+        processingRequestId: null,
+        providerTaskId: job.status === "cancelled" ? null : job.providerTaskId,
+      });
+    }
+
+    return cleanedCount;
+  });
+}

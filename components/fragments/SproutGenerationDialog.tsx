@@ -8,6 +8,7 @@ import type { FragmentDetailViewModel } from "@/data/queries/fragment-detail-que
 import { ContentProcessingJobRepository } from "@/data/repositories/content-processing-job-repository";
 import { normalizeContentMarkdown, plainTextToMarkdown } from "@/domain";
 import { acceptSproutDisclosure } from "@/services/accept-sprout-disclosure";
+import { localPersistenceErrorMessage } from "@/services/local-persistence-error";
 import {
   cancelSproutGenerationJob,
   confirmSproutGeneration,
@@ -165,10 +166,15 @@ export function SproutGenerationDialog({
       if (result.job.status === "pending" || result.job.status === "failed") {
         onStartProcessingJob(result.job.id);
       }
-    } catch {
+    } catch (error) {
       if (isMountedRef.current) {
         setPreparation("ready");
-        setErrorMessage("暂时没能开始发芽，没有创建新笔记，也没有修改原内容。");
+        setErrorMessage(
+          localPersistenceErrorMessage(
+            error,
+            "暂时没能开始发芽，没有创建新笔记，也没有修改原内容。",
+          ),
+        );
       }
     } finally {
       preparationLockRef.current = false;
@@ -223,10 +229,12 @@ export function SproutGenerationDialog({
       if (!isMountedRef.current) return;
       setPreparation("ready");
       await createOrResumeJob();
-    } catch {
+    } catch (error) {
       if (isMountedRef.current) {
         setPreparation("awaiting_disclosure");
-        setErrorMessage("这次没有保存你的选择，也没有发送笔记内容。请重试。");
+        setErrorMessage(
+          localPersistenceErrorMessage(error, "这次没有保存你的选择，也没有发送笔记内容。请重试。"),
+        );
       }
     }
   }
@@ -264,8 +272,10 @@ export function SproutGenerationDialog({
         title: preview.data.title,
         markdown: preview.data.markdown,
       });
-    } catch {
-      setErrorMessage("这次没有种下新笔记，也没有修改原笔记。请重试。");
+    } catch (error) {
+      setErrorMessage(
+        localPersistenceErrorMessage(error, "这次没有种下新笔记，也没有修改原笔记。请重试。"),
+      );
     } finally {
       if (isMountedRef.current) setIsConfirming(false);
     }

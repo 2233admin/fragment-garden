@@ -4,9 +4,10 @@
 // the media record changes or the panel unmounts.
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useBlobObjectUrl } from "../media/useBlobObjectUrl";
 import type { Fragment, MediaAsset } from "@/domain";
 
 import { ModalDialog } from "../shared/ModalDialog";
@@ -16,43 +17,9 @@ type ImageMediaPanelProps = Readonly<{
   mediaAsset: MediaAsset;
 }>;
 
-function useBlobUrl(blob: Blob | null): string | null {
-  const [resource, setResource] = useState<{ blob: Blob | null; url: string | null }>({
-    blob: null,
-    url: null,
-  });
-
-  useEffect(() => {
-    let nextUrl: string | null = null;
-    if (blob !== null && typeof URL.createObjectURL === "function") {
-      try {
-        nextUrl = URL.createObjectURL(blob);
-      } catch {
-        nextUrl = null;
-      }
-    }
-
-    let isActive = true;
-    Promise.resolve().then(() => {
-      if (isActive) {
-        setResource({ blob, url: nextUrl });
-      }
-    });
-
-    return () => {
-      isActive = false;
-      if (nextUrl !== null) {
-        URL.revokeObjectURL(nextUrl);
-      }
-    };
-  }, [blob]);
-
-  return resource.blob === blob ? resource.url : null;
-}
-
 export function ImageMediaPanel({ fragment, mediaAsset }: ImageMediaPanelProps) {
   const previewTitleId = useId();
-  const imageUrl = useBlobUrl(mediaAsset.blob);
+  const imageUrl = useBlobObjectUrl(mediaAsset.blob);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   const isImageLoadFailed = imageUrl !== null && failedImageUrl === imageUrl;
@@ -89,7 +56,7 @@ export function ImageMediaPanel({ fragment, mediaAsset }: ImageMediaPanelProps) 
           </button>
         ) : (
           <p className="border-y border-dashed border-garden-line py-5 text-sm text-garden-muted">
-            图片暂时无法读取，原始记录仍保存在本地。
+            原图片暂时无法读取。笔记正文和其他内容仍可使用。
           </p>
         )}
       </section>

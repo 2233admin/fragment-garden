@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { FragmentNote } from "@/domain";
 import { deleteFragmentNote } from "@/services/delete-fragment-note";
+import { localPersistenceErrorMessage } from "@/services/local-persistence-error";
 import { updateFragmentNote } from "@/services/update-fragment-note";
 
 import { AsyncButton } from "../shared/AsyncButton";
@@ -77,8 +78,10 @@ export function FragmentNoteList({
       setEditingNoteId(null);
       setDraftMarkdown("");
       onFeedback("追加笔记已更新。", "status");
-    } catch {
-      setErrorMessage("修改没有保存，你的输入仍在，可以重试。");
+    } catch (error) {
+      setErrorMessage(
+        localPersistenceErrorMessage(error, "修改没有保存，你的输入仍在，可以重试。"),
+      );
       onFeedback("追加笔记修改失败，没有产生部分更新。", "error");
     } finally {
       mutationLockRef.current = false;

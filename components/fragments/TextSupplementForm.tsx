@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 
 import { addTextSupplement } from "@/services/add-text-supplement";
+import { localPersistenceErrorMessage } from "@/services/local-persistence-error";
 
 import { AsyncButton } from "../shared/AsyncButton";
 import { RichTextEditor } from "./RichTextEditor";
@@ -48,8 +49,10 @@ export function TextSupplementForm({
       await addTextSupplement({ fragmentId, contentMarkdown });
       setContentMarkdown("");
       onSaved("追加笔记已保存。");
-    } catch {
-      setErrorMessage("保存失败，没有产生部分更新。你的输入仍在，可以重试。");
+    } catch (error) {
+      setErrorMessage(
+        localPersistenceErrorMessage(error, "保存失败，没有产生部分更新。你的输入仍在，可以重试。"),
+      );
     } finally {
       submissionLockRef.current = false;
       setIsPending(false);

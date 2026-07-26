@@ -22,6 +22,7 @@ import {
   runWithGardenRestoreLock,
   type GardenRestoreBroadcastEvent,
 } from "./garden-restore-coordination";
+import { isQuotaExceededError, LOCAL_STORAGE_FULL_MESSAGE } from "./local-persistence-error";
 
 export const GARDEN_BACKUP_FORMAT_VERSION = 1;
 export const MAX_GARDEN_BACKUP_BYTES = 256 * 1024 * 1024;
@@ -343,6 +344,7 @@ export async function restoreGardenBackup(
 }
 
 export function gardenBackupErrorMessage(error: unknown): string {
+  if (isQuotaExceededError(error)) return LOCAL_STORAGE_FULL_MESSAGE;
   if (error instanceof GardenBackupError) {
     if (error.code === "file_too_large") return "这份备份文件太大，当前版本无法安全读取。";
     if (error.code === "incomplete_backup") return "备份文件不完整或已损坏。";

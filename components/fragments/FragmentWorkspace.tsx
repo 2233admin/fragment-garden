@@ -362,9 +362,7 @@ export function FragmentWorkspace({
               className="rounded-2xl border border-garden-line bg-garden-paper px-6 py-14 text-center"
             >
               <h3 className="font-display text-xl font-semibold">正在初始化本地花园…</h3>
-              <p className="mt-2 text-sm text-garden-muted">
-                正在读取当前浏览器中的 IndexedDB 数据。
-              </p>
+              <p className="mt-2 text-sm text-garden-muted">正在读取当前浏览器中保存的内容。</p>
             </section>
           ) : null}
 

@@ -36,6 +36,7 @@ import {
   SproutGenerationApiClientError,
   sproutGenerationErrorMessage,
 } from "./sprout-generation-api-client";
+import { isQuotaExceededError, LOCAL_STORAGE_FULL_MESSAGE } from "./local-persistence-error";
 
 const ACTIVE_SPROUT_JOB_STATUSES = new Set<ContentProcessingJob["status"]>([
   "pending",
@@ -247,7 +248,7 @@ export async function processSproutGenerationJob(
       started.request,
       options.signal,
     );
-    return database.transaction(
+    return await database.transaction(
       "rw",
       database.contentProcessingJobs,
       database.fragments,
@@ -289,7 +290,10 @@ export async function processSproutGenerationJob(
       },
     );
   } catch (error) {
-    const code = error instanceof SproutGenerationApiClientError ? error.code : "provider_error";
+    const isStorageFull = isQuotaExceededError(error);
+    const providerCode =
+      error instanceof SproutGenerationApiClientError ? error.code : "provider_error";
+    const code = isStorageFull ? "local_storage_full" : providerCode;
     return database.transaction("rw", database.contentProcessingJobs, async () => {
       const job = await repository.getById(jobId);
       if (
@@ -303,7 +307,9 @@ export async function processSproutGenerationJob(
         status: "failed" as const,
         processingRequestId: null,
         errorCode: code,
-        errorMessage: sproutGenerationErrorMessage(code),
+        errorMessage: isStorageFull
+          ? LOCAL_STORAGE_FULL_MESSAGE
+          : sproutGenerationErrorMessage(providerCode),
         updatedAt: timestamp,
       };
       requireRecordUpdated(await repository.update(jobId, changes), "Content processing job");
@@ -325,7 +331,11 @@ export async function cancelSproutGenerationJob(
     }
     await repository.update(jobId, {
       status: "cancelled",
+      sourceSnapshot: null,
       processingRequestId: null,
+      providerTaskId: null,
+      resultTitle: null,
+      resultMarkdown: null,
       updatedAt: timestamp,
     });
   });
@@ -494,9 +504,12 @@ export async function confirmSproutGeneration(
       requireRecordUpdated(
         await jobRepository.update(job.id, {
           status: "completed",
+          sourceSnapshot: null,
           createdFragmentId: fragmentId,
+          processingRequestId: null,
+          providerTaskId: null,
           resultTitle: preview.title,
-          resultMarkdown: preview.markdown,
+          resultMarkdown: null,
           updatedAt: timestamp,
         }),
         "Content processing job",

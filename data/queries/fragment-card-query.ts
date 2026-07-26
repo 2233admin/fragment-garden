@@ -87,12 +87,14 @@ export function listFragmentCardViewModels(
     [database.fragments, database.plants, database.externalLinkImports, database.mediaAssets],
     async () => {
       const fragments = await fragmentRepository.listVisibleFragments();
+      const fragmentIds = new Set(fragments.map((fragment) => fragment.id));
       const [plants, linkImports, mediaAssets] = await Promise.all([
-        plantRepository.listByFragmentIds(fragments.map((fragment) => fragment.id)),
+        plantRepository.listByFragmentIds([...fragmentIds]),
         database.externalLinkImports.toArray(),
         database.mediaAssets
-          .where("fragmentId")
-          .anyOf(fragments.map((fragment) => fragment.id))
+          .where("kind")
+          .equals("image")
+          .and((asset) => fragmentIds.has(asset.fragmentId))
           .toArray(),
       ]);
       const plantByFragmentId = new Map(plants.map((plant) => [plant.fragmentId, plant] as const));
@@ -152,7 +154,7 @@ export function listFragmentCardViewModels(
           plantStage: plant.stage,
           growthScore: plant.growthScore,
           isPlacedInGarden: plant.slotId !== null,
-          mediaKind: mediaAsset?.kind ?? null,
+          mediaKind: mediaAsset?.kind ?? (fragment.contentType === "audio" ? "audio" : null),
           mediaProcessingStatus: mediaAsset?.processingStatus ?? null,
           mediaSizeBytes: mediaAsset?.sizeBytes ?? null,
           mediaDurationMs: mediaAsset?.durationMs ?? null,

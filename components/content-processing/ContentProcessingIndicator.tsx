@@ -23,12 +23,16 @@ function resolveSummary(jobs: readonly ContentProcessingJob[]): string {
   ).length;
   const failedCount = countJobs(jobs, "failed");
   const completedCount = countJobs(jobs, "completed");
+  const awaitingCount = countJobs(jobs, "awaiting_confirmation");
 
   if (activeCount > 0) {
     return `正在整理 ${activeCount} 条内容`;
   }
   if (failedCount > 0) {
     return `${failedCount} 条内容需要处理`;
+  }
+  if (awaitingCount > 0) {
+    return awaitingCount === 1 ? "一条新笔记等待确认" : `${awaitingCount} 条新笔记等待确认`;
   }
   if (completedCount > 0) {
     return completedCount === 1 ? "新笔记已经整理好了" : `${completedCount} 条新笔记已经整理好了`;

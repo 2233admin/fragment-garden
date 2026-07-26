@@ -7,7 +7,6 @@ import {
   getFragmentDetailViewModel,
   type FragmentDetailViewModel,
 } from "@/data/queries/fragment-detail-query";
-import type { SproutRecommendedAction } from "@/validation/sprout-api";
 
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import { ModalDialog } from "../shared/ModalDialog";
@@ -17,7 +16,7 @@ import { FragmentLinkDetailPanel } from "./FragmentLinkDetailPanel";
 import { FragmentNoteList } from "./FragmentNoteList";
 import { ImageMediaPanel } from "./ImageMediaPanel";
 import { MarkdownContent } from "./MarkdownContent";
-import { SproutAnalysisDialog } from "./SproutAnalysisDialog";
+import { SproutGenerationDialog } from "./SproutGenerationDialog";
 import { TextSupplementForm } from "./TextSupplementForm";
 import { VoiceMediaPanel } from "./VoiceMediaPanel";
 import { useFragmentDetailActions } from "./useFragmentDetailActions";
@@ -28,6 +27,7 @@ type FragmentDetailDialogProps = {
   onClose: () => void;
   onDeleted: (message: string) => void;
   onOpenRelatedFragment: (fragmentId: string) => Promise<boolean>;
+  onStartProcessingJob: (jobId: string) => void;
   onRetryLinkImport?: (fragmentId: string) => Promise<void>;
 };
 
@@ -44,6 +44,7 @@ export function FragmentDetailDialog({
   onClose,
   onDeleted,
   onOpenRelatedFragment,
+  onStartProcessingJob,
 }: FragmentDetailDialogProps) {
   const dialogTitleId = useId();
   const articleTitleId = useId();
@@ -103,20 +104,6 @@ export function FragmentDetailDialog({
     requestAnimationFrame(() => {
       requestAnimationFrame(() => sproutTriggerRef.current?.focus());
     });
-  }
-
-  function continueFromLegacySprout(action: SproutRecommendedAction): void {
-    actions.closeOverlay();
-    if (action === "add_content" || action === "record_next_step") {
-      openNoteComposer();
-      return;
-    }
-
-    actions.setFeedback({
-      kind: "status",
-      message: "这条方向没有自动执行，你可以继续编辑当前笔记或稍后再处理。",
-    });
-    requestStableFocus();
   }
 
   return (
@@ -343,14 +330,11 @@ export function FragmentDetailDialog({
       </ModalDialog>
 
       {actions.activeOverlay === "sprout" && detail !== null && !isDeleted ? (
-        <SproutAnalysisDialog
-          additions={detail.additions}
-          externalLinkImport={detail.externalLinkImport}
-          fragment={detail.fragment}
-          mediaAsset={detail.mediaAsset}
+        <SproutGenerationDialog
+          detail={detail}
           onClose={closeSproutAndRestoreFocus}
-          onContinue={continueFromLegacySprout}
-          plant={detail.plant}
+          onOpenCreatedFragment={onOpenRelatedFragment}
+          onStartProcessingJob={onStartProcessingJob}
         />
       ) : null}
 

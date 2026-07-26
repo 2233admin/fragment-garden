@@ -494,6 +494,15 @@ export function GardenWorkspace() {
         onClose={() => contentProcessing.closeDialog()}
         onDelete={contentProcessing.removeJob}
         onOpenCompleted={(job, triggerElement) => {
+          if (job.kind === "sprout" && job.status === "awaiting_confirmation") {
+            if (job.sourceFragmentId === null) return;
+            contentProcessing.closeDialog(false);
+            void openFragment(job.sourceFragmentId, {
+              successMessage: "新笔记预览已经准备好。打开发芽即可继续确认。",
+              triggerElement,
+            });
+            return;
+          }
           if (job.createdFragmentId === null) return;
           contentProcessing.closeDialog(false);
           void openFragment(job.createdFragmentId, {
@@ -524,6 +533,7 @@ export function GardenWorkspace() {
               triggerElement: null,
             })
           }
+          onStartProcessingJob={(jobId) => void contentProcessing.startJob(jobId)}
         />
       ) : null}
     </main>

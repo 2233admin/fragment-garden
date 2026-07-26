@@ -22,6 +22,7 @@ export * from "./shared/time";
 export * from "./shared/types";
 export * from "./sprout/constants";
 export * from "./sprout/context";
+export * from "./sprout/generation-context";
 export * from "./sprout/local-date";
 export * from "./sprout/readiness";
 export * from "./sprout/recommended-actions";

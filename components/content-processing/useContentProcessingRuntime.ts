@@ -15,8 +15,19 @@ import {
   LinkProcessingJobManager,
   type LinkProcessingJobManagerEvent,
 } from "@/services/link-processing-job-manager";
+import {
+  cancelSproutGenerationJob,
+  markStaleSproutGenerationJobs,
+  processSproutGenerationJob,
+} from "@/services/sprout-generation-jobs";
 
-const VISIBLE_JOB_STATUSES = ["pending", "processing", "failed", "completed"] as const;
+const VISIBLE_JOB_STATUSES = [
+  "pending",
+  "processing",
+  "awaiting_confirmation",
+  "failed",
+  "completed",
+] as const;
 const MAX_IMAGE_CONCURRENCY = 2;
 
 type ImageQueueItem = Readonly<{
@@ -47,6 +58,7 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
   const queuedImageJobIdsRef = useRef(new Set<string>());
   const activeImageJobIdsRef = useRef(new Set<string>());
   const imageAbortControllersRef = useRef(new Map<string, AbortController>());
+  const activeSproutJobIdsRef = useRef(new Set<string>());
   const isDisposedRef = useRef(false);
 
   useEffect(() => {
@@ -57,7 +69,7 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
     useLiveQuery(
       () =>
         new ContentProcessingJobRepository().listByKindsAndStatuses(
-          ["link", "image"],
+          ["link", "image", "sprout"],
           VISIBLE_JOB_STATUSES,
         ),
       [],
@@ -67,6 +79,38 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
   const reportEvent = useCallback((event: ContentProcessingRuntimeEvent): void => {
     onEventRef.current(event);
   }, []);
+
+  const runSproutJob = useCallback(
+    async (jobId: string): Promise<void> => {
+      if (isDisposedRef.current || activeSproutJobIdsRef.current.has(jobId)) return;
+      activeSproutJobIdsRef.current.add(jobId);
+      try {
+        const result = await processSproutGenerationJob(jobId);
+        if (isDisposedRef.current || result === null) return;
+        reportEvent({
+          type: result.status === "awaiting_confirmation" ? "completed" : "failed",
+          jobId,
+          fragmentId: null,
+          message:
+            result.status === "awaiting_confirmation"
+              ? "一条新笔记预览已经发芽完成，确认后才会种下。"
+              : (result.errorMessage ?? "这次发芽没有完成，没有创建新笔记。"),
+        });
+      } catch {
+        if (!isDisposedRef.current) {
+          reportEvent({
+            type: "failed",
+            jobId,
+            fragmentId: null,
+            message: "这次发芽没有完成，没有创建新笔记，可以稍后重试。",
+          });
+        }
+      } finally {
+        activeSproutJobIdsRef.current.delete(jobId);
+      }
+    },
+    [reportEvent],
+  );
 
   const runImageWorker = useCallback(async (): Promise<void> => {
     while (!isDisposedRef.current) {
@@ -154,6 +198,18 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
         message: "暂时没能恢复图片整理状态，原始任务仍保存在当前浏览器中。",
       });
     });
+    void markStaleSproutGenerationJobs(new Date(Date.now() - 15 * 60 * 1000)).catch(() => {
+      reportEvent({
+        type: "failed",
+        jobId: "sprout-recovery",
+        fragmentId: null,
+        message: "暂时没能恢复发芽任务状态，原笔记没有被修改。",
+      });
+    });
+    void new ContentProcessingJobRepository()
+      .listByKindAndStatuses("sprout", ["pending"])
+      .then((pendingJobs) => pendingJobs.forEach((job) => void runSproutJob(job.id)))
+      .catch(() => undefined);
     void manager.resumePendingJobs();
 
     const resumeLinks = (): void => {
@@ -174,7 +230,7 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
       imageAbortControllers.clear();
       activeImageJobIds.clear();
     };
-  }, [reportEvent]);
+  }, [reportEvent, runSproutJob]);
 
   const openDialog = useCallback((): void => {
     setErrorMessage(null);
@@ -192,9 +248,14 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
   const startJob = useCallback(
     async (jobId: string): Promise<void> => {
       setErrorMessage(null);
-      setIsDialogOpen(true);
       try {
         const job = await new ContentProcessingJobRepository().getById(jobId);
+        // Sprout generation already owns an editable preview dialog. Opening
+        // the global task dialog here would cover that preview in the native
+        // dialog top layer and make its confirmation controls unreachable.
+        if (job?.kind !== "sprout") {
+          setIsDialogOpen(true);
+        }
         if (job?.kind === "link" && linkManagerRef.current !== null) {
           linkManagerRef.current.start(jobId);
           return;
@@ -203,13 +264,17 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
           enqueueImageJob(jobId, "start");
           return;
         }
+        if (job?.kind === "sprout") {
+          void runSproutJob(jobId);
+          return;
+        }
 
         setErrorMessage("暂时没能找到这条整理任务。没有创建任何卡片。");
       } catch {
         setErrorMessage("整理任务已经保存在本地，但暂时没能开始。请打开任务列表后重试。");
       }
     },
-    [enqueueImageJob],
+    [enqueueImageJob, runSproutJob],
   );
 
   const retryJob = useCallback(
@@ -226,6 +291,11 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
           enqueueImageJob(jobId, "start");
         } else if (job?.kind === "image" && job.status === "failed") {
           enqueueImageJob(jobId, "retry");
+        } else if (
+          job?.kind === "sprout" &&
+          (job.status === "pending" || job.status === "failed")
+        ) {
+          await runSproutJob(jobId);
         } else {
           throw new Error("Processing job was not found");
         }
@@ -236,7 +306,7 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
         setBusyJobId(null);
       }
     },
-    [enqueueImageJob],
+    [enqueueImageJob, runSproutJob],
   );
 
   const removeJob = useCallback(async (jobId: string): Promise<void> => {
@@ -253,6 +323,8 @@ export function useContentProcessingRuntime({ onEvent }: UseContentProcessingRun
         await cancelImageProcessingJob(jobId);
       } else if (job?.kind === "link") {
         await linkManagerRef.current?.delete(jobId);
+      } else if (job?.kind === "sprout") {
+        await cancelSproutGenerationJob(jobId);
       }
     } catch {
       setErrorMessage("这条任务暂时没能删除，原始内容仍然保留。请稍后再试。");

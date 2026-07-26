@@ -58,8 +58,11 @@ export function FragmentDetailOverview({
               onClick={() => void openRelatedFragment(sourceFragment.id)}
               type="button"
             >
-              源自「{sourceFragment.title}」
+              发芽自「{sourceFragment.title}」
             </button>
+          ) : null}
+          {childFragments.length > 0 ? (
+            <span>从这里发芽出了 {childFragments.length} 条新笔记</span>
           ) : null}
           {childFragments.map((childFragment) => (
             <button
@@ -69,7 +72,7 @@ export function FragmentDetailOverview({
               onClick={() => void openRelatedFragment(childFragment.id)}
               type="button"
             >
-              延伸到「{childFragment.title}」
+              查看「{childFragment.title}」
             </button>
           ))}
         </div>

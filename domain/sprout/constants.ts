@@ -1,4 +1,5 @@
 export const SPROUT_PROMPT_VERSION = "sprout-v1";
+export const SPROUT_GENERATE_PROMPT_VERSION = "sprout-generate-v1";
 
 export const SPROUT_PREPARATION_DELAY_MS = 300;
 export const SPROUT_MAX_DIRECTION_CHARACTERS = 500;

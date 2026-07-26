@@ -95,6 +95,14 @@ export class ContentProcessingJobRepository {
     return jobs.map(normalizeJob).sort(compareJobs);
   }
 
+  async listBySourceFragmentId(sourceFragmentId: string): Promise<ContentProcessingJob[]> {
+    const jobs = await this.database.contentProcessingJobs
+      .where("sourceFragmentId")
+      .equals(sourceFragmentId)
+      .toArray();
+    return jobs.map(normalizeJob).sort(compareJobs);
+  }
+
   add(job: ContentProcessingJob): Promise<string> {
     return this.database.contentProcessingJobs.add(job);
   }

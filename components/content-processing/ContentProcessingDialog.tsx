@@ -39,28 +39,41 @@ function resolveTaskName(job: ContentProcessingJob): string {
       return "链接内容";
     }
   }
+  if (job.kind === "sprout") {
+    return job.resultTitle?.trim() || "正在发芽的新笔记";
+  }
   return "待整理内容";
 }
 
 function resolveStatusCopy(job: ContentProcessingJob): string {
   if (job.status === "pending") {
-    return job.kind === "image"
-      ? "原图已经保存在本地。继续整理后才会发送当前图片并创建正式笔记。"
+    if (job.kind === "image") {
+      return "原图已经保存在本地。继续整理后才会发送当前图片并创建正式笔记。";
+    }
+    return job.kind === "sprout"
+      ? "正在准备从原笔记生成一条新笔记。完成后仍需你预览确认。"
       : "正在准备整理。你可以离开这里，稍后再回来查看。";
   }
   if (job.status === "processing") {
-    return "正在整理这条内容。完成前不会创建卡片或植物。";
+    return job.kind === "sprout"
+      ? "正在发芽。生成和预览期间都不会创建卡片或植物。"
+      : "正在整理这条内容。完成前不会创建卡片或植物。";
   }
   if (job.status === "failed") {
-    return job.kind === "image"
-      ? "这张图片暂时没能整理完成，原图仍保存在本地任务中。"
+    if (job.kind === "image") {
+      return "这张图片暂时没能整理完成，原图仍保存在本地任务中。";
+    }
+    return job.kind === "sprout"
+      ? "这次发芽没有完成，原笔记没有被修改，也没有创建新卡片。"
       : "这个链接暂时没能整理完成，没有留下空卡片。";
   }
   if (job.status === "completed") {
     return "新笔记已经整理好了。";
   }
   if (job.status === "awaiting_confirmation") {
-    return "内容已经准备好，等待确认。";
+    return job.kind === "sprout"
+      ? "新笔记预览已经准备好，确认种下前仍不是正式卡片。"
+      : "内容已经准备好，等待确认。";
   }
   return "这条任务已经取消。";
 }
@@ -91,6 +104,7 @@ export function ContentProcessingDialog({
   const isPending = busyJobId !== null;
   const confirmedJob = jobs.find((job) => job.id === confirmation?.jobId);
   const isDeletingImage = confirmedJob?.kind === "image";
+  const isCancellingSprout = confirmedJob?.kind === "sprout";
 
   function confirmRemoval(): void {
     if (confirmation === null) return;
@@ -117,7 +131,7 @@ export function ContentProcessingDialog({
             正在整理的内容
           </h2>
           <p className="mt-2 text-sm leading-6 text-garden-muted" id={descriptionId}>
-            链接和图片整理成功后才会成为正式笔记。离开这里不会中断可以继续的任务。
+            链接和图片整理成功后才会成为正式笔记；发芽还需要预览确认。离开这里不会中断可以继续的任务。
           </p>
         </header>
 
@@ -146,7 +160,7 @@ export function ContentProcessingDialog({
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-semibold text-garden-accent">
-                            {job.kind === "image" ? "图片" : "链接"}
+                            {job.kind === "image" ? "图片" : job.kind === "link" ? "链接" : "发芽"}
                           </span>
                           <span className="text-xs text-garden-muted">{taskStatusLabel(job)}</span>
                         </div>
@@ -205,6 +219,18 @@ export function ContentProcessingDialog({
                             </AsyncButton>
                           </>
                         ) : null}
+                        {job.kind === "sprout" &&
+                        job.status === "awaiting_confirmation" &&
+                        job.sourceFragmentId !== null ? (
+                          <button
+                            className="rounded-md bg-garden-accent px-4 py-2 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
+                            disabled={isPending}
+                            onClick={(event) => onOpenCompleted(job, event.currentTarget)}
+                            type="button"
+                          >
+                            回到原笔记
+                          </button>
+                        ) : null}
                         {job.status === "completed" && job.createdFragmentId !== null ? (
                           <button
                             className="rounded-md bg-garden-accent px-4 py-2 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
@@ -241,7 +267,9 @@ export function ContentProcessingDialog({
         description={
           isDeletingImage
             ? "确认后，这张图片的临时整理任务和本地原图会被删除，不会创建正式笔记。"
-            : "确认后，这条链接整理任务会被移除，不会创建正式笔记。"
+            : isCancellingSprout
+              ? "确认后，这次发芽任务会结束，不会创建新笔记，也不会修改原笔记。"
+              : "确认后，这条链接整理任务会被移除，不会创建正式笔记。"
         }
         errorMessage={errorMessage}
         isOpen={confirmation !== null}

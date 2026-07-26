@@ -356,10 +356,10 @@ export function CreateImageFragmentForm({
           className="rounded-full bg-garden-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
           disabled={image === null || isValidating}
           isPending={isPending}
-          pendingLabel="正在种下…"
+          pendingLabel="正在准备…"
           type="submit"
         >
-          种下图片
+          开始整理
         </AsyncButton>
       </div>
     </form>

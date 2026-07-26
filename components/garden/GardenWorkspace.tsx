@@ -4,6 +4,9 @@ import { Activity, useCallback, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import { CompanionExperience } from "@/components/companion/CompanionExperience";
+import { ContentProcessingDialog } from "@/components/content-processing/ContentProcessingDialog";
+import { ContentProcessingIndicator } from "@/components/content-processing/ContentProcessingIndicator";
+import { useContentProcessingRuntime } from "@/components/content-processing/useContentProcessingRuntime";
 import { FragmentDetailDialog } from "@/components/fragments/FragmentDetailDialog";
 import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
 import { useDormancySync } from "@/components/fragments/useDormancySync";
@@ -65,7 +68,7 @@ export function GardenWorkspace() {
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const gardenModeButtonRef = useRef<HTMLButtonElement>(null);
   const cardModeButtonRef = useRef<HTMLButtonElement>(null);
-  const handleLinkImportEvent = useCallback(
+  const handleContentProcessingEvent = useCallback(
     (event: Readonly<{ type: "completed" | "failed"; message: string }>): void => {
       setInteractionFeedback({
         kind: event.type === "failed" ? "error" : "status",
@@ -74,8 +77,9 @@ export function GardenWorkspace() {
     },
     [],
   );
-  const { retryExternalLinkImport, startExternalLinkImport } =
-    useExternalLinkImportRuntime(handleLinkImportEvent);
+  const contentProcessing = useContentProcessingRuntime({ onEvent: handleContentProcessingEvent });
+  // Historical Fragment-bound imports can still be pending after an upgrade.
+  useExternalLinkImportRuntime(handleContentProcessingEvent);
   const handleCompanionTypeChange = useCallback(
     (companionType: CompanionViewModel["type"] | null): void => {
       setCompanion((current) => {
@@ -399,6 +403,12 @@ export function GardenWorkspace() {
           onRequestCreateFragment={handleCompanionCreateRequest}
         />
 
+        <ContentProcessingIndicator
+          buttonRef={contentProcessing.triggerRef}
+          jobs={contentProcessing.jobs}
+          onOpen={contentProcessing.openDialog}
+        />
+
         <Activity mode={mode === "garden" ? "visible" : "hidden"}>
           <section aria-labelledby="garden-mode-title" className="pt-3" id="garden-mode-panel">
             <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
@@ -458,20 +468,49 @@ export function GardenWorkspace() {
               onOpenFragment={(fragmentId, triggerElement) => {
                 void openFragment(fragmentId, { triggerElement });
               }}
-              onExternalCreateCompleted={() =>
+              onExternalCreateCompleted={(notice) =>
                 setInteractionFeedback({
                   kind: "status",
-                  message: "已经种下了。以后再回来看看，它也许会慢慢长出新的方向。",
+                  message:
+                    notice.contentType === "link" || notice.contentType === "image"
+                      ? "已经开始整理。完成后，它才会成为花园中的新笔记。"
+                      : "已经种下了。以后再回来看看，它也许会慢慢长出新的方向。",
                 })
               }
               openCreateRequest={openCreateRequest}
-              onRetryLinkImport={retryExternalLinkImport}
-              onStartLinkImport={startExternalLinkImport}
+              onProcessingJobCreated={(jobId) => void contentProcessing.startJob(jobId)}
               openingFragmentId={openingFragmentId}
             />
           </section>
         </Activity>
       </div>
+
+      <ContentProcessingDialog
+        busyJobId={contentProcessing.busyJobId}
+        errorMessage={contentProcessing.errorMessage}
+        isOpen={contentProcessing.isDialogOpen}
+        jobs={contentProcessing.jobs}
+        onCancel={contentProcessing.removeJob}
+        onClose={() => contentProcessing.closeDialog()}
+        onDelete={contentProcessing.removeJob}
+        onOpenCompleted={(job, triggerElement) => {
+          if (job.createdFragmentId === null) return;
+          contentProcessing.closeDialog(false);
+          void openFragment(job.createdFragmentId, {
+            successMessage: "新笔记已经整理好了。",
+            triggerElement,
+          }).then(async (didOpen) => {
+            if (!didOpen) return;
+            try {
+              await contentProcessing.dismissCompletedJob(job.id);
+            } catch {
+              // The formal note is already open. Keeping a stale lightweight
+              // task entry is harmless and allows a later cleanup attempt.
+            }
+          });
+        }}
+        onRetry={contentProcessing.retryJob}
+      />
 
       {selectedFragmentId !== null ? (
         <FragmentDetailDialog
@@ -485,7 +524,6 @@ export function GardenWorkspace() {
               triggerElement: null,
             })
           }
-          onRetryLinkImport={retryExternalLinkImport}
         />
       ) : null}
     </main>

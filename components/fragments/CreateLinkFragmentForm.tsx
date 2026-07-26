@@ -68,7 +68,7 @@ export function CreateLinkFragmentForm({
         </div>
 
         <p className="rounded-xl border border-garden-line bg-garden-canvas/55 px-4 py-3 text-xs leading-5 text-garden-muted">
-          提交后会先保存原链接和植物，再在后台读取内容。读取失败不会删除已经种下的碎片。
+          提交后会先整理链接内容。整理成功才会创建正式笔记和植物；失败时不会留下空卡片。
         </p>
 
         {errorMessage !== null ? (
@@ -94,10 +94,10 @@ export function CreateLinkFragmentForm({
         <AsyncButton
           className="rounded-full bg-garden-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
           isPending={isPending}
-          pendingLabel="正在种下…"
+          pendingLabel="正在准备…"
           type="submit"
         >
-          种下链接
+          开始整理
         </AsyncButton>
       </div>
     </form>

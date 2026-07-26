@@ -27,6 +27,11 @@ export type ImageProcessingResult = Readonly<{
 }>;
 
 function canReplaceGeneratedContent(fragment: Fragment, mediaAsset: MediaAsset): boolean {
+  // A legacy image note is user-authored content and must never be replaced by
+  // a provider result, even when it still matches the old derived body.
+  if (normalizeContentMarkdown(fragment.rawText ?? "").length > 0) {
+    return false;
+  }
   const current = normalizeContentMarkdown(fragment.contentMarkdown ?? "");
   const expected = resolveFragmentContentMarkdown(
     { ...fragment, contentMarkdown: undefined },
@@ -127,20 +132,13 @@ export async function applyImageAnalysisResult(
       processingRequestId: null,
       errorCode: null,
       generatedTitle: parsed.data.title,
-      summary: parsed.data.summary,
-      visibleText: parsed.data.visibleText,
-      contentKind: parsed.data.contentKind,
       updatedAt: timestamp,
     };
     await assets.put(updatedAsset);
     const shouldUpdateTitle =
       asset.temporaryTitle !== null && fragment.title === asset.temporaryTitle;
     const shouldUpdateContent = canReplaceGeneratedContent(fragment, asset);
-    const contentMarkdown = resolveFragmentContentMarkdown(
-      { ...fragment, contentMarkdown: undefined },
-      null,
-      updatedAsset,
-    );
+    const contentMarkdown = normalizeContentMarkdown(parsed.data.markdown);
     const updatedFragment: Fragment = {
       ...fragment,
       analysisStatus: "completed",

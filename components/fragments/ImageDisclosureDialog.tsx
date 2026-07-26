@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useId } from "react";
 
 import { AsyncButton } from "../shared/AsyncButton";
+import { ModalDialog } from "../shared/ModalDialog";
 
 type ImageDisclosureDialogProps = Readonly<{
+  allowLocalOnly?: boolean;
   isOpen: boolean;
   isPending: boolean;
   errorMessage: string | null;
@@ -14,6 +16,7 @@ type ImageDisclosureDialogProps = Readonly<{
 }>;
 
 export function ImageDisclosureDialog({
+  allowLocalOnly = true,
   errorMessage,
   isOpen,
   isPending,
@@ -23,43 +26,17 @@ export function ImageDisclosureDialog({
 }: ImageDisclosureDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
-  const cancelButtonRef = useRef<HTMLButtonElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) {
-      const previous = previousFocusRef.current;
-      if (previous?.isConnected) previous.focus();
-      previousFocusRef.current = null;
-      return;
-    }
-
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    requestAnimationFrame(() => cancelButtonRef.current?.focus());
-  }, [isOpen]);
-
-  if (!isOpen) {
-    return null;
-  }
 
   return (
-    <div
-      aria-describedby={descriptionId}
-      aria-labelledby={titleId}
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          if (!isPending) onCancel();
-        }
-      }}
-      role="dialog"
-      tabIndex={-1}
+    <ModalDialog
+      className="m-auto w-[min(92vw,36rem)] rounded-2xl border border-garden-line bg-garden-paper p-0 shadow-2xl backdrop:bg-black/30"
+      describedBy={descriptionId}
+      isOpen={isOpen}
+      isPending={isPending}
+      labelledBy={titleId}
+      onRequestClose={onCancel}
     >
-      <div className="w-[min(92vw,36rem)] rounded-2xl border border-garden-line bg-garden-paper p-6 shadow-2xl sm:p-7">
+      <div className="p-6 sm:p-7">
         <p className="text-xs font-semibold tracking-[0.16em] text-garden-accent uppercase">
           图片分析说明
         </p>
@@ -81,22 +58,24 @@ export function ImageDisclosureDialog({
         ) : null}
         <div className="mt-6 flex flex-wrap justify-end gap-3">
           <button
+            autoFocus
             className="rounded-full border border-garden-line px-4 py-2.5 text-sm font-semibold text-garden-ink hover:bg-garden-soft disabled:opacity-50"
             disabled={isPending}
             onClick={onCancel}
-            ref={cancelButtonRef}
             type="button"
           >
             取消
           </button>
-          <button
-            className="rounded-full border border-garden-accent px-4 py-2.5 text-sm font-semibold text-garden-accent hover:bg-garden-soft disabled:opacity-50"
-            disabled={isPending}
-            onClick={onLocalOnly}
-            type="button"
-          >
-            仅保存在本地
-          </button>
+          {allowLocalOnly ? (
+            <button
+              className="rounded-full border border-garden-accent px-4 py-2.5 text-sm font-semibold text-garden-accent hover:bg-garden-soft disabled:opacity-50"
+              disabled={isPending}
+              onClick={onLocalOnly}
+              type="button"
+            >
+              仅保存在本地
+            </button>
+          ) : null}
           <AsyncButton
             className="rounded-full bg-garden-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
             isPending={isPending}
@@ -108,6 +87,6 @@ export function ImageDisclosureDialog({
           </AsyncButton>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }

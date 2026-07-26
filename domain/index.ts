@@ -10,6 +10,7 @@ export * from "./garden/companion-view-model";
 export * from "./garden/plant-view-model";
 export * from "./growth/growth";
 export * from "./links/external-url";
+export * from "./links/link-note-markdown";
 export * from "./movement/geometry";
 export * from "./movement/grid";
 export * from "./movement/pathfinding";

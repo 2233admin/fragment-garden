@@ -171,9 +171,16 @@ export type ContentProcessingJob = {
   kind: ContentProcessingJobKind;
   status: ContentProcessingJobStatus;
   sourceUrl: string | null;
+  normalizedSourceUrl: string | null;
+  allowDuplicate: boolean;
+  initiator: LinkImportInitiator | null;
+  userTitle: string | null;
+  userNoteMarkdown: string | null;
   sourceBlob: Blob | null;
   sourceMimeType: string | null;
   sourceFileName: string | null;
+  sourceWidth: number | null;
+  sourceHeight: number | null;
   sourceFragmentId: string | null;
   sourceSnapshot: string | null;
   createdFragmentId: string | null;
@@ -182,9 +189,13 @@ export type ContentProcessingJob = {
   resultTitle: string | null;
   resultMarkdown: string | null;
   errorCode: string | null;
+  errorMessage: string | null;
   attemptCount: number;
+  attemptGeneration: number;
   createdAt: string;
   updatedAt: string;
+  startedAt: string | null;
+  lastPolledAt: string | null;
 };
 
 export type Attachment = {

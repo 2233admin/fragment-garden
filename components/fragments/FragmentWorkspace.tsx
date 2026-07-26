@@ -9,13 +9,7 @@ import {
   type FragmentCardSort,
   type FragmentCardViewModel,
 } from "@/data/queries/fragment-card-query";
-import { acceptImageDisclosure } from "@/services/accept-image-disclosure";
 import { acceptVoiceDisclosure } from "@/services/accept-voice-disclosure";
-import {
-  markStaleImageProcessing,
-  processImageAnalysis,
-  setImageLocalOnly,
-} from "@/services/image-media-processing";
 import {
   markStaleAudioProcessing,
   processAudioTranscription,
@@ -25,7 +19,6 @@ import { queryLocalSettings } from "@/data/queries/companion-query";
 import { MVP_VOICE_INPUT_ENABLED } from "@/lib/product-capabilities";
 
 import { CreateFragmentDialog, type CreatedFragmentNotice } from "./CreateFragmentDialog";
-import { ImageDisclosureDialog } from "./ImageDisclosureDialog";
 import { VoiceDisclosureDialog } from "./VoiceDisclosureDialog";
 import { EmptyFragmentState } from "./EmptyFragmentState";
 import { FragmentList } from "./FragmentList";
@@ -40,7 +33,6 @@ type MediaDisclosureRequest = Readonly<{
 }>;
 
 const LOADING_CARD_STATE: CardQueryState = { status: "loading" };
-const MAX_IMAGE_PROCESSING_CONCURRENCY = 2;
 
 type FragmentWorkspaceProps = {
   layout?: "page" | "embedded";
@@ -49,8 +41,7 @@ type FragmentWorkspaceProps = {
   /** Monotonic external request counter for opening the existing create dialog. */
   openCreateRequest?: number;
   onExternalCreateCompleted?: (notice: CreatedFragmentNotice) => void;
-  onRetryLinkImport?: (fragmentId: string) => Promise<void>;
-  onStartLinkImport?: (fragmentId: string) => void;
+  onProcessingJobCreated?: (jobId: string) => void;
 };
 
 export function FragmentWorkspace({
@@ -59,29 +50,20 @@ export function FragmentWorkspace({
   openingFragmentId,
   openCreateRequest,
   onExternalCreateCompleted,
-  onStartLinkImport,
+  onProcessingJobCreated,
 }: FragmentWorkspaceProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sort, setSort] = useState<FragmentCardSort>("updated_desc");
   const [queryAttempt, setQueryAttempt] = useState(0);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [imageDisclosure, setImageDisclosure] = useState<MediaDisclosureRequest | null>(null);
-  const [imageDisclosureDialogKey, setImageDisclosureDialogKey] = useState("image-disclosure");
-  const [imageDisclosureError, setImageDisclosureError] = useState<string | null>(null);
-  const [isImageDisclosurePending, setIsImageDisclosurePending] = useState(false);
   const [voiceDisclosure, setVoiceDisclosure] = useState<MediaDisclosureRequest | null>(null);
   const [voiceDisclosureDialogKey, setVoiceDisclosureDialogKey] = useState("voice-disclosure");
   const [voiceDisclosureError, setVoiceDisclosureError] = useState<string | null>(null);
   const [isVoiceDisclosurePending, setIsVoiceDisclosurePending] = useState(false);
-  const imageProcessingActiveRef = useRef(new Set<string>());
-  const imageProcessingQueueRef = useRef<string[]>([]);
-  const imageProcessingDrainRef = useRef(false);
   const voiceProcessingLockRef = useRef(false);
   const voiceProcessingActiveAssetRef = useRef<string | null>(null);
   const voiceProcessingQueueRef = useRef<string[]>([]);
-  const imageDisclosureRef = useRef<MediaDisclosureRequest | null>(null);
-  const imageDisclosureQueueRef = useRef<MediaDisclosureRequest[]>([]);
   const voiceDisclosureRef = useRef<MediaDisclosureRequest | null>(null);
   const voiceDisclosureQueueRef = useRef<MediaDisclosureRequest[]>([]);
   const seedButtonRef = useRef<HTMLButtonElement>(null);
@@ -92,7 +74,6 @@ export function FragmentWorkspace({
   const pendingOpenCreateRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
-    void markStaleImageProcessing(new Date(Date.now() - 15 * 60 * 1000));
     void markStaleAudioProcessing(new Date(Date.now() - 15 * 60 * 1000));
   }, []);
 
@@ -179,38 +160,6 @@ export function FragmentWorkspace({
     restoreFocus(createTriggerRef.current);
   }
 
-  function openImageDisclosure(request: MediaDisclosureRequest): void {
-    if (
-      imageDisclosureRef.current?.assetId === request.assetId ||
-      imageDisclosureQueueRef.current.some((queued) => queued.assetId === request.assetId)
-    ) {
-      return;
-    }
-
-    if (imageDisclosureRef.current !== null) {
-      imageDisclosureQueueRef.current.push(request);
-      setFeedback("另一张图片正在等待隐私选择；这张图片稍后可以在详情中开始分析。");
-      return;
-    }
-
-    imageDisclosureRef.current = request;
-    setImageDisclosureDialogKey(request.assetId);
-    setImageDisclosureError(null);
-    setImageDisclosure(request);
-  }
-
-  function closeImageDisclosure(): void {
-    imageDisclosureRef.current = null;
-    setImageDisclosure(null);
-    setImageDisclosureError(null);
-    const next = imageDisclosureQueueRef.current.shift();
-    if (next !== undefined) {
-      imageDisclosureRef.current = next;
-      setImageDisclosureDialogKey(next.assetId);
-      setImageDisclosure(next);
-    }
-  }
-
   function openVoiceDisclosure(request: MediaDisclosureRequest): void {
     if (
       voiceDisclosureRef.current?.assetId === request.assetId ||
@@ -240,109 +189,6 @@ export function FragmentWorkspace({
       voiceDisclosureRef.current = next;
       setVoiceDisclosureDialogKey(next.assetId);
       setVoiceDisclosure(next);
-    }
-  }
-
-  async function executeImageProcessing(assetId: string): Promise<void> {
-    try {
-      const result = await processImageAnalysis(assetId);
-      if (result === null) {
-        setFeedback("这次图片分析结果已过期，原图仍保存在本地，可以在详情中重试。");
-        return;
-      }
-      setFeedback("图片分析已完成，原图和结果都保存在本地。");
-    } catch {
-      setFeedback("图片已经保存在本地，但分析暂时失败，可以在详情中重试。");
-    } finally {
-      imageProcessingActiveRef.current.delete(assetId);
-      if (imageDisclosureRef.current?.assetId === assetId) {
-        closeImageDisclosure();
-      }
-      drainImageProcessingQueue();
-    }
-  }
-
-  function drainImageProcessingQueue(): void {
-    if (imageProcessingDrainRef.current) return;
-
-    imageProcessingDrainRef.current = true;
-    try {
-      while (
-        imageProcessingActiveRef.current.size < MAX_IMAGE_PROCESSING_CONCURRENCY &&
-        imageProcessingQueueRef.current.length > 0
-      ) {
-        const nextAssetId = imageProcessingQueueRef.current.shift();
-        if (nextAssetId === undefined || imageProcessingActiveRef.current.has(nextAssetId)) {
-          continue;
-        }
-
-        imageProcessingActiveRef.current.add(nextAssetId);
-        void executeImageProcessing(nextAssetId);
-      }
-    } finally {
-      imageProcessingDrainRef.current = false;
-    }
-  }
-
-  function runImageProcessing(assetId: string): void {
-    if (
-      imageProcessingActiveRef.current.has(assetId) ||
-      imageProcessingQueueRef.current.includes(assetId)
-    ) {
-      return;
-    }
-
-    imageProcessingQueueRef.current.push(assetId);
-    if (imageProcessingActiveRef.current.size >= MAX_IMAGE_PROCESSING_CONCURRENCY) {
-      setFeedback("图片已经保存在本地，前面的分析完成后会继续处理。");
-    }
-    drainImageProcessingQueue();
-  }
-
-  async function startImageProcessingFlow(assetId: string, fragmentId: string): Promise<void> {
-    try {
-      const settings = await queryLocalSettings();
-      if (settings.imageAiDisclosureAcceptedAt !== null) {
-        setImageDisclosureError(null);
-        runImageProcessing(assetId);
-        return;
-      }
-      openImageDisclosure({ assetId, fragmentId });
-    } catch {
-      if (imageDisclosureRef.current?.assetId === assetId) {
-        closeImageDisclosure();
-      }
-      setFeedback("暂时无法读取图片分析设置。图片仍保存在本地，请稍后重试。");
-    }
-  }
-
-  async function acceptImageProcessing(): Promise<void> {
-    if (imageDisclosure === null || isImageDisclosurePending) return;
-    setIsImageDisclosurePending(true);
-    setImageDisclosureError(null);
-    try {
-      await acceptImageDisclosure({ now: new Date().toISOString() });
-      const request = imageDisclosure;
-      closeImageDisclosure();
-      runImageProcessing(request.assetId);
-    } catch {
-      setImageDisclosureError("这次选择没有保存，图片仍只保存在本地。请重试。");
-    } finally {
-      setIsImageDisclosurePending(false);
-    }
-  }
-
-  async function keepImageLocalOnly(): Promise<void> {
-    if (imageDisclosure === null || isImageDisclosurePending) return;
-    setIsImageDisclosurePending(true);
-    try {
-      await setImageLocalOnly(imageDisclosure.assetId);
-      setFeedback("图片已保存在本地，没有发送给 OpenAI。");
-      closeImageDisclosure();
-    } catch {
-      setImageDisclosureError("暂时无法更新图片处理状态，图片仍然保存在本地。");
-    } finally {
-      setIsImageDisclosurePending(false);
     }
   }
 
@@ -578,11 +424,11 @@ export function FragmentWorkspace({
         isOpen={isCreateOpen}
         onClose={closeCreateDialog}
         onCreated={(notice) => {
-          if (notice.contentType === "image") {
-            void startImageProcessingFlow(notice.mediaAssetId, notice.fragmentId);
-          }
           if (MVP_VOICE_INPUT_ENABLED && notice.contentType === "audio") {
             void startVoiceProcessingFlow(notice.mediaAssetId, notice.fragmentId);
+          }
+          if (notice.contentType === "link" || notice.contentType === "image") {
+            onProcessingJobCreated?.(notice.processingJobId);
           }
           if (isExternalCreateRequestRef.current) {
             onExternalCreateCompleted?.(notice);
@@ -598,7 +444,7 @@ export function FragmentWorkspace({
           }
 
           if (notice.contentType === "image") {
-            setFeedback("图片已经先种下了。");
+            setFeedback("图片已进入整理任务，成功后才会成为正式笔记。");
             return;
           }
 
@@ -607,28 +453,9 @@ export function FragmentWorkspace({
             return;
           }
 
-          setFeedback(
-            notice.linkImportStarted
-              ? `“${notice.title}”链接已经种下，正在读取内容。`
-              : `“${notice.title}”链接已保存到本地。读取暂时未启动，刷新页面后会继续恢复。`,
-          );
+          setFeedback(`“${notice.title}”正在整理，完成前不会出现在卡片或花园中。`);
         }}
         onOpenExistingFragment={onOpenFragment}
-        onStartLinkImport={onStartLinkImport}
-      />
-
-      <ImageDisclosureDialog
-        errorMessage={imageDisclosureError}
-        isOpen={imageDisclosure !== null}
-        isPending={isImageDisclosurePending}
-        key={imageDisclosureDialogKey}
-        onAccept={() => void acceptImageProcessing()}
-        onCancel={() => {
-          if (!isImageDisclosurePending) {
-            closeImageDisclosure();
-          }
-        }}
-        onLocalOnly={() => void keepImageLocalOnly()}
       />
 
       <VoiceDisclosureDialog

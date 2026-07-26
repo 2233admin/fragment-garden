@@ -2,12 +2,17 @@
 
 import { useId, useRef, useState, type FormEvent } from "react";
 
+import { findExistingLinkContent } from "@/data/queries/content-processing-job-query";
 import { queryLocalSettings } from "@/data/queries/companion-query";
+import { normalizeExternalUrl, plainTextToMarkdown } from "@/domain";
 import { MVP_VOICE_INPUT_ENABLED } from "@/lib/product-capabilities";
 import { acceptGetNoteDisclosure } from "@/services/accept-getnote-disclosure";
+import { acceptImageDisclosure } from "@/services/accept-image-disclosure";
+import { createLinkProcessingJob } from "@/services/create-link-processing-job";
+import { createImageProcessingJob } from "@/services/image-processing-jobs";
 import { createMediaFragment } from "@/services/create-media-fragment";
 import { createLocalFragment } from "@/services/create-local-fragment";
-import { createLocalLinkFragment } from "@/services/create-local-link-fragment";
+import { externalUrlSchema } from "@/validation/external-url";
 
 import { DuplicateLinkDialog } from "../link-imports/DuplicateLinkDialog";
 import { GetNoteDisclosureDialog } from "../link-imports/GetNoteDisclosureDialog";
@@ -16,6 +21,7 @@ import { CreateImageFragmentForm, type ImageSelection } from "./CreateImageFragm
 import { CreateLinkFragmentForm } from "./CreateLinkFragmentForm";
 import { CreateTextFragmentForm } from "./CreateTextFragmentForm";
 import { CreateVoiceFragmentForm } from "./CreateVoiceFragmentForm";
+import { ImageDisclosureDialog } from "./ImageDisclosureDialog";
 import type { VoiceRecording } from "./useVoiceRecorder";
 
 export type CreatedFragmentNotice =
@@ -25,13 +31,12 @@ export type CreatedFragmentNotice =
     }>
   | Readonly<{
       contentType: "link";
-      linkImportStarted: boolean;
+      processingJobId: string;
       title: string;
     }>
   | Readonly<{
       contentType: "image";
-      fragmentId: string;
-      mediaAssetId: string;
+      processingJobId: string;
       title: string;
     }>
   | Readonly<{
@@ -46,13 +51,14 @@ type CreateFragmentDialogProps = {
   onClose: () => void;
   onCreated: (result: CreatedFragmentNotice) => void;
   onOpenExistingFragment: (fragmentId: string, triggerElement: HTMLButtonElement) => void;
-  onStartLinkImport?: (fragmentId: string) => void;
 };
 
 type CreateMode = "text" | "link" | "image" | "voice";
 type PendingAction =
   | "checking_disclosure"
   | "accepting_disclosure"
+  | "checking_image_disclosure"
+  | "accepting_image_disclosure"
   | "validating_image"
   | "saving_text"
   | "saving_link"
@@ -72,7 +78,6 @@ export function CreateFragmentDialog({
   onClose,
   onCreated,
   onOpenExistingFragment,
-  onStartLinkImport,
 }: CreateFragmentDialogProps) {
   const titleId = useId();
   const submissionLockRef = useRef(false);
@@ -89,6 +94,9 @@ export function CreateFragmentDialog({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [isDisclosureOpen, setIsDisclosureOpen] = useState(false);
   const [disclosureError, setDisclosureError] = useState<string | null>(null);
+  const [pendingLinkAllowDuplicate, setPendingLinkAllowDuplicate] = useState<boolean | null>(null);
+  const [isImageDisclosureOpen, setIsImageDisclosureOpen] = useState(false);
+  const [imageDisclosureError, setImageDisclosureError] = useState<string | null>(null);
   const [duplicateCandidate, setDuplicateCandidate] = useState<DuplicateCandidate | null>(null);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const isPending = pendingAction !== null;
@@ -107,6 +115,9 @@ export function CreateFragmentDialog({
     setSelectionError(null);
     setIsDisclosureOpen(false);
     setDisclosureError(null);
+    setPendingLinkAllowDuplicate(null);
+    setIsImageDisclosureOpen(false);
+    setImageDisclosureError(null);
     setDuplicateCandidate(null);
     setDuplicateError(null);
   }
@@ -153,48 +164,42 @@ export function CreateFragmentDialog({
     setSelectionError(null);
   }
 
-  async function selectLinkMode(): Promise<void> {
+  function selectLinkMode(): void {
     if (isPending || mode === "link") {
       return;
     }
 
-    setPendingAction("checking_disclosure");
     setSelectionError(null);
     setImageSelection(null);
-
-    try {
-      const settings = await queryLocalSettings();
-
-      if (settings.getNoteDisclosureAcceptedAt === null) {
-        setDisclosureError(null);
-        setIsDisclosureOpen(true);
-      } else {
-        setMode("link");
-        setFormError(null);
-      }
-    } catch {
-      setSelectionError("暂时无法读取第三方处理设置，因此没有开始链接导入。请重新选择链接。");
-    } finally {
-      setPendingAction(null);
-    }
+    setMode("link");
+    setFormError(null);
   }
 
   async function acceptDisclosure(): Promise<void> {
-    if (pendingAction !== null) {
+    const allowDuplicate = pendingLinkAllowDuplicate;
+    if (pendingAction !== null || submissionLockRef.current || allowDuplicate === null) {
       return;
     }
 
+    submissionLockRef.current = true;
     setPendingAction("accepting_disclosure");
     setDisclosureError(null);
+    let didAcceptDisclosure = false;
 
     try {
       await acceptGetNoteDisclosure({ now: new Date().toISOString() });
+      didAcceptDisclosure = true;
       setIsDisclosureOpen(false);
-      setMode("link");
-      setFormError(null);
+      setPendingLinkAllowDuplicate(null);
+      await createAndFinishLinkJob(allowDuplicate);
     } catch {
-      setDisclosureError("同意状态没有保存，因此尚未创建链接碎片，也没有调用得到大脑。请重试。");
+      if (didAcceptDisclosure) {
+        setFormError("链接整理任务暂时没能创建。链接仍在表单中，可以直接重试。");
+      } else {
+        setDisclosureError("这次选择没有保存，因此没有发送链接，也没有创建整理任务。请重试。");
+      }
     } finally {
+      submissionLockRef.current = false;
       setPendingAction(null);
     }
   }
@@ -316,36 +321,114 @@ export function CreateFragmentDialog({
     }
 
     submissionLockRef.current = true;
-    setPendingAction("saving_image");
+    setPendingAction("checking_image_disclosure");
     setFormError(null);
 
     try {
-      const result = await createMediaFragment({
-        blob: imageSelection.file,
-        fileName: imageSelection.file.name,
-        height: imageSelection.height,
-        kind: "image",
-        mimeType: imageSelection.mimeType,
-        optionalNote: imageNote,
-        optionalTitle: imageTitle,
-        width: imageSelection.width,
-      });
-      const notice: CreatedFragmentNotice = {
-        contentType: "image",
-        fragmentId: result.fragment.id,
-        mediaAssetId: result.mediaAsset.id,
-        title: result.fragment.title,
-      };
+      const settings = await queryLocalSettings();
+      if (settings.imageAiDisclosureAcceptedAt === null) {
+        setImageDisclosureError(null);
+        setIsImageDisclosureOpen(true);
+        return;
+      }
 
-      clearState();
-      onCreated(notice);
-      onClose();
+      setPendingAction("saving_image");
+      await createAndFinishImageJob(imageSelection);
     } catch {
-      setFormError("图片尚未保存到本地。你的图片和说明仍在这里，可以直接重试。");
+      setFormError("暂时无法开始整理。图片和说明仍在这里，没有创建卡片，可以直接重试。");
     } finally {
       submissionLockRef.current = false;
       setPendingAction(null);
     }
+  }
+
+  async function createAndFinishImageJob(selection: ImageSelection): Promise<void> {
+    const job = await createImageProcessingJob({
+      blob: selection.file,
+      fileName: selection.file.name,
+      height: selection.height,
+      initiator: "form",
+      mimeType: selection.mimeType,
+      userNoteMarkdown: plainTextToMarkdown(imageNote),
+      userTitle: imageTitle,
+      width: selection.width,
+    });
+    const notice: CreatedFragmentNotice = {
+      contentType: "image",
+      processingJobId: job.id,
+      title: job.userTitle ?? job.sourceFileName ?? "图片内容",
+    };
+
+    clearState();
+    onCreated(notice);
+    onClose();
+  }
+
+  async function acceptImageDisclosureAndCreate(): Promise<void> {
+    const selection = imageSelection;
+    if (pendingAction !== null || submissionLockRef.current || selection === null) {
+      return;
+    }
+
+    submissionLockRef.current = true;
+    setPendingAction("accepting_image_disclosure");
+    setImageDisclosureError(null);
+    let didAcceptDisclosure = false;
+
+    try {
+      await acceptImageDisclosure({ now: new Date().toISOString() });
+      didAcceptDisclosure = true;
+      setIsImageDisclosureOpen(false);
+      setPendingAction("saving_image");
+      await createAndFinishImageJob(selection);
+    } catch {
+      if (didAcceptDisclosure) {
+        setFormError("图片整理任务暂时没能创建。图片和说明仍在表单中，可以直接重试。");
+      } else {
+        setImageDisclosureError("这次选择没有保存，因此没有发送图片，也没有创建整理任务。请重试。");
+      }
+    } finally {
+      submissionLockRef.current = false;
+      setPendingAction(null);
+    }
+  }
+
+  function finishLinkJob(jobId: string, title: string): void {
+    const notice: CreatedFragmentNotice = {
+      contentType: "link",
+      processingJobId: jobId,
+      title,
+    };
+
+    clearState();
+    onCreated(notice);
+    onClose();
+  }
+
+  async function createAndFinishLinkJob(allowDuplicate: boolean): Promise<void> {
+    const result = await createLinkProcessingJob({
+      allowDuplicate,
+      initiatedBy: "form",
+      sourceUrl,
+      userTitle: linkTitle,
+    });
+
+    if (result.kind === "duplicate_fragment") {
+      setDuplicateCandidate({
+        fragmentId: result.fragment.id,
+        title: result.fragment.title,
+      });
+      return;
+    }
+
+    const fallbackTitle = (() => {
+      try {
+        return new URL(result.job.sourceUrl ?? sourceUrl).hostname.replace(/^www\./u, "");
+      } catch {
+        return "链接内容";
+      }
+    })();
+    finishLinkJob(result.job.id, result.job.userTitle ?? fallbackTitle);
   }
 
   async function saveLink(allowDuplicate: boolean): Promise<void> {
@@ -359,19 +442,11 @@ export function CreateFragmentDialog({
     setDuplicateError(null);
 
     try {
-      let result: Awaited<ReturnType<typeof createLocalLinkFragment>>;
-
+      let validatedSourceUrl: string;
       try {
-        result = await createLocalLinkFragment({
-          sourceUrl,
-          title: linkTitle,
-          initiatedBy: "form",
-          now: new Date().toISOString(),
-          allowDuplicate,
-        });
+        validatedSourceUrl = externalUrlSchema.parse(sourceUrl);
       } catch {
-        const message =
-          "链接尚未保存到本地。请确认地址使用 HTTP/HTTPS，且不是本地或内网地址，然后重试。";
+        const message = "请确认地址使用 HTTP/HTTPS，且不是本地或内网地址。没有创建卡片或整理任务。";
 
         if (allowDuplicate) {
           setDuplicateError(message);
@@ -381,33 +456,41 @@ export function CreateFragmentDialog({
         return;
       }
 
-      if (result.kind === "duplicate") {
-        setDuplicateCandidate({
-          fragmentId: result.fragment.id,
-          title: result.fragment.title,
-        });
+      if (!allowDuplicate) {
+        const existing = await findExistingLinkContent(normalizeExternalUrl(validatedSourceUrl));
+        if (existing?.kind === "fragment") {
+          setDuplicateCandidate({
+            fragmentId: existing.fragment.id,
+            title: existing.fragment.title,
+          });
+          return;
+        }
+        if (existing?.kind === "job") {
+          finishLinkJob(
+            existing.job.id,
+            existing.job.userTitle ?? existing.job.resultTitle ?? "正在整理的链接",
+          );
+          return;
+        }
+      }
+
+      const settings = await queryLocalSettings();
+      if (settings.getNoteDisclosureAcceptedAt === null) {
+        setPendingLinkAllowDuplicate(allowDuplicate);
+        setDisclosureError(null);
+        setDuplicateCandidate(null);
+        setIsDisclosureOpen(true);
         return;
       }
 
-      const fragmentId = result.fragment.id;
-      let linkImportStarted = false;
-
-      try {
-        onStartLinkImport?.(fragmentId);
-        linkImportStarted = onStartLinkImport !== undefined;
-      } catch {
-        // The local import record remains resumable after a refresh.
+      await createAndFinishLinkJob(allowDuplicate);
+    } catch {
+      const message = "暂时无法开始整理。链接仍在表单中，没有创建卡片，可以直接重试。";
+      if (allowDuplicate) {
+        setDuplicateError(message);
+      } else {
+        setFormError(message);
       }
-
-      const notice: CreatedFragmentNotice = {
-        contentType: "link",
-        linkImportStarted,
-        title: result.fragment.title,
-      };
-
-      clearState();
-      onCreated(notice);
-      onClose();
     } finally {
       submissionLockRef.current = false;
       setPendingAction(null);
@@ -454,9 +537,9 @@ export function CreateFragmentDialog({
             {isTextMode
               ? "先在本地保存内容。标题留空时，会从第一行自动生成。"
               : isLinkMode
-                ? "原链接和植物会先在本地保存，不需要等待第三方读取完成。"
+                ? "链接会先进入整理任务，读取成功后才会成为正式笔记和植物。"
                 : isImageMode
-                  ? "图片会先保存在当前浏览器中，不需要等待 AI 分析完成。"
+                  ? "图片会先进入本地整理任务，分析成功后才会成为正式笔记和植物。"
                   : "录音会先保存在当前浏览器中，不需要等待转写完成。"}
           </p>
 
@@ -487,7 +570,7 @@ export function CreateFragmentDialog({
                   : "text-garden-muted hover:text-garden-ink"
               }`}
               disabled={isPending}
-              onClick={() => void selectLinkMode()}
+              onClick={selectLinkMode}
               type="button"
             >
               {pendingAction === "checking_disclosure" ? "正在准备…" : "链接"}
@@ -595,8 +678,24 @@ export function CreateFragmentDialog({
           if (pendingAction === null) {
             setDisclosureError(null);
             setIsDisclosureOpen(false);
+            setPendingLinkAllowDuplicate(null);
           }
         }}
+      />
+
+      <ImageDisclosureDialog
+        allowLocalOnly={false}
+        errorMessage={imageDisclosureError}
+        isOpen={isImageDisclosureOpen}
+        isPending={pendingAction === "accepting_image_disclosure"}
+        onAccept={() => void acceptImageDisclosureAndCreate()}
+        onCancel={() => {
+          if (pendingAction === null) {
+            setImageDisclosureError(null);
+            setIsImageDisclosureOpen(false);
+          }
+        }}
+        onLocalOnly={() => undefined}
       />
 
       <DuplicateLinkDialog

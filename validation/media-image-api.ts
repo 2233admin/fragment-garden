@@ -2,16 +2,7 @@ import { z } from "zod";
 
 export const IMAGE_ANALYSIS_PROMPT_VERSION = "image-analysis-v1" as const;
 export const IMAGE_TITLE_MAX_CHARACTERS = 100;
-export const IMAGE_SUMMARY_MAX_CHARACTERS = 800;
-export const IMAGE_VISIBLE_TEXT_MAX_CHARACTERS = 6_000;
-
-export const imageContentKindSchema = z.enum([
-  "screenshot",
-  "document",
-  "photo",
-  "diagram",
-  "other",
-]);
+export const IMAGE_MARKDOWN_MAX_CHARACTERS = 8_000;
 
 function unicodeLength(value: string): number {
   return Array.from(value).length;
@@ -28,13 +19,7 @@ function boundedText(maximum: number) {
 export const imageAnalysisResultSchema = z
   .object({
     title: boundedText(IMAGE_TITLE_MAX_CHARACTERS),
-    summary: boundedText(IMAGE_SUMMARY_MAX_CHARACTERS),
-    visibleText: z
-      .string()
-      .refine((value) => unicodeLength(value) <= IMAGE_VISIBLE_TEXT_MAX_CHARACTERS)
-      .transform((value) => (value.trim().length === 0 ? null : value.trim()))
-      .nullable(),
-    contentKind: imageContentKindSchema,
+    markdown: boundedText(IMAGE_MARKDOWN_MAX_CHARACTERS),
   })
   .strict();
 

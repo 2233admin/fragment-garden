@@ -4,15 +4,13 @@ import type { ResponseFormatTextJSONSchemaConfig } from "openai/resources/respon
 
 export {
   IMAGE_ANALYSIS_PROMPT_VERSION,
-  IMAGE_SUMMARY_MAX_CHARACTERS,
+  IMAGE_MARKDOWN_MAX_CHARACTERS,
   IMAGE_TITLE_MAX_CHARACTERS,
-  IMAGE_VISIBLE_TEXT_MAX_CHARACTERS,
   imageAnalysisApiErrorCodeSchema,
   imageAnalysisApiErrorResponseSchema,
   imageAnalysisApiResultSchema,
   imageAnalysisResultSchema,
   imageClientRequestIdSchema,
-  imageContentKindSchema,
 } from "../../../../validation/media-image-api";
 export type {
   ImageAnalysisApiErrorCode,
@@ -29,15 +27,10 @@ export const IMAGE_ANALYSIS_RESPONSE_FORMAT: ResponseFormatTextJSONSchemaConfig 
   schema: {
     type: "object",
     properties: {
-      title: { type: "string" },
-      summary: { type: "string" },
-      visibleText: { type: ["string", "null"] },
-      contentKind: {
-        type: "string",
-        enum: ["screenshot", "document", "photo", "diagram", "other"],
-      },
+      title: { type: "string", minLength: 1, maxLength: 100 },
+      markdown: { type: "string", minLength: 1, maxLength: 8_000 },
     },
-    required: ["title", "summary", "visibleText", "contentKind"],
+    required: ["title", "markdown"],
     additionalProperties: false,
   },
 };

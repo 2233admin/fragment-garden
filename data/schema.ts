@@ -32,3 +32,21 @@ export const FRAGMENT_GARDEN_SCHEMA_V5 = {
   fragmentNotes: "id,fragmentId,source,createdAt,updatedAt",
   contentProcessingJobs: "id,kind,status,createdAt,updatedAt,sourceFragmentId,createdFragmentId",
 } as const;
+
+/**
+ * The complete current schema is the source of truth for full-garden backups.
+ * Keeping the table list derived from it prevents a later schema addition from
+ * being silently omitted by export or restore.
+ */
+export const FRAGMENT_GARDEN_SCHEMA = {
+  ...FRAGMENT_GARDEN_SCHEMA_V1,
+  ...FRAGMENT_GARDEN_SCHEMA_V3,
+  ...FRAGMENT_GARDEN_SCHEMA_V4,
+  ...FRAGMENT_GARDEN_SCHEMA_V5,
+} as const;
+
+export type FragmentGardenTableName = keyof typeof FRAGMENT_GARDEN_SCHEMA;
+
+export const FRAGMENT_GARDEN_TABLE_NAMES = Object.freeze(
+  Object.keys(FRAGMENT_GARDEN_SCHEMA) as FragmentGardenTableName[],
+);

@@ -1,8 +1,9 @@
 "use client";
 
-import { Activity, useCallback, useRef, useState } from "react";
+import { Activity, useCallback, useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
+import { DataBackupDialog } from "@/components/backup/DataBackupDialog";
 import { CompanionExperience } from "@/components/companion/CompanionExperience";
 import { ContentProcessingDialog } from "@/components/content-processing/ContentProcessingDialog";
 import { ContentProcessingIndicator } from "@/components/content-processing/ContentProcessingIndicator";
@@ -11,11 +12,16 @@ import { FragmentDetailDialog } from "@/components/fragments/FragmentDetailDialo
 import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
 import { useDormancySync } from "@/components/fragments/useDormancySync";
 import { useExternalLinkImportRuntime } from "@/components/link-imports/useExternalLinkImportRuntime";
+import { fragmentGardenDb } from "@/data/db";
 import type { GardenPlantSnapshot } from "@/domain";
 import type { GardenSummary } from "@/domain/companion/context-builder";
 import type { CompanionViewModel } from "@/domain/garden/companion-view-model";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
 import { queryGardenPlantSnapshot, queryGardenSummary } from "@/services/garden-query-service";
+import {
+  RESTORE_COMPLETED_SESSION_KEY,
+  subscribeToGardenRestoreEvents,
+} from "@/services/garden-restore-coordination";
 import { recordFragmentViewed } from "@/services/record-fragment-viewed";
 
 import { GardenAccessibilitySummary } from "./GardenAccessibilitySummary";
@@ -60,6 +66,8 @@ export function GardenWorkspace() {
   const [companionOpenGeneration, setCompanionOpenGeneration] = useState(0);
   const [preserveCompanionScreen, setPreserveCompanionScreen] = useState(false);
   const [openCreateRequest, setOpenCreateRequest] = useState(0);
+  const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const [isRemoteRestoreInProgress, setIsRemoteRestoreInProgress] = useState(false);
   const selectedFragmentIdRef = useRef<string | null>(null);
   const isCompanionDialogOpenRef = useRef(false);
   const openingLockRef = useRef<string | null>(null);
@@ -68,6 +76,8 @@ export function GardenWorkspace() {
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const gardenModeButtonRef = useRef<HTMLButtonElement>(null);
   const cardModeButtonRef = useRef<HTMLButtonElement>(null);
+  const backupButtonRef = useRef<HTMLButtonElement>(null);
+  const remoteRestoreOperationRef = useRef<string | null>(null);
   const handleContentProcessingEvent = useCallback(
     (event: Readonly<{ type: "completed" | "failed"; message: string }>): void => {
       setInteractionFeedback({
@@ -80,6 +90,50 @@ export function GardenWorkspace() {
   const contentProcessing = useContentProcessingRuntime({ onEvent: handleContentProcessingEvent });
   // Historical Fragment-bound imports can still be pending after an upgrade.
   useExternalLinkImportRuntime(handleContentProcessingEvent);
+
+  useEffect(() => {
+    let restoredNoticeFrame: number | null = null;
+    if (sessionStorage.getItem(RESTORE_COMPLETED_SESSION_KEY) === "true") {
+      sessionStorage.removeItem(RESTORE_COMPLETED_SESSION_KEY);
+      restoredNoticeFrame = window.requestAnimationFrame(() => {
+        setInteractionFeedback({ kind: "status", message: "花园已经恢复完成。" });
+      });
+    }
+
+    let recoveryTimer: number | null = null;
+    const clearRecoveryTimer = (): void => {
+      if (recoveryTimer !== null) window.clearTimeout(recoveryTimer);
+      recoveryTimer = null;
+    };
+    const unsubscribe = subscribeToGardenRestoreEvents((event) => {
+      if (event.type === "started") {
+        remoteRestoreOperationRef.current = event.operationId;
+        setIsRemoteRestoreInProgress(true);
+        fragmentGardenDb.close();
+        clearRecoveryTimer();
+        recoveryTimer = window.setTimeout(() => window.location.reload(), 30_000);
+        return;
+      }
+      if (remoteRestoreOperationRef.current !== event.operationId) return;
+      clearRecoveryTimer();
+      if (event.type === "completed") {
+        sessionStorage.setItem(RESTORE_COMPLETED_SESSION_KEY, "true");
+        window.location.reload();
+        return;
+      }
+      remoteRestoreOperationRef.current = null;
+      void fragmentGardenDb.open().finally(() => {
+        setIsRemoteRestoreInProgress(false);
+        setQueryAttempt((attempt) => attempt + 1);
+      });
+    });
+
+    return () => {
+      if (restoredNoticeFrame !== null) window.cancelAnimationFrame(restoredNoticeFrame);
+      clearRecoveryTimer();
+      unsubscribe();
+    };
+  }, []);
   const handleCompanionTypeChange = useCallback(
     (companionType: CompanionViewModel["type"] | null): void => {
       setCompanion((current) => {
@@ -333,7 +387,7 @@ export function GardenWorkspace() {
 
   return (
     <main className="min-h-screen px-5 py-8 text-garden-ink sm:px-8 lg:px-12 lg:py-10">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-7xl" inert={isRemoteRestoreInProgress}>
         <header className="flex flex-col gap-6 border-b border-garden-line pb-7 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-semibold tracking-[0.2em] text-garden-accent uppercase">
@@ -346,12 +400,22 @@ export function GardenWorkspace() {
               点击花园地面让人物移动，或点击植物走近并查看内容；卡片模式仍可直接记录和整理。
             </p>
           </div>
-          <GardenModeToggle
-            cardButtonRef={cardModeButtonRef}
-            gardenButtonRef={gardenModeButtonRef}
-            mode={mode}
-            onModeChange={handleModeChange}
-          />
+          <div className="flex flex-wrap items-center gap-3 self-start lg:self-auto">
+            <GardenModeToggle
+              cardButtonRef={cardModeButtonRef}
+              gardenButtonRef={gardenModeButtonRef}
+              mode={mode}
+              onModeChange={handleModeChange}
+            />
+            <button
+              className="rounded-md border border-garden-line bg-garden-paper px-4 py-2.5 text-sm font-semibold text-garden-ink hover:bg-garden-soft"
+              onClick={() => setIsBackupOpen(true)}
+              ref={backupButtonRef}
+              type="button"
+            >
+              数据与备份
+            </button>
+          </div>
         </header>
 
         <div
@@ -488,7 +552,7 @@ export function GardenWorkspace() {
       <ContentProcessingDialog
         busyJobId={contentProcessing.busyJobId}
         errorMessage={contentProcessing.errorMessage}
-        isOpen={contentProcessing.isDialogOpen}
+        isOpen={contentProcessing.isDialogOpen && !isRemoteRestoreInProgress}
         jobs={contentProcessing.jobs}
         onCancel={contentProcessing.removeJob}
         onClose={() => contentProcessing.closeDialog()}
@@ -521,7 +585,7 @@ export function GardenWorkspace() {
         onRetry={contentProcessing.retryJob}
       />
 
-      {selectedFragmentId !== null ? (
+      {!isRemoteRestoreInProgress && selectedFragmentId !== null ? (
         <FragmentDetailDialog
           fragmentId={selectedFragmentId}
           key={selectedFragmentId}
@@ -535,6 +599,23 @@ export function GardenWorkspace() {
           }
           onStartProcessingJob={(jobId) => void contentProcessing.startJob(jobId)}
         />
+      ) : null}
+      <DataBackupDialog
+        isOpen={isBackupOpen && !isRemoteRestoreInProgress}
+        onClose={() => setIsBackupOpen(false)}
+        onRestoreCompleted={() => window.location.reload()}
+      />
+      {isRemoteRestoreInProgress ? (
+        <div
+          aria-live="assertive"
+          className="fixed inset-0 z-50 grid place-items-center bg-garden-canvas/95 px-6 text-center"
+          role="alert"
+        >
+          <div>
+            <p className="font-display text-2xl font-semibold">另一页正在恢复花园</p>
+            <p className="mt-2 text-sm text-garden-muted">完成后此页面会自动重新载入。</p>
+          </div>
+        </div>
       ) : null}
     </main>
   );

@@ -28,7 +28,11 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    ".next-playwright/types/**/*.ts",
+    ".next-playwright/dev/types/**/*.ts",
+    ".next-stage14-build/types/**/*.ts",
+    ".next-stage14-build/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

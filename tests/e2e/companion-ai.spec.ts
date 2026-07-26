@@ -3,8 +3,6 @@ import { expect, test, type Page } from "@playwright/test";
 import { clearFragmentGardenIndexedDb } from "./helpers/indexed-db";
 import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
 
-const BASE_URL = "http://localhost:3000";
-
 async function setHistoricalOpenAiMode(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -45,6 +43,8 @@ test("NPC path hides open chat controls and never calls the AI route", async ({
   context,
   page,
 }) => {
+  const baseURL = test.info().project.use.baseURL;
+  if (typeof baseURL !== "string") throw new Error("Playwright baseURL is required");
   let companionRouteCalls = 0;
   await page.route("**/api/companion/respond", async (route) => {
     companionRouteCalls += 1;
@@ -52,7 +52,7 @@ test("NPC path hides open chat controls and never calls the AI route", async ({
   });
 
   await page.goto("/garden");
-  await clearFragmentGardenIndexedDb(context, page, BASE_URL);
+  await clearFragmentGardenIndexedDb(context, page, baseURL);
   await page.reload();
   await completeCompanionOnboardingIfNeeded(page, "cat");
   await setHistoricalOpenAiMode(page);
@@ -98,8 +98,10 @@ test("NPC path hides open chat controls and never calls the AI route", async ({
 });
 
 test("cat and dog use the same fixed NPC labels", async ({ context, page }) => {
+  const baseURL = test.info().project.use.baseURL;
+  if (typeof baseURL !== "string") throw new Error("Playwright baseURL is required");
   await page.goto("/garden");
-  await clearFragmentGardenIndexedDb(context, page, BASE_URL);
+  await clearFragmentGardenIndexedDb(context, page, baseURL);
   await page.reload();
   await completeCompanionOnboardingIfNeeded(page, "dog");
   await page.getByRole("button", { name: "打开花园伙伴", exact: true }).click();

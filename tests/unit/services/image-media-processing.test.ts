@@ -49,9 +49,7 @@ describe("image media processing boundaries", () => {
         clientRequestId: "request-first",
         result: {
           title: "整理后的图片",
-          summary: "图片摘要",
-          visibleText: "可见文字",
-          contentKind: "document",
+          markdown: "图片摘要\n\n可见文字",
         },
       },
       { database },
@@ -73,9 +71,7 @@ describe("image media processing boundaries", () => {
         clientRequestId: "request-second",
         result: {
           title: "新的分析标题",
-          summary: "新的摘要",
-          visibleText: null,
-          contentKind: "photo",
+          markdown: "新的摘要",
         },
       },
       { database },
@@ -89,6 +85,43 @@ describe("image media processing boundaries", () => {
     await expect(
       database.fragmentEvents.where("fragmentId").equals(created.fragment.id).count(),
     ).resolves.toBe(1);
+  });
+
+  it("preserves a user-authored legacy image note with the new Markdown contract", async () => {
+    const created = await createMediaFragment(
+      {
+        kind: "image",
+        blob: createImageBlob(),
+        mimeType: "image/png",
+        width: 1,
+        height: 1,
+        optionalNote: "User-authored image context",
+      },
+      { database },
+    );
+    await beginImageAnalysis(created.mediaAsset.id, "request-user-note", { database });
+
+    await applyImageAnalysisResult(
+      {
+        assetId: created.mediaAsset.id,
+        clientRequestId: "request-user-note",
+        result: { title: "Generated title", markdown: "Generated Markdown" },
+      },
+      { database },
+    );
+
+    await expect(database.fragments.get(created.fragment.id)).resolves.toMatchObject({
+      title: "Generated title",
+      rawText: "User-authored image context",
+      contentMarkdown: "User-authored image context",
+      analysisStatus: "completed",
+    });
+    await expect(database.mediaAssets.get(created.mediaAsset.id)).resolves.toMatchObject({
+      generatedTitle: "Generated title",
+      summary: null,
+      visibleText: null,
+      contentKind: null,
+    });
   });
 
   it("does not start a new request for a deleted fragment", async () => {
@@ -245,9 +278,7 @@ describe("image media processing boundaries", () => {
               clientRequestId: "request-old",
               analysis: {
                 title: "旧结果",
-                summary: "旧摘要",
-                visibleText: null,
-                contentKind: "other",
+                markdown: "旧摘要",
               },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },

@@ -1,126 +1,200 @@
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type Route,
+} from "@playwright/test";
 
 import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
 import { clearFragmentGardenIndexedDb, readFragmentGardenPersistence } from "./helpers/indexed-db";
 
-function baseUrl(): string {
-  const value = test.info().project.use.baseURL;
-  if (typeof value !== "string") throw new Error("Missing Playwright baseURL");
-  return value;
+const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
+function getBaseURL(): string {
+  const baseURL = test.info().project.use.baseURL;
+  if (typeof baseURL !== "string") throw new Error("The Playwright project must define a baseURL.");
+  return baseURL;
 }
 
-function tinyPng(): Buffer {
-  return Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64",
-  );
+function readClientRequestId(route: Route): string {
+  const body = route.request().postDataBuffer()?.toString("utf8") ?? "";
+  return body.match(/name="clientRequestId"\r?\n\r?\n([^\r\n]+)/u)?.[1] ?? "image-e2e-request";
 }
 
-async function initialize(page: Page, context: BrowserContext): Promise<void> {
-  await clearFragmentGardenIndexedDb(context, page, baseUrl());
+async function initializeGarden(context: BrowserContext, page: Page): Promise<void> {
+  await clearFragmentGardenIndexedDb(context, page, getBaseURL());
   await page.goto("/garden");
   await completeCompanionOnboardingIfNeeded(page);
   await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-  await expect(page.getByRole("button", { name: "种下碎片", exact: true })).toBeVisible();
 }
 
-test("image fragments are saved locally before analysis and survive refresh", async ({
+async function openImageCreator(page: Page): Promise<Locator> {
+  await page.getByRole("button", { name: "种下碎片", exact: true }).click();
+  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
+  await createDialog.getByRole("button", { name: "图片", exact: true }).click();
+  const imageDialog = page.getByRole("dialog", { name: "种下图片碎片" });
+  await expect(imageDialog).toBeVisible();
+  return imageDialog;
+}
+
+async function submitImage(
+  page: Page,
+  fileName: string,
+  title: string,
+  expectDisclosure = true,
+): Promise<void> {
+  const imageDialog = await openImageCreator(page);
+  await imageDialog.locator('input[type="file"]').setInputFiles({
+    name: fileName,
+    mimeType: "image/png",
+    buffer: PNG_BYTES,
+  });
+  await expect(imageDialog.getByAltText("待保存的图片预览")).toBeVisible();
+  await imageDialog.getByLabel("标题（可选）").fill(title);
+  await imageDialog.getByRole("button", { name: "开始整理", exact: true }).click();
+
+  const disclosure = page.getByRole("dialog", { name: "发送当前图片前，请先确认" });
+  if (expectDisclosure) {
+    await expect(disclosure).toBeVisible();
+    await disclosure.getByRole("button", { name: "同意并分析", exact: true }).click();
+  } else {
+    await expect(disclosure).toBeHidden();
+  }
+}
+
+async function fulfillFailure(route: Route): Promise<void> {
+  await route.fulfill({
+    body: JSON.stringify({
+      error: {
+        code: "request_timeout",
+        message: "图片分析超时。",
+        requestId: "00000000-0000-4000-8000-000000000099",
+      },
+    }),
+    contentType: "application/json",
+    status: 504,
+  });
+}
+
+async function fulfillSuccess(route: Route): Promise<void> {
+  await route.fulfill({
+    body: JSON.stringify({
+      requestId: "00000000-0000-4000-8000-000000000002",
+      clientRequestId: readClientRequestId(route),
+      analysis: {
+        title: "重试后整理好的图片",
+        markdown: "## 整理结果\n\n这张图片在手动重试后成功整理。",
+      },
+    }),
+    contentType: "application/json",
+    status: 200,
+  });
+}
+
+test("failed image job keeps its Blob, retries in place, and deletion removes another temporary job", async ({
   context,
   page,
 }) => {
-  const captured = { clientRequestId: null as string | null };
-  let releaseRequest!: () => void;
-  const requestBlocked = new Promise<void>((resolve) => {
-    releaseRequest = resolve;
+  let analysisRequestCount = 0;
+  let transcriptionRequestCount = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/api/media/audio/transcribe")) transcriptionRequestCount += 1;
   });
   await page.route("**/api/media/image/analyze", async (route) => {
-    const body = (await route.request().postDataBuffer())?.toString("utf8") ?? "";
-    captured.clientRequestId =
-      body.match(/name="clientRequestId"\r?\n\r?\n([^\r\n]+)/u)?.[1] ?? null;
-    await requestBlocked;
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        requestId: "11111111-1111-4111-8111-111111111111",
-        clientRequestId: captured.clientRequestId,
-        analysis: {
-          title: "截图里的小计划",
-          summary: "一张包含简单计划的截图。",
-          visibleText: "今天先整理一个小步骤",
-          contentKind: "screenshot",
-        },
-      }),
-      status: 200,
-    });
+    analysisRequestCount += 1;
+    if (analysisRequestCount === 2) {
+      await fulfillSuccess(route);
+      return;
+    }
+    await fulfillFailure(route);
   });
 
-  await initialize(page, context);
-  await page.getByRole("button", { name: "种下碎片", exact: true }).click();
-  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
-  await createDialog.getByRole("button", { name: "图片", exact: true }).click();
-  const imageDialog = page.getByRole("dialog", { name: "种下图片碎片" });
-  await imageDialog.locator('input[type="file"]').setInputFiles({
-    name: "plan.png",
-    mimeType: "image/png",
-    buffer: tinyPng(),
-  });
-  await expect(imageDialog.locator("img")).toBeVisible();
-  await imageDialog.getByRole("button", { name: "种下图片", exact: true }).click();
-  await expect(imageDialog).toBeHidden();
-  await expect(page.getByText("图片已经先种下了。", { exact: true })).toBeVisible();
-
-  const disclosure = page.getByRole("dialog", { name: "发送当前图片前，请先确认" });
-  await expect(disclosure).toBeVisible();
-  await disclosure.getByRole("button", { name: "同意并分析", exact: true }).click();
-
+  await initializeGarden(context, page);
+  await submitImage(page, "retry.png", "等待重试的图片");
   await expect
-    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets.length)
-    .toBe(1);
-  const localState = await readFragmentGardenPersistence(page);
-  expect(localState.fragments).toHaveLength(1);
-  expect(localState.plants).toHaveLength(1);
-  expect(localState.mediaAssets[0]).toMatchObject({
+    .poll(async () => (await readFragmentGardenPersistence(page)).contentProcessingJobs[0]?.status)
+    .toBe("failed");
+
+  const failedState = await readFragmentGardenPersistence(page);
+  const retryJobId = failedState.contentProcessingJobs[0]?.id;
+  expect(retryJobId).toBeTruthy();
+  expect(failedState.contentProcessingJobs[0]).toMatchObject({
+    blobSize: PNG_BYTES.byteLength,
+    createdFragmentId: null,
+    errorCode: "request_timeout",
     kind: "image",
-    mimeType: "image/png",
-    processingStatus: "processing",
-    blobSize: tinyPng().length,
+    status: "failed",
   });
+  expect(failedState.fragments).toEqual([]);
+  expect(failedState.plants).toEqual([]);
+  expect(failedState.fragmentEvents).toEqual([]);
+  expect(failedState.mediaAssets).toEqual([]);
+  await expect(page.getByRole("button", { name: /^打开笔记：/u })).toHaveCount(0);
 
-  releaseRequest();
-  await expect(page.getByText("截图里的小计划", { exact: true })).toBeVisible();
-  await page.reload();
-  await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-  await expect(page.getByRole("button", { name: "打开笔记：截图里的小计划" })).toBeVisible();
-  await page.getByRole("button", { name: "打开笔记：截图里的小计划" }).click();
-  const detail = page.getByRole("dialog", { name: "截图里的小计划" });
-  await expect(detail.getByAltText("用户上传的图片：截图里的小计划")).toBeVisible();
-  await expect(detail.getByText("一张包含简单计划的截图。", { exact: true })).toBeVisible();
-  await expect(detail.getByText("今天先整理一个小步骤", { exact: true })).toBeVisible();
-  await expect(detail).not.toContainText(/分析完成|处理状态|图片摘要|可见文字|成长分|成长阶段/u);
-  await expect(detail.getByRole("button", { name: /分析图片|重新分析/u })).toHaveCount(0);
-});
-
-test("local-only image choice does not call the analysis route", async ({ context, page }) => {
-  let requestCount = 0;
-  await page.route("**/api/media/image/analyze", async (route) => {
-    requestCount += 1;
-    await route.abort();
-  });
-  await initialize(page, context);
-  await page.getByRole("button", { name: "种下碎片", exact: true }).click();
-  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
-  await createDialog.getByRole("button", { name: "图片", exact: true }).click();
-  const imageDialog = page.getByRole("dialog", { name: "种下图片碎片" });
-  await imageDialog.locator('input[type="file"]').setInputFiles({
-    name: "local.png",
-    mimeType: "image/png",
-    buffer: tinyPng(),
-  });
-  await imageDialog.getByRole("button", { name: "种下图片", exact: true }).click();
-  const disclosure = page.getByRole("dialog", { name: "发送当前图片前，请先确认" });
-  await disclosure.getByRole("button", { name: "仅保存在本地", exact: true }).click();
+  const processingDialog = page.getByRole("dialog", { name: "正在整理的内容" });
+  const failedRow = processingDialog.getByRole("listitem").filter({ hasText: "retry.png" });
+  await expect(failedRow).toContainText("原图仍保存在本地任务中");
+  await failedRow.getByRole("button", { name: "重试", exact: true }).click();
   await expect
-    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets[0]?.processingStatus)
-    .toBe("local_only");
-  expect(requestCount).toBe(0);
+    .poll(async () => (await readFragmentGardenPersistence(page)).contentProcessingJobs[0]?.status)
+    .toBe("completed");
+
+  const completedState = await readFragmentGardenPersistence(page);
+  expect(completedState.contentProcessingJobs).toHaveLength(1);
+  expect(completedState.contentProcessingJobs[0]).toMatchObject({
+    blobSize: 0,
+    id: retryJobId,
+    status: "completed",
+  });
+  expect(completedState.fragments).toHaveLength(1);
+  expect(completedState.plants).toHaveLength(1);
+  expect(completedState.mediaAssets).toHaveLength(1);
+  expect(completedState.fragmentEvents.filter((event) => event.type === "created")).toHaveLength(1);
+
+  await processingDialog.getByRole("button", { name: "关闭", exact: true }).click();
+  await submitImage(page, "cancel.png", "不会留下空卡片的图片", false);
+  await expect
+    .poll(async () => {
+      const state = await readFragmentGardenPersistence(page);
+      return state.contentProcessingJobs.find((job) => job.sourceFileName === "cancel.png")?.status;
+    })
+    .toBe("failed");
+
+  const secondFailureState = await readFragmentGardenPersistence(page);
+  const removableJob = secondFailureState.contentProcessingJobs.find(
+    (job) => job.sourceFileName === "cancel.png",
+  );
+  expect(removableJob).toMatchObject({
+    blobSize: PNG_BYTES.byteLength,
+    createdFragmentId: null,
+    status: "failed",
+  });
+  expect(secondFailureState.fragments).toHaveLength(1);
+  expect(secondFailureState.plants).toHaveLength(1);
+  expect(secondFailureState.mediaAssets).toHaveLength(1);
+
+  const removableRow = processingDialog.getByRole("listitem").filter({ hasText: "cancel.png" });
+  await removableRow.getByRole("button", { name: "删除任务", exact: true }).click();
+  const confirmation = page.getByRole("alertdialog", { name: "删除这条整理任务？" });
+  await expect(confirmation).toContainText("本地原图会被删除");
+  await confirmation.getByRole("button", { name: "删除任务", exact: true }).click();
+  await expect
+    .poll(async () => (await readFragmentGardenPersistence(page)).contentProcessingJobs.length)
+    .toBe(1);
+
+  const finalState = await readFragmentGardenPersistence(page);
+  expect(finalState.contentProcessingJobs[0]?.id).toBe(retryJobId);
+  expect(finalState.fragments).toHaveLength(1);
+  expect(finalState.plants).toHaveLength(1);
+  expect(finalState.mediaAssets).toHaveLength(1);
+  expect(finalState.fragmentEvents.filter((event) => event.type === "created")).toHaveLength(1);
+  await expect(page.getByRole("button", { name: "打开笔记：不会留下空卡片的图片" })).toHaveCount(0);
+  expect(analysisRequestCount).toBe(3);
+  expect(transcriptionRequestCount).toBe(0);
+  await expect.poll(async () => page.locator("canvas").count()).toBeLessThanOrEqual(1);
 });

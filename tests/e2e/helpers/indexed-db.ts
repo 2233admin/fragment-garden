@@ -3,7 +3,9 @@ import type { BrowserContext, Page } from "@playwright/test";
 export type StoredFragment = {
   analysisStatus: string;
   completionStatus: string;
+  contentMarkdown: string;
   contentType: string;
+  createdAt: string;
   id: string;
   lastInteractedAt: string;
   lifecycleStatus: string;
@@ -11,6 +13,7 @@ export type StoredFragment = {
   sourceUrl: string | null;
   summary: string | null;
   title: string;
+  updatedAt: string;
 };
 
 export type StoredPlant = {
@@ -34,8 +37,51 @@ export type StoredExternalLinkImport = {
   attemptCount: number;
   fragmentId: string;
   id: string;
+  sourceContent: string | null;
   status: string;
   taskId: string | null;
+};
+
+export type StoredFragmentNote = {
+  fragmentId: string;
+  id: string;
+  markdown: string;
+  source: string;
+};
+
+export type StoredFragmentRelation = {
+  id: string;
+  relationType: string;
+  sourceFragmentId: string;
+  status: string;
+  targetFragmentId: string;
+};
+
+export type StoredContentProcessingJob = {
+  allowDuplicate: boolean;
+  attemptCount: number;
+  attemptGeneration: number;
+  blobSize: number;
+  createdFragmentId: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  id: string;
+  initiator: string | null;
+  kind: string;
+  normalizedSourceUrl: string | null;
+  processingRequestId: string | null;
+  providerTaskId: string | null;
+  resultMarkdown: string | null;
+  resultTitle: string | null;
+  sourceFileName: string | null;
+  sourceFragmentId: string | null;
+  sourceHeight: number | null;
+  sourceMimeType: string | null;
+  sourceUrl: string | null;
+  sourceWidth: number | null;
+  status: string;
+  userNoteMarkdown: string | null;
+  userTitle: string | null;
 };
 
 export type StoredChatMessage = {
@@ -62,9 +108,12 @@ export type StoredMediaAsset = {
 
 export type FragmentGardenPersistenceState = {
   chatMessages: StoredChatMessage[];
+  contentProcessingJobs: StoredContentProcessingJob[];
   mediaAssets: StoredMediaAsset[];
   externalLinkImports: StoredExternalLinkImport[];
   fragmentEvents: StoredFragmentEvent[];
+  fragmentNotes: StoredFragmentNote[];
+  fragmentRelations: StoredFragmentRelation[];
   fragments: StoredFragment[];
   getNoteDisclosureAcceptedAt: string | null;
   openAiDisclosureAcceptedAt: string | null;
@@ -102,6 +151,9 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
       "externalLinkImports",
       "chatMessages",
       "mediaAssets",
+      "fragmentNotes",
+      "contentProcessingJobs",
+      "relations",
     ].filter((name) => database.objectStoreNames.contains(name));
     const transaction = database.transaction(storeNames, "readonly");
     const readAll = <T>(storeName: string): Promise<T[]> =>
@@ -144,6 +196,9 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
       externalLinkImports,
       chatMessages,
       mediaAssets,
+      fragmentNotes,
+      contentProcessingJobs,
+      fragmentRelations,
     ] = await Promise.all([
       readSettings(),
       readAll<StoredFragment>("fragments"),
@@ -167,11 +222,52 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
             blob: Blob;
           }>("mediaAssets")
         : Promise.resolve([]),
+      database.objectStoreNames.contains("fragmentNotes")
+        ? readAll<StoredFragmentNote>("fragmentNotes")
+        : Promise.resolve([]),
+      database.objectStoreNames.contains("contentProcessingJobs")
+        ? readAll<{
+            allowDuplicate: boolean;
+            attemptCount: number;
+            attemptGeneration: number;
+            createdFragmentId: string | null;
+            errorCode: string | null;
+            errorMessage: string | null;
+            id: string;
+            initiator: string | null;
+            kind: string;
+            normalizedSourceUrl: string | null;
+            processingRequestId: string | null;
+            providerTaskId: string | null;
+            resultMarkdown: string | null;
+            resultTitle: string | null;
+            sourceBlob: Blob | null;
+            sourceFileName: string | null;
+            sourceFragmentId: string | null;
+            sourceHeight: number | null;
+            sourceMimeType: string | null;
+            sourceUrl: string | null;
+            sourceWidth: number | null;
+            status: string;
+            userNoteMarkdown: string | null;
+            userTitle: string | null;
+          }>("contentProcessingJobs")
+        : Promise.resolve([]),
+      database.objectStoreNames.contains("relations")
+        ? readAll<StoredFragmentRelation>("relations")
+        : Promise.resolve([]),
     ]);
 
     database.close();
     return {
       chatMessages,
+      contentProcessingJobs: contentProcessingJobs.map((job) => {
+        const { sourceBlob, ...storedJob } = job;
+        return {
+          ...storedJob,
+          blobSize: sourceBlob?.size ?? 0,
+        };
+      }),
       mediaAssets: mediaAssets.map((asset) => ({
         id: asset.id,
         fragmentId: asset.fragmentId,
@@ -188,6 +284,8 @@ export function readFragmentGardenPersistence(page: Page): Promise<FragmentGarde
       })),
       externalLinkImports,
       fragmentEvents,
+      fragmentNotes,
+      fragmentRelations,
       fragments,
       getNoteDisclosureAcceptedAt: settings?.getNoteDisclosureAcceptedAt ?? null,
       openAiDisclosureAcceptedAt: settings?.openAiDisclosureAcceptedAt ?? null,

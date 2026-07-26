@@ -68,9 +68,7 @@ function createProviderResponse(result: unknown): OpenAIResponse {
 
 const VALID_RESULT = {
   title: "A small garden note",
-  summary: "A simple screenshot with a short visible label.",
-  visibleText: "Start here",
-  contentKind: "screenshot",
+  markdown: "## What is visible\n\nA simple screenshot with the label **Start here**.",
 } as const;
 
 describe("image analysis Route Handler", () => {
@@ -123,6 +121,16 @@ describe("image analysis Route Handler", () => {
       text: { format: { type: "json_schema", strict: true, name: "image_analysis" } },
     });
     expect(request?.text?.format).toEqual(IMAGE_ANALYSIS_RESPONSE_FORMAT);
+    expect(IMAGE_ANALYSIS_RESPONSE_FORMAT.schema).toMatchObject({
+      required: ["title", "markdown"],
+      additionalProperties: false,
+      properties: {
+        title: { maxLength: 100 },
+        markdown: { maxLength: 8_000 },
+      },
+    });
+    expect(request?.instructions).toContain("untrusted content");
+    expect(request?.instructions).toMatch(/Do\s+not emit raw HTML/u);
     expect(request).not.toHaveProperty("tools");
     expect(request).not.toHaveProperty("reasoning");
     expect(request).not.toHaveProperty("previous_response_id");
@@ -137,7 +145,8 @@ describe("image analysis Route Handler", () => {
 
   it.each([
     ["non-multipart", new Request("http://localhost", { method: "POST", body: "{}" })],
-    ["unknown field", createRequest(createPngFile(), { extraFields: { model: "client-model" } })],
+    ["client model", createRequest(createPngFile(), { extraFields: { model: "client-model" } })],
+    ["client prompt", createRequest(createPngFile(), { extraFields: { prompt: "client-prompt" } })],
   ])("rejects %s before OpenAI", async (_label, request) => {
     const response = await POST(request);
 
@@ -284,5 +293,20 @@ describe("image analysis Route Handler", () => {
     expect(JSON.parse(bodyText)).toMatchObject({ error: { code } });
     expect(bodyText).not.toContain("private");
     expect(bodyText).not.toContain("reasoning");
+  });
+
+  it.each([
+    ["legacy extraction fields", { ...VALID_RESULT, summary: "legacy" }],
+    ["empty Markdown", { title: VALID_RESULT.title, markdown: "   " }],
+    ["oversized Markdown", { title: VALID_RESULT.title, markdown: "x".repeat(8_001) }],
+  ])("rejects %s as an invalid structured result", async (_label, result) => {
+    openAiSdkMock.create.mockResolvedValue(createProviderResponse(result));
+
+    const response = await POST(createRequest(createPngFile()));
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "invalid_model_response" },
+    });
   });
 });

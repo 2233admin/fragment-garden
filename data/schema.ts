@@ -4,7 +4,8 @@ export const FRAGMENT_GARDEN_DATABASE_VERSION_V1 = 1;
 export const FRAGMENT_GARDEN_DATABASE_VERSION_V2 = 2;
 export const FRAGMENT_GARDEN_DATABASE_VERSION_V3 = 3;
 export const FRAGMENT_GARDEN_DATABASE_VERSION_V4 = 4;
-export const FRAGMENT_GARDEN_DATABASE_VERSION = FRAGMENT_GARDEN_DATABASE_VERSION_V4;
+export const FRAGMENT_GARDEN_DATABASE_VERSION_V5 = 5;
+export const FRAGMENT_GARDEN_DATABASE_VERSION = FRAGMENT_GARDEN_DATABASE_VERSION_V5;
 
 export const FRAGMENT_GARDEN_SCHEMA_V1 = {
   settings: "id",
@@ -24,4 +25,10 @@ export const FRAGMENT_GARDEN_SCHEMA_V3 = {
 
 export const FRAGMENT_GARDEN_SCHEMA_V4 = {
   mediaAssets: "id,fragmentId,kind,processingStatus,createdAt",
+} as const;
+
+/** Both stores are declared together; later stages may use jobs without mutating V5. */
+export const FRAGMENT_GARDEN_SCHEMA_V5 = {
+  fragmentNotes: "id,fragmentId,source,createdAt,updatedAt",
+  contentProcessingJobs: "id,kind,status,createdAt,updatedAt,sourceFragmentId,createdFragmentId",
 } as const;

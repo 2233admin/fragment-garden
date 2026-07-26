@@ -17,19 +17,20 @@
 3. 用户是否会回看过去保存的内容；
 4. 回看后是否会产生补充、关联、行动或新的想法。
 
-阶段 7A 已完成链接碎片、本地异步导入状态和受限的 GetNoteConnector。阶段 7B 已完成可降级的真实 AI
-花园伙伴、安全边界和三个受限工具。阶段 8 已完成规则型 NPC 入口：伙伴使用固定台词、固定选项和本地
-花园数据，不通过开放聊天工作。阶段 9 已实现绑定单个 Fragment 的“思维发芽”代码与 Mock 验证：先进行本地信息充分性
-检查，再在独立披露同意后可选调用 OpenAI，并且只有用户确认后才保存结构化伙伴建议。阶段 10 的图片输入与真实
-分析已经可用：原始 Blob 先保存到 IndexedDB，再按独立图片披露调用服务端 Route。语音录制、audio MediaAsset、
-转写 Route、转写编辑和自动化测试等技术基础已经实现，但真实语音链路尚未稳定通过；普通 MVP 暂时隐藏新建语音和
-重新转写入口，后续作为 Post-MVP / Experimental 能力重新验证。阶段 7B 的开放聊天服务仍作为不可见的过渡和开发
-调试基础设施保留；阶段 11 尚未开始，Embedding、
-相似碎片、花丛、云同步和伙伴动画仍未实现。
+阶段 7A～10 已完成链接读取、规则型 NPC、旧版思维发芽和图片理解等技术闭环。当前正在按新的 MVP
+产品边界连续实施阶段 11～13：卡片改为内容型笔记，链接和图片只在处理成功后创建正式卡片，思维发芽
+改为生成一篇可预览、可编辑的新笔记，并在用户确认后创建新卡片和植物。卡片负责承载内容，花园负责
+表现生命周期与成长状态；普通详情不再承担系统后台职责。
+
+语音录制、audio MediaAsset、转写 Route、转写编辑和自动化测试等技术基础继续保留，但真实语音链路尚未
+稳定通过；普通 MVP 隐藏新建语音和重新转写入口，后续作为 Post-MVP / Experimental 能力重新验证。阶段 7B
+开放聊天和阶段 9 伙伴建议也仅作为不可见的历史技术实现保留。阶段 14 才处理备份、恢复、稳定性和 MVP
+封版；Embedding、相似碎片、花丛、云同步和伙伴动画不在当前范围。
 
 ## 第一版能力范围（当前实现与目标）
 
-- 当前 MVP 可用文字、链接和图片碎片的本地优先保存；原始图片在任何 AI 请求前都已保存在当前浏览器；
+- 当前 MVP 输入为文字、链接和图片：文字立即创建正式卡片；链接和图片先创建可恢复的本地处理任务，
+  处理成功后才原子创建正式 Fragment、Plant，以及图片对应的 MediaAsset；
 - 新碎片先生成一株统一幼苗；
 - 链接由受限 GetNoteConnector 异步读取，失败时保留原始 URL 和本地内容；
 - 用户可在固定花园地图中通过鼠标点击移动人物；
@@ -41,8 +42,8 @@
 - 猫和狗仅外观不同，能力、语气和逻辑完全一致；
 - 阶段 8 已实现功能型规则 NPC，通过固定台词和固定选项帮助用户理解、记录和回看花园；它提供花园近况、
   休眠植物列表、确定性旧碎片推荐、规则说明和种下新想法等本地动作；
-- 共享 Fragment 详情已提供“思维发芽”，所有未删除内容均可使用；它只分析当前选中的 Fragment，返回一条
-  结构化建议，并且不直接修改原文、执行建议动作或切换植物成长阶段；
+- 共享 Fragment 详情提供“发芽”：它只使用当前笔记主体、用户追加笔记和必要来源文字，生成一篇新的完整
+  Markdown 笔记；结果先预览和编辑，确认后才创建新 Fragment、Plant 与来源关系，原卡片始终不被覆盖；
 - 图片支持 PNG、JPEG、WebP（单张、最大 10 MB），可选择文件或从剪贴板粘贴；图片详情使用 Blob URL 预览，
   分析状态和结果保存在本地，并可手动重试；
 - 图片分析使用独立披露与固定 Route（`/api/media/image/analyze`），处理失败不会删除 Fragment、Plant 或原始媒体；
@@ -95,17 +96,17 @@
 4. Dexie 管理浏览器本地持久化；
 5. Route Handlers 管理 AI 与链接提取；
 6. GameBridge 是 React 与 Phaser 的唯一通信通道；
-7. 碎片必须先保存，再进行 AI 后处理；
-8. AI 失败不能阻止创建植物；
+7. 文字本地校验后立即保存；链接和图片以本地 processing job 承接第三方处理，只有成功结果才成为正式卡片；
+8. 链接、图片或发芽失败只影响临时任务，不得留下空卡片、空植物或修改原卡片；
 9. 植物状态由确定性规则计算，不由 AI 决定；
 10. 花园交互失败时，卡片模式必须始终可用。
 
 ## 链接读取与 GetNote 配置
 
-链接会先在一个本地事务中创建 Fragment、Plant、created Event 和 ExternalLinkImport，卡片与植物
-无需等待第三方即可出现。首次使用前会说明链接内容将由得到大脑（GetNote）处理；只有用户同意后，
-客户端才会启动读取。失败、离线、刷新或服务未配置都不会删除本地 Fragment、Plant 和原始 URL。
-读取期间用户手工修改的标题或正文会分别受到保护，不会被稍后返回的第三方对应字段覆盖。
+链接会在用户同意得到大脑（GetNote）披露后创建本地 processing job，而不是立即创建正式 Fragment 或
+Plant。任务保存原始 URL、provider task identity、状态和重试信息；成功取得足够正文后，才在一个事务中
+创建正式内容型卡片、植物、来源元数据和 created Event。失败、离线或服务未配置时保留任务用于重试或
+取消，但卡片列表和花园不会出现空内容。
 
 GetNoteConnector 只在服务端使用固定的 save、progress 和 detail 接口，不提供任意路径代理。配置写入
 本机 `.env.local`：
@@ -175,7 +176,7 @@ strict JSON Schema Structured Output 只返回一个具体化方向、一个引�
 阶段 7B 的开放 Chat UI、Route、ChatMessage、OpenAI 服务层和三个受限工具仍保留为不可见的开发调试/过渡
 基础设施，不参与普通 NPC 或思维发芽路径。阶段 10 的图片能力已经接入共享创建和详情流程；语音底层实现与历史
 内容兼容继续保留，但不参与当前普通创建流程。正式伙伴
-移动动画、Embedding、相似碎片和花丛不属于当前阶段，阶段 11 尚未开始。
+移动动画、Embedding、相似碎片和花丛不属于当前阶段。阶段 11 的内容型卡片已经完成，阶段 12 尚未开始。
 
 真实服务验收最终使用服务端 `OPENAI_MODEL` 配置的 `gpt-4.1-mini`（响应快照
 `gpt-4.1-mini-2025-04-14`），不发送 reasoning 参数，保持 `max_output_tokens = 700`。正式六次请求均以
@@ -215,34 +216,25 @@ npm run dev
 
 实际脚本以项目初始化后的 `package.json` 为准。
 
-## 阶段 10 收敛：图片完成，语音延期
+## MVP 核心体验重构：阶段 11～13
 
-当前 MVP 的输入范围是文字、链接和图片，AI 核心能力是思维发芽。图片遵循“先本地保存，再可选 AI 处理”原则：
+阶段 11 已把正式卡片统一为内容型笔记。Fragment 的主体使用 `contentMarkdown`，阅读界面安全渲染富文本，
+编辑界面提供标题与必要格式能力；用户追加内容独立存入 `fragmentNotes`，不再混入系统 Event 或伙伴建议。
+卡片列表与详情移除生命周期、成长分、处理状态和系统流水，状态继续只由花园视觉与底层 Domain 使用。
+编辑器采用受限 Lexical 节点和 Markdown transformer，原因是它提供稳定的 React 本地编辑能力而不引入协作或
+云端体系；阅读使用 `react-markdown`，跳过原始 HTML 并限制 URL 协议。阶段 11 的 `contentProcessingJobs`
+仅完成 V5 store 预留，当前保持为空。
 
-```text
-选择图片
-→ 本地校验
-→ 一个事务创建 Fragment、Plant、MediaAsset 和 created Event
-→ 立即预览
-→ 用户决定是否发送当前图片给 OpenAI
-→ 结果写回同一 MediaAsset
-```
+阶段 12 将把链接和图片改为延迟创建：披露同意后先写入 V5 `contentProcessingJobs`。链接 job 保存 URL 和
+GetNote 任务身份；图片 job 保存临时 Blob。任务不占植物槽位，也不进入卡片列表。成功后才原子创建正式
+Fragment、Plant、created Event，图片同时创建 MediaAsset 并移走 job 中的重复 Blob；失败可重试或取消，
+不会留下空卡片。
 
-Dexie 已从 V3 升级到 V4，新增 `mediaAssets` 表，原始 `Blob`、MIME、大小、处理状态、请求 ID 和派生结果分开保存。
-V3 的 Fragment、Plant、事件、Settings、ChatMessage、GetNote 状态和伙伴建议均保留，刷新后媒体仍可读取。媒体状态为
-`pending`、`processing`、`completed`、`failed` 或 `local_only`；页面不会因刷新自动重复请求。删除内容不能开始新的处理，
-迟到响应也不能复活或覆盖已删除内容。
+阶段 13 将新增 `POST /api/sprout/generate` 和 `sprout-generate-v1` Prompt。生成输入只包含当前笔记的 Markdown、
+所有用户追加笔记、必要来源说明和已有子笔记标题，不发送图片/音频 Blob、其他 Fragment、伙伴建议或生命周期
+字段。输出固定为 `{ title, markdown }`，先存入 sprout job 并显示可编辑预览；只有用户点击“确认种下”后，
+才原子创建一张普通文字卡片、一株植物和 confirmed `grows_from` 关系。旧 `/api/sprout/analyze`、
+`partner_suggestion_saved` 和历史数据继续保留，但普通 UI 不再使用。
 
-图片只接受 PNG、JPEG 和 WebP，最大 10 MB。图片披露独立保存为 `imageAiDisclosureAcceptedAt`，旧 Chat 或思维发芽
-同意不会代替它。图片发芽只使用已保存的摘要、可见文字和用户补充；发芽 Route 不接收原始 Blob，也不读取其他 Fragment。
-图片分析完成本身不增加成长分、不切换植物阶段；用户后续编辑或确认建议仍遵循既有成长规则。
-
-语音不是验证核心产品闭环的必要输入；文字、链接、图片与思维发芽已经能完成稳定、可展示的闭环，而浏览器录音、
-媒体编码、权限和转写存在更高的兼容成本。因此语音延期到 Post-MVP，并非删除或判定实现无效。V4 audio 数据、
-`MediaRecorder` 状态机、`/api/media/audio/transcribe`、独立披露字段、转写编辑和相关自动测试继续保留；已有录音和
-transcript 仍可读取、播放、编辑，有有效 transcript 的历史语音仍可发芽且不会发送原始 Blob。普通 MVP 创建 Dialog
-不显示语音，历史语音详情不显示重新转写，只显示“当前版本暂不提供新的语音转写。”
-
-图片分析由服务端从 `.env.local` 读取 `OPENAI_IMAGE_ANALYSIS_ENABLED` 和 `OPENAI_IMAGE_MODEL`。保留的转写 Route 继续读取
-默认关闭的 `OPENAI_TRANSCRIPTION_ENABLED` 和 `OPENAI_TRANSCRIPTION_MODEL`；普通用户路径不调用它。以上变量都不使用
-`NEXT_PUBLIC_` 前缀，模型不能由客户端提交。阶段 10 收敛不创建 `m3-ai-inputs` 或替代 Tag；阶段 11 尚未开始。
+图片仍只接受 PNG、JPEG 和 WebP，最大 10 MB；图片披露独立保存，图片 Route 和模型只由服务端配置。
+语音继续作为 Post-MVP / Experimental 历史兼容能力。阶段 14 尚未开始，不创建 `mvp-v1` 或其他新 Tag。

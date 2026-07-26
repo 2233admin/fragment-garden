@@ -1,13 +1,27 @@
 import type Dexie from "dexie";
 import type { Transaction } from "dexie";
 
-import type { ChatMessage, Fragment, Plant, Settings } from "../domain";
+import {
+  plainTextToMarkdown,
+  resolveFragmentContentMarkdown,
+  type ChatMessage,
+  type ExternalLinkImport,
+  type Fragment,
+  type FragmentEvent,
+  type FragmentNote,
+  type MediaAsset,
+  type Plant,
+  type Settings,
+} from "../domain";
+import { safelyParseTextAddedEventPayload } from "../validation/fragment-event-payload";
 import {
   FRAGMENT_GARDEN_DATABASE_VERSION_V2,
   FRAGMENT_GARDEN_DATABASE_VERSION_V3,
   FRAGMENT_GARDEN_DATABASE_VERSION_V4,
+  FRAGMENT_GARDEN_DATABASE_VERSION_V5,
   FRAGMENT_GARDEN_SCHEMA_V3,
   FRAGMENT_GARDEN_SCHEMA_V4,
+  FRAGMENT_GARDEN_SCHEMA_V5,
 } from "./schema";
 
 type MigrationRegistrar = (database: Dexie) => void;
@@ -78,10 +92,75 @@ const registerVersion4: MigrationRegistrar = (database) => {
   database.version(FRAGMENT_GARDEN_DATABASE_VERSION_V4).stores(FRAGMENT_GARDEN_SCHEMA_V4);
 };
 
+type Version4Fragment = Omit<Fragment, "contentMarkdown"> & {
+  contentMarkdown?: string;
+};
+
+async function addVersion5Content(transaction: Transaction): Promise<void> {
+  const [legacyFragments, linkImports, mediaAssets, textAddedEvents] = await Promise.all([
+    transaction.table<Version4Fragment, string>("fragments").toArray(),
+    transaction.table<ExternalLinkImport, string>("externalLinkImports").toArray(),
+    transaction.table<MediaAsset, string>("mediaAssets").toArray(),
+    transaction
+      .table<FragmentEvent, string>("fragmentEvents")
+      .where("type")
+      .equals("text_added")
+      .toArray(),
+  ]);
+
+  const linkImportByFragmentId = new Map(
+    linkImports.map((linkImport) => [linkImport.fragmentId, linkImport] as const),
+  );
+  const mediaAssetByFragmentId = new Map(
+    mediaAssets.map((mediaAsset) => [mediaAsset.fragmentId, mediaAsset] as const),
+  );
+  const fragmentIds = new Set(legacyFragments.map((fragment) => fragment.id));
+  const migratedFragments: Fragment[] = legacyFragments.map((legacyFragment) => {
+    return {
+      ...legacyFragment,
+      contentMarkdown: resolveFragmentContentMarkdown(
+        legacyFragment,
+        linkImportByFragmentId.get(legacyFragment.id) ?? null,
+        mediaAssetByFragmentId.get(legacyFragment.id) ?? null,
+      ),
+    };
+  });
+  const notes: FragmentNote[] = textAddedEvents.flatMap((event) => {
+    if (!fragmentIds.has(event.fragmentId)) return [];
+    const payload = safelyParseTextAddedEventPayload(event.payload);
+    if (payload === null) return [];
+    const contentMarkdown = plainTextToMarkdown(payload.text);
+    if (contentMarkdown.length === 0) return [];
+    return [
+      {
+        id: event.id,
+        fragmentId: event.fragmentId,
+        contentMarkdown,
+        source: "user" as const,
+        createdAt: event.occurredAt,
+        updatedAt: event.occurredAt,
+      },
+    ];
+  });
+
+  await transaction.table<Fragment, string>("fragments").bulkPut(migratedFragments);
+  if (notes.length > 0) {
+    await transaction.table<FragmentNote, string>("fragmentNotes").bulkPut(notes);
+  }
+}
+
+const registerVersion5: MigrationRegistrar = (database) => {
+  database
+    .version(FRAGMENT_GARDEN_DATABASE_VERSION_V5)
+    .stores(FRAGMENT_GARDEN_SCHEMA_V5)
+    .upgrade(addVersion5Content);
+};
+
 const DATABASE_MIGRATIONS: readonly MigrationRegistrar[] = [
   registerVersion2,
   registerVersion3,
   registerVersion4,
+  registerVersion5,
 ];
 
 /**

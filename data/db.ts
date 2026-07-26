@@ -4,9 +4,11 @@ import type {
   Attachment,
   ChatMessage,
   Cluster,
+  ContentProcessingJob,
   ExternalLinkImport,
   Fragment,
   FragmentEvent,
+  FragmentNote,
   FragmentRelation,
   MediaAsset,
   Plant,
@@ -32,6 +34,8 @@ export class FragmentGardenDatabase extends Dexie {
   chatMessages!: Table<ChatMessage, string>;
   externalLinkImports!: Table<ExternalLinkImport, string>;
   mediaAssets!: Table<MediaAsset, string>;
+  fragmentNotes!: Table<FragmentNote, string>;
+  contentProcessingJobs!: Table<ContentProcessingJob, string>;
 
   constructor(databaseName = FRAGMENT_GARDEN_DATABASE_NAME) {
     super(databaseName);

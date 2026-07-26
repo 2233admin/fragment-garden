@@ -2,6 +2,8 @@ import {
   PLANT_SLOT_IDS,
   allocateFirstAvailablePlantSlot,
   deriveLocalFragmentTitle,
+  normalizeContentMarkdown,
+  plainTextToMarkdown,
   type Fragment,
   type FragmentEvent,
   type Plant,
@@ -18,6 +20,7 @@ import {
 export type CreateLocalFragmentInput = {
   title?: string;
   rawText: string;
+  contentMarkdown?: string;
 };
 
 export type CreateLocalFragmentResult = {
@@ -41,6 +44,12 @@ export async function createLocalFragment(
     manualTitle === undefined || manualTitle.length === 0
       ? deriveLocalFragmentTitle(input.rawText)
       : manualTitle;
+  const contentMarkdown = normalizeContentMarkdown(
+    input.contentMarkdown ?? plainTextToMarkdown(input.rawText),
+  );
+  if (contentMarkdown.length === 0) {
+    throw new Error("Fragment content cannot be empty");
+  }
   const { database, createId, timestamp } = resolveLocalServiceDependencies(dependencies);
 
   const fragmentRepository = new FragmentRepository(database);
@@ -61,6 +70,7 @@ export async function createLocalFragment(
         title,
         rawText: input.rawText,
         sourceUrl: null,
+        contentMarkdown,
         summary: null,
         keywords: [],
         lifecycleStatus: "active",

@@ -1,56 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import type { FragmentContentType } from "@/domain";
 import { updateFragmentContent } from "@/services/update-fragment-content";
 
 import { AsyncButton } from "../shared/AsyncButton";
+import { RichTextEditor } from "./RichTextEditor";
 
-type FragmentEditFormProps = {
+type FragmentEditFormProps = Readonly<{
   contentType: FragmentContentType;
   fragmentId: string;
-  initialRawText: string;
+  initialContentMarkdown: string;
   initialTitle: string;
   isDisabled: boolean;
+  onCancel: () => void;
   onPendingChange: (isPending: boolean) => void;
   onSaved: (message: string) => void;
+}>;
+
+const IMMUTABLE_SOURCE_COPY: Partial<Record<FragmentContentType, string>> = {
+  audio: "原始录音不会被修改。",
+  image: "原始图片不会被修改。",
+  link: "原链接不会被修改，也不会重新读取。",
 };
 
 export function FragmentEditForm({
   contentType,
   fragmentId,
-  initialRawText,
+  initialContentMarkdown,
   initialTitle,
   isDisabled,
+  onCancel,
   onPendingChange,
   onSaved,
 }: FragmentEditFormProps) {
   const [title, setTitle] = useState(initialTitle);
-  const [rawText, setRawText] = useState(initialRawText);
+  const [contentMarkdown, setContentMarkdown] = useState(initialContentMarkdown);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const submissionLockRef = useRef(false);
-  const previousFragmentIdRef = useRef(fragmentId);
-  const isTitleDirtyRef = useRef(false);
-  const isRawTextDirtyRef = useRef(false);
-
-  useEffect(() => {
-    const didFragmentChange = previousFragmentIdRef.current !== fragmentId;
-
-    if (didFragmentChange) {
-      previousFragmentIdRef.current = fragmentId;
-      isTitleDirtyRef.current = false;
-      isRawTextDirtyRef.current = false;
-    }
-
-    if (!isTitleDirtyRef.current) {
-      setTitle(initialTitle);
-    }
-    if (!isRawTextDirtyRef.current) {
-      setRawText(initialRawText);
-    }
-  }, [fragmentId, initialRawText, initialTitle]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -59,8 +48,13 @@ export function FragmentEditForm({
       return;
     }
 
-    if (contentType === "text" && rawText.trim().length === 0) {
-      setErrorMessage("原始内容不能为空，修改尚未保存。请填写内容后重试。");
+    if (title.trim().length === 0) {
+      setErrorMessage("标题不能为空，修改尚未保存。");
+      return;
+    }
+
+    if (contentMarkdown.trim().length === 0) {
+      setErrorMessage("主体内容不能为空，修改尚未保存。");
       return;
     }
 
@@ -70,30 +64,18 @@ export function FragmentEditForm({
     onPendingChange(true);
 
     try {
-      const editedFields = {
-        title: isTitleDirtyRef.current,
-        rawText: isRawTextDirtyRef.current,
-      };
-      const result = await updateFragmentContent({
+      await updateFragmentContent({
+        contentMarkdown,
+        editedFields: {
+          contentMarkdown: true,
+          title: true,
+        },
         fragmentId,
-        rawText,
         title,
-        editedFields,
       });
-
-      isTitleDirtyRef.current = false;
-      isRawTextDirtyRef.current = false;
-      setTitle(result.fragment.title);
-      setRawText(result.fragment.rawText ?? "");
-      onSaved(
-        contentType === "link"
-          ? "链接标题和正文已保存，不会自动重新读取。"
-          : contentType === "text"
-            ? "标题和原始内容已保存。"
-            : "标题和补充说明已保存。",
-      );
+      onSaved("标题和主体内容已保存。");
     } catch {
-      setErrorMessage("修改保存失败，本地原文没有被替换。你的输入仍在，可以重试。");
+      setErrorMessage("修改保存失败，原内容没有被替换。你的输入仍在，可以重试。");
     } finally {
       submissionLockRef.current = false;
       setIsPending(false);
@@ -102,77 +84,64 @@ export function FragmentEditForm({
   }
 
   return (
-    <form
-      className="rounded-2xl border border-garden-line bg-white p-5"
-      id={`edit-fragment-${fragmentId}`}
-      onSubmit={handleSubmit}
-    >
-      <h3 className="font-display text-xl font-semibold text-garden-ink">
-        {contentType === "text" ? "编辑原始内容" : "编辑媒体补充说明"}
-      </h3>
-      <p className="mt-1 text-xs leading-5 text-garden-muted">
-        {contentType === "link"
-          ? "手动编辑会保留为你的内容，不会自动重新读取链接，也不会增加成长分。"
-          : "编辑不会增加成长分，也不会成为一条补充记录。"}
-      </p>
+    <form className="space-y-6" onSubmit={(event) => void handleSubmit(event)}>
+      <div>
+        <p className="text-xs font-semibold text-garden-accent">编辑笔记</p>
+        <h3 className="mt-1 font-display text-2xl font-semibold text-garden-ink">标题与主体内容</h3>
+        {IMMUTABLE_SOURCE_COPY[contentType] !== undefined ? (
+          <p className="mt-2 text-sm leading-6 text-garden-muted">
+            {IMMUTABLE_SOURCE_COPY[contentType]}
+          </p>
+        ) : null}
+      </div>
 
-      <div className="mt-5">
+      <div>
         <label
           className="mb-2 block text-sm font-semibold text-garden-ink"
           htmlFor={`edit-title-${fragmentId}`}
         >
-          编辑标题
+          标题
         </label>
         <input
-          className="w-full rounded-xl border border-garden-line bg-garden-paper px-4 py-3 text-sm text-garden-ink disabled:opacity-60"
+          autoFocus
+          className="w-full rounded-lg border border-garden-line bg-white px-4 py-3 text-base text-garden-ink focus:border-garden-accent disabled:opacity-60"
           disabled={isDisabled}
           id={`edit-title-${fragmentId}`}
-          onChange={(event) => {
-            isTitleDirtyRef.current = true;
-            setTitle(event.target.value);
-          }}
+          maxLength={200}
+          onChange={(event) => setTitle(event.target.value)}
           type="text"
           value={title}
         />
       </div>
 
-      <div className="mt-4">
-        <label
-          className="mb-2 block text-sm font-semibold text-garden-ink"
-          htmlFor={`edit-content-${fragmentId}`}
-        >
-          {contentType === "link"
-            ? "编辑提取正文（可选）"
-            : contentType === "text"
-              ? "编辑原始内容"
-              : "编辑补充说明（可选）"}
-        </label>
-        <textarea
-          className="min-h-40 w-full resize-y rounded-xl border border-garden-line bg-garden-paper px-4 py-3 text-sm leading-6 text-garden-ink disabled:opacity-60"
+      <div>
+        <p className="mb-2 text-sm font-semibold text-garden-ink">主体内容</p>
+        <RichTextEditor
+          ariaLabel="编辑主体内容"
           disabled={isDisabled}
-          id={`edit-content-${fragmentId}`}
-          onChange={(event) => {
-            isRawTextDirtyRef.current = true;
-            setRawText(event.target.value);
-          }}
-          required={contentType === "text"}
-          value={rawText}
+          initialMarkdown={initialContentMarkdown}
+          namespace={`fragment-body-${fragmentId}`}
+          onChange={setContentMarkdown}
         />
       </div>
 
       {errorMessage !== null ? (
-        <p
-          aria-live="assertive"
-          className="mt-4 rounded-xl bg-garden-danger-soft px-4 py-3 text-sm leading-6 text-garden-danger"
-          role="alert"
-        >
+        <p aria-live="assertive" className="text-sm leading-6 text-garden-danger" role="alert">
           {errorMessage}
         </p>
       ) : null}
 
-      <div className="mt-4 flex justify-end">
+      <div className="flex justify-end gap-3 border-t border-garden-line pt-5">
+        <button
+          className="rounded-md border border-garden-line px-5 py-2.5 text-sm font-semibold text-garden-ink hover:bg-garden-soft disabled:opacity-50"
+          disabled={isPending}
+          onClick={onCancel}
+          type="button"
+        >
+          取消
+        </button>
         <AsyncButton
-          className="rounded-full bg-garden-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
+          className="rounded-md bg-garden-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
           disabled={isDisabled && !isPending}
           isPending={isPending}
           pendingLabel="正在保存…"

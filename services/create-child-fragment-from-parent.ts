@@ -3,6 +3,8 @@ import {
   allocateFirstAvailablePlantSlot,
   calculateGrowthScore,
   deriveLocalFragmentTitle,
+  normalizeContentMarkdown,
+  plainTextToMarkdown,
   resolvePlantStage,
   type Fragment,
   type FragmentEvent,
@@ -29,6 +31,7 @@ export type CreateChildFragmentFromParentInput = Readonly<{
   parentFragmentId: string;
   title?: string;
   rawText: string;
+  contentMarkdown?: string;
   now: string;
 }>;
 
@@ -56,6 +59,12 @@ export async function createChildFragmentFromParent(
     manualTitle === undefined || manualTitle.length === 0
       ? deriveLocalFragmentTitle(input.rawText)
       : manualTitle;
+  const contentMarkdown = normalizeContentMarkdown(
+    input.contentMarkdown ?? plainTextToMarkdown(input.rawText),
+  );
+  if (contentMarkdown.length === 0) {
+    throw new Error("Fragment content cannot be empty");
+  }
   const restoredPayload = parseRestoredEventPayload({ reason: "content_updated" });
   const { database, createId, timestamp } = resolveLocalServiceDependencies({
     ...dependencies,
@@ -97,6 +106,7 @@ export async function createChildFragmentFromParent(
         title,
         rawText: input.rawText,
         sourceUrl: null,
+        contentMarkdown,
         summary: null,
         keywords: [],
         lifecycleStatus: "active",

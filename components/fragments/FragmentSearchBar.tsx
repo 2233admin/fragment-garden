@@ -31,7 +31,7 @@ export function FragmentSearchBar({
           className="w-full rounded-xl border border-garden-line bg-white px-4 py-3 text-sm text-garden-ink placeholder:text-garden-muted/70"
           id="fragment-search"
           onChange={(event) => onSearchTermChange(event.target.value)}
-          placeholder="搜索标题或原始内容"
+          placeholder="搜索标题或笔记内容"
           type="search"
           value={searchTerm}
         />
@@ -50,9 +50,9 @@ export function FragmentSearchBar({
           onChange={(event) => onSortChange(event.target.value as FragmentCardSort)}
           value={sort}
         >
+          <option value="updated_desc">最近更新</option>
           <option value="created_desc">最近创建</option>
           <option value="created_asc">最早创建</option>
-          <option value="interacted_desc">最近互动</option>
         </select>
       </div>
     </div>

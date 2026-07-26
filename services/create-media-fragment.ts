@@ -1,6 +1,7 @@
 import {
   PLANT_SLOT_IDS,
   allocateFirstAvailablePlantSlot,
+  resolveFragmentContentMarkdown,
   type Fragment,
   type FragmentEvent,
   type MediaAsset,
@@ -144,7 +145,7 @@ export async function createMediaFragment(
     database.fragmentEvents,
     async () => {
       const occupiedSlotIds = (await plantRepository.list()).map((plant) => plant.slotId);
-      const fragment: Fragment = {
+      const fragmentWithoutMarkdown: Omit<Fragment, "contentMarkdown"> = {
         id: createId(),
         contentType: input.kind,
         title,
@@ -161,6 +162,10 @@ export async function createMediaFragment(
         updatedAt: timestamp,
         lastInteractedAt: timestamp,
         completedAt: null,
+      };
+      const fragment: Fragment = {
+        ...fragmentWithoutMarkdown,
+        contentMarkdown: resolveFragmentContentMarkdown(fragmentWithoutMarkdown),
       };
       const plant: Plant = {
         id: createId(),

@@ -149,7 +149,7 @@ API Key：
 
 AI：
 
-- 只能在明确绑定当前 Fragment 的场景返回结构化分析和建议；
+- 只能在明确绑定当前输入或 Fragment 的场景返回结构化分析或待确认的新笔记；
 - 不得被重新扩展为开放聊天、通用问答或通用 Agent；
 - 输出必须包含受约束的结果字段，不得把自由文本当作已执行动作；
 - 不得直接修改数据库；
@@ -191,34 +191,28 @@ AI：
 
 ## 5. 创建碎片原则
 
-创建流程必须是：
+当前普通 MVP 输入为文字、链接和图片，三类输入使用两个明确流程：
 
 ```text
-本地校验
-→ 立即保存 Fragment
-→ 立即保存 Plant
-→ （图片）立即保存 MediaAsset 原始 Blob
-→ 立即写入 created Event
-→ UI 显示幼苗并预览图片
-→ （链接）按阶段 7A 规则异步读取
-→ （图片）用户单独同意后才异步分析
+文字：本地校验 → 原子创建 Fragment + Plant + created Event
+
+链接/图片：本地校验与独立披露
+→ 创建 ContentProcessingJob（图片 Blob 保存在 job）
+→ 不创建 Fragment、Plant 或正式 MediaAsset
+→ 处理成功
+→ 原子创建正式 Fragment + Plant + created Event
+→ 图片同时创建 MediaAsset，并从 job 移除重复 Blob
 ```
 
-当前普通 MVP 创建流程支持文字、链接和图片，不等待通用 AI，也不自动计算 Embedding 或相似候选。图片必须先本地保存，
-之后才可由用户单独同意图片分析；思维发芽只能由用户在共享详情中明确选中 Fragment 后主动发起。Embedding、相似候选和花丛
-仍属于待重新规划的后续能力。
+processing job 不是卡片、不占植物槽位、不进入花园数量或卡片列表。失败必须保留可重试任务和必要原始输入，
+取消图片任务必须删除临时 Blob；失败、取消、刷新或晚到响应都不能留下空 Fragment、空 Plant 或重复正式数据。
+文字创建不等待 AI。链接和图片的新规则只作用于新建流程，历史正式卡片不得删除或自动重新处理。
 
-语音创建作为 Post-MVP / Experimental 技术能力保留但未激活。未来重新启用时，仍必须先在一个事务中保存 Fragment、Plant、
-audio MediaAsset 原始 Blob 和 `created` Event，再允许独立披露后的转写；不得等待 AI 成功才保存。
+发芽只能由用户从明确选中的正式 Fragment 主动发起。生成结果先保存在 sprout job 并允许预览编辑，只有用户
+确认后才原子创建新的正式卡片、植物和来源关系；不得覆盖原卡片或写旧伙伴建议成长事件。
 
-禁止：
-
-```text
-等待 AI 成功
-→ 才允许保存
-```
-
-任何 AI、网络、链接或媒体处理失败都不能删除已经创建的碎片。
+语音创建作为 Post-MVP / Experimental 技术能力保留但未激活。历史 audio Fragment、MediaAsset、转写查看、
+编辑和只发送 transcript 的发芽兼容必须继续存在。
 
 ---
 
@@ -240,6 +234,11 @@ audio MediaAsset 原始 Blob 和 `created` Event，再允许独立披露后的�
 - 用户确认后才能变为 `confirmed`；
 - 数据库迁移必须显式增加版本；
 - 不允许直接修改旧 Schema 而不写迁移。
+- V4 → V5 必须一次注册 `fragmentNotes` 与 `contentProcessingJobs` 两张 store；不得在已经发布的同一
+  Dexie 版本中事后补 store；
+- `Fragment.contentMarkdown` 是正式主体，`FragmentNote` 是独立用户追加；旧 `text_added` Event 迁移为
+  note 时必须保留原 Event，`partner_suggestion_saved` 不得误迁移；
+- ContentProcessingJob 不得被查询或投影成 Fragment，不得占用 Plant slot。
 
 ---
 
@@ -538,23 +537,25 @@ MediaRecorder 资源清理、语音转写编辑、独立披露、重试和媒体
   Action 与本地 Service 完成，不让模型自由选择工具；
 - 新增 AI 能力必须绑定一个由用户明确选中的 Fragment，并通过服务端 Route Handler；不得让 AI 直接访问
   Dexie、Phaser 或整个花园；
-- 思维发芽输出必须结构化，只能成为建议。只有用户明确确认保存，才能写入补充历史并标记“伙伴建议”；
-- 发芽建议不得覆盖原文、替换标题、自动创建子想法、执行动作、完成、封存或删除；
+- 阶段 13 的普通发芽输出必须结构化为 `{ title, markdown }`，先成为可编辑预览。只有用户明确点击
+  “确认种下”，本地事务才可创建新的普通文字 Fragment、Plant 与 confirmed `grows_from` 关系；
+- 发芽不得覆盖原卡片标题、主体或追加笔记，不得自动完成、封存、删除或写入伙伴建议；
 - active、dormant、completed、archived 和无槽位 Fragment 可发芽，deleted 内容不可发芽；保存建议只能按产品
   文档规定转换：dormant 恢复 active，completed 保持永久盛开，archived 不恢复且不占槽位，不得产生其他隐式
   状态或槽位变化；
-- 阶段 9 已使用独立 `POST /api/sprout/analyze`、版本化 Prompt、strict Structured Output 和
-  `store: false` 实现单 Fragment 发芽；它不使用工具调用、远端会话、`previous_response_id`、Streaming 或
-  Agent Loop；
+- 阶段 9 的 `POST /api/sprout/analyze`、伙伴建议、Prompt 和测试继续作为历史技术实现保留，普通 UI 不再
+  调用或展示。阶段 13 必须使用独立 `POST /api/sprout/generate`、独立 Schema 和版本化
+  `sprout-generate-v1` Prompt；它同样不得使用工具、远端会话、Streaming、Search 或 Agent Loop；
 - 阶段 10 已使用 Dexie V4 `mediaAssets` 实现当前图片输入和保留的 audio 技术基础：原始 Blob 必须先本地保存，Fragment、
   Plant、MediaAsset 和 `created` Event 必须原子创建；图片只走 `POST /api/media/image/analyze`；语音代码只走
   `POST /api/media/audio/transcribe`，但当前普通创建与重新转写入口均隐藏；两者各自独立披露、状态、request id 和失败保留；
 - 图片和语音分析/转写不得写入 ChatMessage、不得保存 provider 原始 Response、远端 file id 或 API Key；媒体完成不增加成长分，
   deleted 内容不能开始新请求，迟到响应不能写回；
-- 阶段 10 的思维发芽只能读取当前图片的摘要/可见文字/contentKind 或历史语音 transcript 与用户补充，不得发送原始 Blob、
-  MediaAsset 以外的媒体或其他 Fragment；未有有效派生文字/补充时必须本地判定信息不足；
+- 新发芽只能读取当前 `contentMarkdown`、全部用户 FragmentNote、必要来源名称、历史语音 transcript 和
+  已确认子笔记标题；不得发送 partner suggestion、原始 Blob、MediaAsset、其他 Fragment 或生命周期字段；
 - 旧 ChatMessage、`/api/companion/respond` 和三个受限工具继续作为不可见的过渡/调试基础设施保留，不得让
-  普通用户重新进入开放聊天；阶段 11 尚未开始，不得提前开发 Embedding、相似碎片、花丛、伙伴移动/动画、云端媒体或像素视觉升级；
+  普通用户重新进入开放聊天；阶段 11～13 只实施内容型卡片、延迟创建与发芽 2.0，不得提前开发
+  Embedding、相似碎片、花丛、伙伴移动/动画、云端媒体、备份封版或像素视觉升级；
 - 猫和狗永远共用同一套固定对话、选项、服务、Prompt 和分析逻辑。
 
 阶段 10 的实现边界：图片只接受 PNG/JPEG/WebP、单张且不超过 10 MB。保留的语音实现只允许用户点击后申请麦克风，使用
@@ -567,4 +568,21 @@ MediaRecorder 资源清理、语音转写编辑、独立披露、重试和媒体
 voice-to-sprout 兼容或相关测试；已有 audio Fragment 必须继续可播放、查看和编辑 transcript，有有效 transcript 或用户
 补充时仍可发芽且不得发送原始 Blob。不得把 Mock 或自动测试通过表述为真实语音验收通过。
 
-不得实现图片相册、视频、音频文件上传、实时语音、Embedding、相似碎片、花丛、云同步、社交或阶段 11。
+不得实现图片相册、视频、音频文件上传、实时语音、Embedding、相似碎片、花丛、云同步、社交或阶段 14。
+
+---
+
+## 18. 阶段 11～13 收敛硬规则
+
+- 卡片负责内容，花园负责状态；普通卡片与详情不得展示生命周期、成长分、植物阶段、处理状态、OCR 标签、
+  provider 字段或系统 Event 流水；底层生命周期代码和花园投影继续保留；
+- Markdown 阅读必须安全渲染，不直接注入未过滤 HTML，不允许 `script`、`iframe`、事件处理器或
+  `javascript:` URL；富文本编辑器只支持段落、标题、粗体、列表、引用和安全链接；
+- 新链接和图片必须先创建 job，处理成功后才创建正式卡片；历史正式卡片不迁移为 job；
+- 图片 job 的 Blob 只在 IndexedDB 临时保存，成功后移入唯一 MediaAsset，取消后删除；不得保存 Base64；
+- 发芽生成和预览都不创建 Fragment；确认事务必须幂等，重复点击、多标签页或刷新不能创建第二张卡片；
+- `grows_from` 方向保持 `new/source grows_from original/target`；确认发芽不写 `child_fragment_created` 或
+  `partner_suggestion_saved`，不增加隐藏成长分；
+- 旧 `/api/sprout/analyze`、伙伴建议、ChatMessage、开放聊天、语音技术基础和历史数据不得删除，但普通 UI
+  不再引用；
+- 阶段 14 才处理备份、恢复、稳定性和 MVP 封版。在阶段 14 通过前不得创建 `mvp-v1` Tag。

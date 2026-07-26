@@ -1,4 +1,12 @@
-import { deriveLocalFragmentTitle, type Fragment, type FragmentEvent, type Plant } from "../domain";
+import {
+  deriveLocalFragmentTitle,
+  markdownToPlainText,
+  normalizeContentMarkdown,
+  resolveFragmentContentMarkdown,
+  type Fragment,
+  type FragmentEvent,
+  type Plant,
+} from "../domain";
 import { ExternalLinkImportRepository } from "../data/repositories/external-link-import-repository";
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
@@ -15,10 +23,10 @@ import {
 export type UpdateFragmentContentInput = {
   fragmentId: string;
   title?: string;
-  rawText: string;
+  contentMarkdown: string;
   editedFields?: Readonly<{
     title: boolean;
-    rawText: boolean;
+    contentMarkdown: boolean;
   }>;
 };
 
@@ -58,19 +66,20 @@ export async function updateFragmentContent(
 
       requireFragmentCanInteract(fragment);
 
-      const editedFields = input.editedFields ?? { title: true, rawText: true };
-      const submittedRawText = input.rawText.trim().length === 0 ? null : input.rawText;
-      const rawText = editedFields.rawText ? submittedRawText : fragment.rawText;
-      if (fragment.contentType === "text" && rawText === null) {
-        throw new Error("Fragment text cannot be empty");
-      }
+      const editedFields = input.editedFields ?? { title: true, contentMarkdown: true };
+      const submittedContentMarkdown = normalizeContentMarkdown(input.contentMarkdown);
+      const contentMarkdown = editedFields.contentMarkdown
+        ? submittedContentMarkdown
+        : resolveFragmentContentMarkdown(fragment);
+      if (contentMarkdown.length === 0) throw new Error("Fragment content cannot be empty");
 
       const manualTitle = input.title?.trim();
+      const plainText = markdownToPlainText(contentMarkdown);
       const title = editedFields.title
         ? manualTitle === undefined || manualTitle.length === 0
-          ? fragment.contentType === "link" && rawText === null
+          ? plainText.length === 0
             ? fragment.title
-            : deriveLocalFragmentTitle(rawText ?? "")
+            : deriveLocalFragmentTitle(plainText)
           : manualTitle
         : fragment.title;
       const wasDormant = fragment.lifecycleStatus === "dormant";
@@ -82,7 +91,7 @@ export async function updateFragmentContent(
       const updatedFragment: Fragment = {
         ...fragment,
         title,
-        rawText,
+        contentMarkdown,
         lifecycleStatus: isArchived ? "archived" : "active",
         updatedAt: timestamp,
         lastInteractedAt: timestamp,
@@ -110,7 +119,7 @@ export async function updateFragmentContent(
       requireRecordUpdated(
         await fragmentRepository.update(fragment.id, {
           title,
-          rawText,
+          contentMarkdown,
           lifecycleStatus: updatedFragment.lifecycleStatus,
           updatedAt: timestamp,
           lastInteractedAt: timestamp,
@@ -143,7 +152,8 @@ export async function updateFragmentContent(
             (editedFields.title && title !== fragment.title);
           const userProvidedContent =
             externalLinkImport.userProvidedContent ||
-            (editedFields.rawText && rawText !== fragment.rawText);
+            (editedFields.contentMarkdown &&
+              contentMarkdown !== resolveFragmentContentMarkdown(fragment, externalLinkImport));
 
           requireRecordUpdated(
             await externalLinkImportRepository.update(externalLinkImport.id, {

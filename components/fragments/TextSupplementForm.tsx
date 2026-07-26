@@ -1,29 +1,28 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type RefObject } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { addTextSupplement } from "@/services/add-text-supplement";
 
 import { AsyncButton } from "../shared/AsyncButton";
+import { RichTextEditor } from "./RichTextEditor";
 
-type TextSupplementFormProps = {
+type TextSupplementFormProps = Readonly<{
   fragmentId: string;
-  intent?: "next_step" | "supplement";
   isDisabled: boolean;
+  onCancel: () => void;
   onPendingChange: (isPending: boolean) => void;
   onSaved: (message: string) => void;
-  textareaRef?: RefObject<HTMLTextAreaElement | null>;
-};
+}>;
 
 export function TextSupplementForm({
   fragmentId,
-  intent = "supplement",
   isDisabled,
+  onCancel,
   onPendingChange,
   onSaved,
-  textareaRef,
 }: TextSupplementFormProps) {
-  const [text, setText] = useState("");
+  const [contentMarkdown, setContentMarkdown] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const submissionLockRef = useRef(false);
@@ -35,8 +34,8 @@ export function TextSupplementForm({
       return;
     }
 
-    if (text.trim().length === 0) {
-      setErrorMessage("补充内容不能为空，这次补充尚未保存。请填写后重试。");
+    if (contentMarkdown.trim().length === 0) {
+      setErrorMessage("追加笔记不能为空，这次内容尚未保存。");
       return;
     }
 
@@ -46,11 +45,11 @@ export function TextSupplementForm({
     onPendingChange(true);
 
     try {
-      await addTextSupplement({ fragmentId, text });
-      setText("");
-      onSaved("新补充已保存，植物成长状态已更新。");
+      await addTextSupplement({ fragmentId, contentMarkdown });
+      setContentMarkdown("");
+      onSaved("追加笔记已保存。");
     } catch {
-      setErrorMessage("补充保存失败，没有产生部分更新。你的输入仍在，可以重试。");
+      setErrorMessage("保存失败，没有产生部分更新。你的输入仍在，可以重试。");
     } finally {
       submissionLockRef.current = false;
       setIsPending(false);
@@ -60,55 +59,50 @@ export function TextSupplementForm({
 
   return (
     <form
-      className="rounded-2xl border border-garden-line bg-garden-soft/45 p-5"
-      onSubmit={handleSubmit}
+      className="border-t border-garden-line pt-7"
+      id={`append-note-form-${fragmentId}`}
+      onSubmit={(event) => void handleSubmit(event)}
     >
-      <h3 className="font-display text-xl font-semibold text-garden-ink">
-        {intent === "next_step" ? "写下下一步" : "添加新补充"}
-      </h3>
-      <p className="mt-1 text-xs leading-5 text-garden-muted">
-        {intent === "next_step"
-          ? "下一步会作为一条文字补充保存，不会创建任务或自动执行。"
-          : "补充会保留为独立历史，并按领域规则重新计算成长。"}
+      <h3 className="font-display text-xl font-semibold text-garden-ink">追加一条笔记</h3>
+      <p className="mt-1 text-sm leading-6 text-garden-muted">
+        新内容会独立保留，不会合并或覆盖上面的主体笔记。
       </p>
 
-      <label
-        className="mt-5 mb-2 block text-sm font-semibold text-garden-ink"
-        htmlFor={`supplement-${fragmentId}`}
-      >
-        {intent === "next_step" ? "写下下一步" : "添加新补充"}
-      </label>
-      <textarea
-        className="min-h-28 w-full resize-y rounded-xl border border-garden-line bg-white px-4 py-3 text-sm leading-6 text-garden-ink disabled:opacity-60"
-        disabled={isDisabled}
-        id={`supplement-${fragmentId}`}
-        onChange={(event) => setText(event.target.value)}
-        placeholder={
-          intent === "next_step" ? "写下你愿意尝试的下一小步…" : "写下新的资料、判断或进展…"
-        }
-        ref={textareaRef}
-        value={text}
-      />
+      <div className="mt-4">
+        <RichTextEditor
+          ariaLabel="追加笔记内容"
+          autoFocus
+          disabled={isDisabled}
+          initialMarkdown=""
+          namespace={`new-fragment-note-${fragmentId}`}
+          onChange={setContentMarkdown}
+          placeholder="写下新的资料、判断或进展…"
+        />
+      </div>
 
       {errorMessage !== null ? (
-        <p
-          aria-live="assertive"
-          className="mt-4 rounded-xl bg-garden-danger-soft px-4 py-3 text-sm leading-6 text-garden-danger"
-          role="alert"
-        >
+        <p aria-live="assertive" className="mt-4 text-sm leading-6 text-garden-danger" role="alert">
           {errorMessage}
         </p>
       ) : null}
 
-      <div className="mt-4 flex justify-end">
+      <div className="mt-4 flex justify-end gap-3">
+        <button
+          className="rounded-md border border-garden-line px-4 py-2.5 text-sm font-semibold text-garden-ink hover:bg-garden-soft disabled:opacity-50"
+          disabled={isPending}
+          onClick={onCancel}
+          type="button"
+        >
+          取消
+        </button>
         <AsyncButton
-          className="rounded-full bg-garden-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
+          className="rounded-md bg-garden-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:opacity-60"
           disabled={isDisabled && !isPending}
           isPending={isPending}
           pendingLabel="正在保存…"
           type="submit"
         >
-          保存补充
+          保存笔记
         </AsyncButton>
       </div>
     </form>

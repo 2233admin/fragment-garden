@@ -1,4 +1,9 @@
-import type { ChatMessage, ExternalLinkImport, Fragment } from "../domain";
+import {
+  resolveFragmentContentMarkdown,
+  type ChatMessage,
+  type ExternalLinkImport,
+  type Fragment,
+} from "../domain";
 import { ChatMessageRepository } from "../data/repositories/chat-message-repository";
 import { ExternalLinkImportRepository } from "../data/repositories/external-link-import-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
@@ -114,10 +119,18 @@ export async function completeExternalLinkImport(
       const summary = input.summary.trim().length === 0 ? null : input.summary;
       const sourceContent = input.sourceContent.trim().length === 0 ? null : input.sourceContent;
       const rawText = current.userProvidedContent ? fragment.rawText : sourceContent;
+      const providerContentMarkdown = resolveFragmentContentMarkdown(
+        { ...fragment, title, contentMarkdown: undefined, rawText, summary },
+        { ...current, sourceContent },
+      );
+      const contentMarkdown = current.userProvidedContent
+        ? resolveFragmentContentMarkdown(fragment, current)
+        : providerContentMarkdown;
       const updatedFragment: Fragment = {
         ...fragment,
         title,
         rawText,
+        contentMarkdown,
         summary,
         analysisStatus: "completed",
         updatedAt: timestamp,
@@ -143,6 +156,7 @@ export async function completeExternalLinkImport(
         await fragmentRepository.update(fragment.id, {
           title,
           rawText,
+          contentMarkdown,
           summary,
           analysisStatus: "completed",
           updatedAt: timestamp,

@@ -52,10 +52,13 @@
 | 7A | 链接碎片与 GetNoteConnector | 链接先本地保存，再异步读取并可恢复 |
 | 7B | 真实 AI 花园伙伴（技术实现完成，过渡） | Responses API、受限工具与本地降级已验证 |
 | 8 | 规则型 NPC（已完成） | 固定选项、本地花园数据与现有 Service 形成 NPC 闭环 |
-| 9 | 思维发芽（已完成并通过真实服务验收） | 单 Fragment 的本地检查、结构化 AI 建议与确认保存形成闭环 |
+| 9 | 思维发芽（历史实现已完成） | 单 Fragment 的结构化伙伴建议与确认保存技术闭环 |
 | 10 | 图片输入完成，语音延期（已收敛） | 图片输入与真实分析可用；语音技术基础保留为 Post-MVP |
+| 11 | 内容型卡片与详情收敛 | Markdown 主体、独立追加笔记和简化阅读闭环 |
+| 12 | 链接与图片延迟创建 | processing job 成功后才创建正式卡片与植物 |
+| 13 | 发芽 2.0 | 生成、预览并确认一张新卡片和一株新植物 |
+| 14 | 备份、恢复、稳定性与 MVP 封版 | 尚未开始 |
 | 后续候选 | 相似碎片与花丛 | 待重新规划 |
-| 11 | 备份、恢复、稳定性与 MVP 封版 | 尚未开始 |
 
 阶段 8 的规则型 NPC 已完成，普通用户当前通过固定台词、固定选项和本地花园数据
 与伙伴互动，不再看到开放输入框或 AI/基础模式切换。阶段 7B 的 OpenAI Route、开放 Chat 组件、ChatMessage、
@@ -67,7 +70,8 @@
 `gpt-4.1-mini-2025-04-14`，不发送 reasoning 参数，保持 700 token 输出上限；六次正式请求全部完成并通过
 Zod。阶段 10 的图片输入、自动测试、构建和真实分析验收已经完成；语音录制、转写、数据层和自动测试也已实现，但真实
 语音兼容链路尚未稳定通过，因此普通创建与重新转写入口已隐藏，语音延期至 Post-MVP / Experimental。该延期不删除
-技术基础，也不再阻塞阶段 10 收敛或后续进入阶段 11。Embedding、相似碎片和花丛仍是后续候选，阶段 11 尚未开始。
+技术基础。阶段 11～13 按“内容型卡片 → 链接/图片延迟创建 → 发芽生成新卡片”顺序实施；阶段 14 才处理
+备份、恢复、稳定性与 MVP 封版。Embedding、相似碎片和花丛仍是后续候选。
 
 ---
 
@@ -698,7 +702,8 @@ Embedding、相似碎片或花丛，也不决定是否删除旧开放聊天代�
 
 阶段 10 最初计划补齐图片和语音。10A 图片输入、自动测试、构建与真实图片分析已经完成；10B 的语音录制、转写、
 数据层和自动测试已实现，但真实链路尚未稳定通过。当前 MVP 以文字、链接、图片和思维发芽完成核心闭环，语音延期为
-Post-MVP / Experimental。浏览器录音、媒体编码、权限和转写兼容成本不再阻塞 MVP 的稳定性与可展示性。阶段 11 尚未开始。
+Post-MVP / Experimental。浏览器录音、媒体编码、权限和转写兼容成本不再阻塞 MVP 的稳定性与可展示性。
+阶段 11～13 接续实施内容型笔记、延迟创建和发芽 2.0。
 
 ## 14.1 共同本地优先边界
 
@@ -740,7 +745,7 @@ Post-MVP / Experimental。浏览器录音、媒体编码、权限和转写兼容
 按顺序运行 `format:check`、`lint`、`typecheck`、`test`、两次连续 `test:e2e`、`build`、`npm ls phaser`、`npm ls openai` 和
 `git diff --check`。自动测试只使用 OpenAI/GetNote Mock；不得提交测试图片、音频、用户数据、报告或 `.env.local`。当前收敛
 不创建原计划的 `m3-ai-inputs`，也不创建替代 Tag。语音真实验收改为未来恢复普通入口的门槛，不再阻塞阶段 10 收敛；
-阶段 11 可在本次收敛完成后按独立任务开始，但当前尚未开始。Embedding、相似碎片、花丛、云端媒体、伙伴动画和像素视觉升级仍不得提前实施。
+阶段 10 收敛完成后按顺序进入阶段 11～13。Embedding、相似碎片、花丛、云端媒体、伙伴动画和像素视觉升级仍不得提前实施。
 
 建议 commits：
 
@@ -754,7 +759,83 @@ docs: document local-first media inputs
 
 ---
 
-# 15. 相似碎片与花丛（后续候选，暂缓）
+# 15. 阶段 11：内容型卡片与详情收敛（已完成）
+
+## 目标
+
+让正式卡片成为可阅读、可编辑的内容型笔记，花园继续独立表现生命周期与成长状态。
+
+## 范围
+
+- Dexie 升级到 V5，一次注册 `fragmentNotes` 与 `contentProcessingJobs`；阶段 11 只启用 notes；
+- 为历史和新 Fragment 统一提供 `contentMarkdown`，迁移时确定性转换现有文字、链接、图片和语音内容；
+- 合法旧 `text_added` Event 映射为独立 FragmentNote，同时保留 Event；伙伴建议不迁移、不展示；
+- 使用安全 Markdown 阅读组件和仅支持段落、标题、粗体、列表、引用、链接的轻量富文本编辑器；
+- 详情顶部只保留返回、编辑、删除，链接额外打开原链接；底部提供追加笔记和发芽；
+- 追加笔记独立创建、编辑、确认删除，不合并主体；
+- 卡片列表只显示标题、主体预览、更新时间及必要的链接/图片/历史语音标识，整卡可点击；
+- 生命周期、成长、系统 Event、处理状态和伙伴建议继续保留在底层，但不进入普通卡片与详情。
+
+## 门槛
+
+`format:check`、`lint`、`typecheck`、`test`、`test:e2e`、`build` 与 `git diff --check` 全部通过；历史
+Fragment、Blob、关系和状态均可读取，Canvas 最多一个。通过后创建阶段 11 本地 commit，不 push。
+
+实现采用受限 Lexical 编辑器和 `react-markdown` 安全阅读组件，不包含协作、云端或完整 Notion 能力。
+阶段 11 门槛已通过；V5 jobs store 仅预留，阶段 12 尚未开始。
+
+---
+
+# 16. 阶段 12：链接与图片处理成功后创建卡片
+
+## 目标
+
+用 V5 processing job 隔离第三方处理中间态，避免失败链接或图片在卡片列表和花园留下空内容。
+
+## 范围
+
+- 启用 `contentProcessingJobs` 的 link/image 分支；job 不属于 Fragment、不占 Plant slot；
+- 链接复用 URL 安全、去重、GetNote 披露和固定 connector，保存 provider task identity 并支持刷新恢复；
+- 图片 job 保存临时 Blob，复用图片披露与 `/api/media/image/analyze`，新输出主体为 `{ title, markdown }`；
+- 成功事务才创建 Fragment、Plant、created Event；图片同时创建唯一 MediaAsset 并清空 job 重复 Blob；
+- 失败保留可重试任务，取消删除任务；图片刷新中断后标记可手动重试，不自动重复计费；
+- 轻量任务入口、列表、状态、重试、取消和“查看笔记”，但任务不进入正式卡片列表。
+
+## 门槛
+
+文字仍立即创建；链接/图片提交和失败时正式数据数量不变，成功时只增加一次；两轮默认并行 E2E、构建和
+`git diff --check` 通过。通过后创建阶段 12 本地 commits，不 push。
+
+---
+
+# 17. 阶段 13：发芽 2.0
+
+## 目标
+
+基于当前卡片主体与全部用户追加笔记，生成一篇可编辑的新笔记；只有用户确认后才创建新卡片和新植物。
+
+## 范围
+
+- 保留旧 `/api/sprout/analyze` 与伙伴建议技术实现，普通 UI 改用独立 `/api/sprout/generate`；
+- 新 Route 使用 `sprout-generate-v1`、Responses API、`store: false`、strict Schema 和 Zod，只返回
+  `{ title, markdown }`；
+- sprout job 保存 source snapshot、request identity、生成结果和确认状态；关闭详情不取消任务；
+- 上下文只含当前 `contentMarkdown`、全部 user notes、必要来源与已发芽标题；不含伙伴建议、Blob、
+  其他 Fragment、生命周期或成长字段；
+- 生成结果先预览并用阶段 11 编辑器修改；放弃或失败不创建正式数据；
+- 确认事务幂等创建 text Fragment、Plant、created Event 与 confirmed `grows_from` 关系；原卡片内容不变，
+  不写 `child_fragment_created` 或 `partner_suggestion_saved`；
+- 原卡片和新卡片轻量展示可点击来源关系，新卡片可以再次发芽。
+
+## 门槛
+
+生成、完成、放弃和失败都不提前创建 Fragment；确认只创建一次；source 不变；旧 analyze 普通请求为 0；
+图片/语音不发送原始媒体；两轮默认并行 E2E、全量构建与依赖检查通过。通过后创建阶段 13 本地 commits，
+不 push、不创建 Tag。
+
+---
+
+# 18. 相似碎片与花丛（后续候选，暂缓）
 
 ## 目标
 
@@ -793,7 +874,7 @@ test: cover similarity ranking and user control
 
 ---
 
-# 16. 阶段 11：备份、恢复、稳定性与 MVP 封版（尚未开始）
+# 19. 阶段 14：备份、恢复、稳定性与 MVP 封版（尚未开始）
 
 ## 目标
 
@@ -834,7 +915,7 @@ docs: update MVP run and backup guide
 
 ---
 
-# 17. 一周自测与 MVP 收口（后续候选，待重排）
+# 20. 一周自测与 MVP 收口（后续候选，待重排）
 
 ## 目标
 
@@ -890,7 +971,7 @@ chore: tag MVP v0.1
 
 ---
 
-## 18. 里程碑标签（历史建议，待重新规划）
+## 21. 里程碑标签（历史建议，待重新规划）
 
 建议在关键节点创建 Git tag：
 
@@ -899,7 +980,7 @@ m0-foundation       阶段 1 完成
 m1-card-loop        阶段 2 完成
 m2-garden-loop      阶段 5 完成
 m3-ai-inputs        原计划；因语音延期，本次不创建
-mvp-v1（示例）      阶段 11 完成并通过 MVP 封版验收后再确定名称
+mvp-v1（示例）      阶段 14 完成并通过 MVP 封版验收后再确定名称
 v0.1                一周自测收口（待重新规划）
 ```
 

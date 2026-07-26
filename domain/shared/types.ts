@@ -13,6 +13,10 @@ export type MediaAssetKind = "image" | "audio";
 export type MediaProcessingStatus =
   "local_only" | "pending" | "processing" | "completed" | "failed";
 export type ImageContentKind = "screenshot" | "document" | "photo" | "diagram" | "other";
+export type FragmentNoteSource = "user";
+export type ContentProcessingJobKind = "link" | "image" | "sprout";
+export type ContentProcessingJobStatus =
+  "pending" | "processing" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
 
 export type FragmentEventType =
   | "created"
@@ -131,6 +135,7 @@ export type Fragment = {
   title: string;
   rawText: string | null;
   sourceUrl: string | null;
+  contentMarkdown: string;
 
   summary: string | null;
   keywords: string[];
@@ -146,6 +151,40 @@ export type Fragment = {
   updatedAt: string;
   lastInteractedAt: string;
   completedAt: string | null;
+};
+
+export type FragmentNote = {
+  id: string;
+  fragmentId: string;
+  contentMarkdown: string;
+  source: FragmentNoteSource;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * V5 reserves the complete processing-job store up front. Stage 11 does not
+ * create these records; link, image, and sprout workflows activate it later.
+ */
+export type ContentProcessingJob = {
+  id: string;
+  kind: ContentProcessingJobKind;
+  status: ContentProcessingJobStatus;
+  sourceUrl: string | null;
+  sourceBlob: Blob | null;
+  sourceMimeType: string | null;
+  sourceFileName: string | null;
+  sourceFragmentId: string | null;
+  sourceSnapshot: string | null;
+  createdFragmentId: string | null;
+  providerTaskId: string | null;
+  processingRequestId: string | null;
+  resultTitle: string | null;
+  resultMarkdown: string | null;
+  errorCode: string | null;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Attachment = {

@@ -8,6 +8,10 @@ import type {
   MediaAssetKind,
   MediaProcessingStatus,
 } from "../../domain";
+import {
+  markdownToPlainText,
+  resolveFragmentContentMarkdown,
+} from "../../domain/fragments/content-markdown";
 export {
   filterAndSortFragmentCards,
   filterFragmentCardsByStatus,
@@ -25,6 +29,7 @@ export type FragmentCardViewModel = {
   plantId: string;
   contentType: FragmentContentType;
   title: string;
+  contentMarkdown: string;
   rawText: string;
   excerpt: string;
   searchText: string;
@@ -34,6 +39,7 @@ export type FragmentCardViewModel = {
   linkImportStatus: LinkImportStatus | null;
   linkImportErrorMessage: string | null;
   createdAt: string;
+  updatedAt: string;
   lastInteractedAt: string;
   lifecycleStatus: FragmentLifecycleStatus;
   completionStatus: FragmentCompletionStatus;
@@ -44,6 +50,7 @@ export type FragmentCardViewModel = {
   mediaProcessingStatus: MediaProcessingStatus | null;
   mediaSizeBytes: number | null;
   mediaDurationMs: number | null;
+  mediaBlob: Blob | null;
 };
 
 function deriveFragmentExcerpt(rawText: string): string {
@@ -113,9 +120,13 @@ export function listFragmentCardViewModels(
         }
 
         const rawText = fragment.rawText ?? "";
-        const excerptSource =
-          fragment.contentType === "link" ? (fragment.summary ?? rawText) : rawText;
-        const searchText = [rawText, fragment.summary, fragment.sourceUrl]
+        const contentMarkdown = resolveFragmentContentMarkdown(
+          fragment,
+          linkImport ?? null,
+          mediaAsset ?? null,
+        );
+        const readableContent = markdownToPlainText(contentMarkdown);
+        const searchText = [readableContent, rawText, fragment.summary, fragment.sourceUrl]
           .filter((value): value is string => value !== null && value.length > 0)
           .join(" ");
 
@@ -124,8 +135,9 @@ export function listFragmentCardViewModels(
           plantId: plant.id,
           contentType: fragment.contentType,
           title: fragment.title,
+          contentMarkdown,
           rawText,
-          excerpt: deriveFragmentExcerpt(excerptSource),
+          excerpt: deriveFragmentExcerpt(readableContent),
           searchText,
           sourceUrl: fragment.sourceUrl,
           sourceHostname: deriveSourceHostname(fragment.sourceUrl),
@@ -133,6 +145,7 @@ export function listFragmentCardViewModels(
           linkImportStatus: linkImport?.status ?? null,
           linkImportErrorMessage: linkImport?.errorMessage ?? null,
           createdAt: fragment.createdAt,
+          updatedAt: fragment.updatedAt,
           lastInteractedAt: fragment.lastInteractedAt,
           lifecycleStatus: fragment.lifecycleStatus,
           completionStatus: fragment.completionStatus,
@@ -143,6 +156,7 @@ export function listFragmentCardViewModels(
           mediaProcessingStatus: mediaAsset?.processingStatus ?? null,
           mediaSizeBytes: mediaAsset?.sizeBytes ?? null,
           mediaDurationMs: mediaAsset?.durationMs ?? null,
+          mediaBlob: mediaAsset?.kind === "image" ? mediaAsset.blob : null,
         };
       });
     },

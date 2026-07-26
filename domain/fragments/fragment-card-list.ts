@@ -1,6 +1,6 @@
 import type { FragmentCompletionStatus, FragmentLifecycleStatus } from "../shared/types";
 
-export type FragmentCardSort = "created_desc" | "created_asc" | "interacted_desc";
+export type FragmentCardSort = "updated_desc" | "created_desc" | "created_asc" | "interacted_desc";
 export type FragmentCardFilter = "current" | "dormant" | "completed" | "archived";
 
 export type SearchableFragmentCard = {
@@ -10,6 +10,7 @@ export type SearchableFragmentCard = {
   searchText?: string;
   createdAt: string;
   lastInteractedAt: string;
+  updatedAt?: string;
 };
 
 export type FilterableFragmentCard = {
@@ -72,6 +73,12 @@ export function filterAndSortFragmentCards<T extends SearchableFragmentCard>(
     let primaryComparison: number;
 
     switch (sort) {
+      case "updated_desc":
+        primaryComparison = compareTimestamps(
+          right.updatedAt ?? right.lastInteractedAt,
+          left.updatedAt ?? left.lastInteractedAt,
+        );
+        break;
       case "created_asc":
         primaryComparison = compareTimestamps(left.createdAt, right.createdAt);
         break;

@@ -1,4 +1,9 @@
-import type { Fragment, MediaAsset } from "../domain";
+import {
+  normalizeContentMarkdown,
+  resolveFragmentContentMarkdown,
+  type Fragment,
+  type MediaAsset,
+} from "../domain";
 import { FragmentGardenDatabase, fragmentGardenDb } from "../data/db";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { MediaAssetRepository } from "../data/repositories/media-asset-repository";
@@ -28,6 +33,16 @@ export type AudioProcessingResult = Readonly<{
   asset: MediaAsset;
   fragment: Fragment;
 }>;
+
+function canReplaceGeneratedContent(fragment: Fragment, mediaAsset: MediaAsset): boolean {
+  const current = normalizeContentMarkdown(fragment.contentMarkdown ?? "");
+  const expected = resolveFragmentContentMarkdown(
+    { ...fragment, contentMarkdown: undefined },
+    null,
+    mediaAsset,
+  );
+  return current.length === 0 || current === expected;
+}
 
 function normalizeAudioErrorCode(errorCode: unknown): AudioTranscriptionApiErrorCode {
   const parsed = audioTranscriptionApiErrorCodeSchema.safeParse(errorCode);
@@ -145,26 +160,32 @@ export async function applyAudioTranscriptionResult(
     };
     await assets.put(updatedAsset);
 
-    if (fragment.analysisStatus !== "completed") {
-      await fragments.update(fragment.id, { analysisStatus: "completed", updatedAt: timestamp });
-    }
-
     const shouldUpdateTitle =
       generatedTitle !== null &&
       asset.temporaryTitle !== null &&
       fragment.title === asset.temporaryTitle;
+    const shouldUpdateContent = canReplaceGeneratedContent(fragment, asset);
+    const contentMarkdown = resolveFragmentContentMarkdown(
+      { ...fragment, contentMarkdown: undefined },
+      null,
+      updatedAsset,
+    );
     const updatedFragment: Fragment = {
       ...fragment,
       analysisStatus: "completed",
       ...(shouldUpdateTitle ? { title: generatedTitle } : {}),
+      ...(shouldUpdateContent ? { contentMarkdown } : {}),
       updatedAt: timestamp,
     };
-    if (shouldUpdateTitle) {
-      requireRecordUpdated(
-        await fragments.update(fragment.id, { title: generatedTitle, updatedAt: timestamp }),
-        "Fragment",
-      );
-    }
+    requireRecordUpdated(
+      await fragments.update(fragment.id, {
+        analysisStatus: "completed",
+        ...(shouldUpdateTitle ? { title: generatedTitle } : {}),
+        ...(shouldUpdateContent ? { contentMarkdown } : {}),
+        updatedAt: timestamp,
+      }),
+      "Fragment",
+    );
 
     return { asset: updatedAsset, fragment: updatedFragment };
   });
@@ -308,11 +329,18 @@ export async function updateAudioTranscript(
         transcriptEditedAt: timestamp,
         updatedAt: timestamp,
       };
+      const shouldUpdateContent = canReplaceGeneratedContent(fragment, asset);
+      const contentMarkdown = resolveFragmentContentMarkdown(
+        { ...fragment, contentMarkdown: undefined },
+        null,
+        updated,
+      );
 
       await assets.put(updated);
       requireRecordUpdated(
         await fragments.update(fragment.id, {
           lifecycleStatus: updatedFragment.lifecycleStatus,
+          ...(shouldUpdateContent ? { contentMarkdown } : {}),
           updatedAt: timestamp,
           lastInteractedAt: timestamp,
         }),

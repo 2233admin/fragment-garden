@@ -1,10 +1,12 @@
 import type {
   ExternalLinkImport,
   Fragment,
+  FragmentNote,
   MediaAsset,
   Plant,
   SproutRecommendedAction,
 } from "../../domain";
+import { resolveFragmentContentMarkdown } from "../../domain/fragments/content-markdown";
 import {
   safelyParseArchivedEventPayload,
   safelyParseChildFragmentCreatedEventPayload,
@@ -19,6 +21,7 @@ import { ExternalLinkImportRepository } from "../repositories/external-link-impo
 import { FragmentEventRepository } from "../repositories/fragment-event-repository";
 import { FragmentRelationRepository } from "../repositories/fragment-relation-repository";
 import { FragmentRepository } from "../repositories/fragment-repository";
+import { FragmentNoteRepository } from "../repositories/fragment-note-repository";
 import { PlantRepository } from "../repositories/plant-repository";
 import { MediaAssetRepository } from "../repositories/media-asset-repository";
 
@@ -64,6 +67,8 @@ export type FragmentHistoryItemViewModel = {
 
 export type FragmentDetailViewModel = {
   fragment: Fragment;
+  contentMarkdown: string;
+  notes: FragmentNote[];
   plant: Plant;
   mediaAsset: MediaAsset | null;
   externalLinkImport: ExternalLinkImport | null;
@@ -114,6 +119,7 @@ export function getFragmentDetailViewModel(
   database: FragmentGardenDatabase = fragmentGardenDb,
 ): Promise<FragmentDetailViewModel | undefined> {
   const fragmentRepository = new FragmentRepository(database);
+  const fragmentNoteRepository = new FragmentNoteRepository(database);
   const plantRepository = new PlantRepository(database);
   const externalLinkImportRepository = new ExternalLinkImportRepository(database);
   const fragmentEventRepository = new FragmentEventRepository(database);
@@ -124,6 +130,7 @@ export function getFragmentDetailViewModel(
     "r",
     [
       database.fragments,
+      database.fragmentNotes,
       database.plants,
       database.fragmentEvents,
       database.relations,
@@ -136,6 +143,7 @@ export function getFragmentDetailViewModel(
         plant,
         externalLinkImport,
         mediaAsset,
+        notes,
         events,
         sourceRelations,
         childRelations,
@@ -144,6 +152,7 @@ export function getFragmentDetailViewModel(
         plantRepository.getByFragmentId(fragmentId),
         externalLinkImportRepository.getByFragmentId(fragmentId),
         mediaAssetRepository.getByFragmentId(fragmentId),
+        fragmentNoteRepository.listByFragmentId(fragmentId),
         fragmentEventRepository.listByFragmentId(fragmentId),
         fragmentRelationRepository.listBySourceFragmentId(fragmentId),
         fragmentRelationRepository.listByTargetFragmentId(fragmentId),
@@ -309,6 +318,12 @@ export function getFragmentDetailViewModel(
 
       return {
         fragment,
+        contentMarkdown: resolveFragmentContentMarkdown(
+          fragment,
+          externalLinkImport ?? null,
+          mediaAsset ?? null,
+        ),
+        notes,
         plant,
         mediaAsset: mediaAsset ?? null,
         externalLinkImport: externalLinkImport ?? null,

@@ -1,11 +1,14 @@
 import {
   calculateGrowthScore,
+  normalizeContentMarkdown,
   resolvePlantStage,
   type Fragment,
   type FragmentEvent,
+  type FragmentNote,
   type Plant,
 } from "../domain";
 import { FragmentEventRepository } from "../data/repositories/fragment-event-repository";
+import { FragmentNoteRepository } from "../data/repositories/fragment-note-repository";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { PlantRepository } from "../data/repositories/plant-repository";
 import {
@@ -22,11 +25,12 @@ import {
 
 export type AddTextSupplementInput = {
   fragmentId: string;
-  text: string;
+  contentMarkdown: string;
 };
 
 export type AddTextSupplementResult = {
   fragment: Fragment;
+  note: FragmentNote;
   plant: Plant;
   textAddedEvent: FragmentEvent;
   restoredEvent: FragmentEvent | null;
@@ -36,18 +40,21 @@ export async function addTextSupplement(
   input: AddTextSupplementInput,
   dependencies: LocalServiceDependencies = {},
 ): Promise<AddTextSupplementResult> {
-  const payload = parseTextAddedEventPayload({ text: input.text });
+  const contentMarkdown = normalizeContentMarkdown(input.contentMarkdown);
+  const payload = parseTextAddedEventPayload({ text: contentMarkdown });
   const restoredPayload = parseRestoredEventPayload({ reason: "content_updated" });
   const { database, createId, timestamp } = resolveLocalServiceDependencies(dependencies);
   const fragmentRepository = new FragmentRepository(database);
   const plantRepository = new PlantRepository(database);
   const fragmentEventRepository = new FragmentEventRepository(database);
+  const fragmentNoteRepository = new FragmentNoteRepository(database);
 
   return database.transaction(
     "rw",
     database.fragments,
     database.plants,
     database.fragmentEvents,
+    database.fragmentNotes,
     async () => {
       const [fragment, plant, existingEvents] = await Promise.all([
         fragmentRepository.getById(input.fragmentId),
@@ -67,6 +74,14 @@ export async function addTextSupplement(
 
       const wasDormant = fragment.lifecycleStatus === "dormant";
       const isArchived = fragment.lifecycleStatus === "archived";
+      const note: FragmentNote = {
+        id: createId(),
+        fragmentId: fragment.id,
+        contentMarkdown,
+        source: "user",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
       const textAddedEvent: FragmentEvent = {
         id: createId(),
         fragmentId: fragment.id,
@@ -125,12 +140,14 @@ export async function addTextSupplement(
         "Plant",
       );
       await fragmentEventRepository.add(textAddedEvent);
+      await fragmentNoteRepository.add(note);
       if (restoredEvent !== null) {
         await fragmentEventRepository.add(restoredEvent);
       }
 
       return {
         fragment: updatedFragment,
+        note,
         plant: updatedPlant,
         textAddedEvent,
         restoredEvent,

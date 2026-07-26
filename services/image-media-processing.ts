@@ -1,4 +1,9 @@
-import type { Fragment, MediaAsset } from "../domain";
+import {
+  normalizeContentMarkdown,
+  resolveFragmentContentMarkdown,
+  type Fragment,
+  type MediaAsset,
+} from "../domain";
 import { FragmentGardenDatabase, fragmentGardenDb } from "../data/db";
 import { FragmentRepository } from "../data/repositories/fragment-repository";
 import { MediaAssetRepository } from "../data/repositories/media-asset-repository";
@@ -20,6 +25,16 @@ export type ImageProcessingResult = Readonly<{
   asset: MediaAsset;
   fragment: Fragment;
 }>;
+
+function canReplaceGeneratedContent(fragment: Fragment, mediaAsset: MediaAsset): boolean {
+  const current = normalizeContentMarkdown(fragment.contentMarkdown ?? "");
+  const expected = resolveFragmentContentMarkdown(
+    { ...fragment, contentMarkdown: undefined },
+    null,
+    mediaAsset,
+  );
+  return current.length === 0 || current === expected;
+}
 
 function nowDependencies(database: FragmentGardenDatabase, now: Date): LocalServiceDependencies {
   return { database, now: () => now };
@@ -120,16 +135,24 @@ export async function applyImageAnalysisResult(
     await assets.put(updatedAsset);
     const shouldUpdateTitle =
       asset.temporaryTitle !== null && fragment.title === asset.temporaryTitle;
+    const shouldUpdateContent = canReplaceGeneratedContent(fragment, asset);
+    const contentMarkdown = resolveFragmentContentMarkdown(
+      { ...fragment, contentMarkdown: undefined },
+      null,
+      updatedAsset,
+    );
     const updatedFragment: Fragment = {
       ...fragment,
       analysisStatus: "completed",
       ...(shouldUpdateTitle ? { title: parsed.data.title } : {}),
+      ...(shouldUpdateContent ? { contentMarkdown } : {}),
       updatedAt: timestamp,
     };
     requireRecordUpdated(
       await fragments.update(fragment.id, {
         analysisStatus: "completed",
         ...(shouldUpdateTitle ? { title: parsed.data.title } : {}),
+        ...(shouldUpdateContent ? { contentMarkdown } : {}),
         updatedAt: timestamp,
       }),
       "Fragment",

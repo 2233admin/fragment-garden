@@ -3,6 +3,7 @@ export * from "./companion/context-builder";
 export * from "./companion/npc";
 export * from "./companion/settings";
 export * from "./fragments/dormancy";
+export * from "./fragments/content-markdown";
 export * from "./fragments/fragment-card-list";
 export * from "./fragments/local-fragment-title";
 export * from "./garden/companion-view-model";

@@ -66,6 +66,12 @@ describe("content processing UI", () => {
             status: "failed",
           }),
           createLinkProcessingJobRecord({
+            errorCode: "local_storage_full",
+            errorMessage: "private-storage-detail",
+            id: "quota-job",
+            status: "failed",
+          }),
+          createLinkProcessingJobRecord({
             createdFragmentId: "fragment-1",
             id: "completed-job",
             resultTitle: "整理后的笔记",
@@ -90,6 +96,8 @@ describe("content processing UI", () => {
     expect(markup).not.toContain("private-provider-task");
     expect(markup).not.toContain("private-error-code");
     expect(markup).not.toContain("private-provider-message");
+    expect(markup).not.toContain("private-storage-detail");
+    expect(markup).toContain("当前浏览器的本地存储空间不足");
   });
 
   it("removes the local-only action from the new image creation disclosure", () => {

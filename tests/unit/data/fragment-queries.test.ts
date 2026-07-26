@@ -164,6 +164,23 @@ describe("listFragmentCardViewModels", () => {
     await expect(listFragmentCardViewModels(database)).rejects.toThrow("Plant not found");
   });
 
+  it("limits long card content to a stable 120-character preview", async () => {
+    const longFragment = createStageTwoFragment({
+      id: "long-fragment",
+      contentMarkdown: "长".repeat(500),
+      rawText: null,
+    });
+    await database.fragments.add(longFragment);
+    await database.plants.add(
+      createStageTwoPlant({ id: "long-plant", fragmentId: longFragment.id }),
+    );
+
+    const [card] = await listFragmentCardViewModels(database);
+    expect(card?.excerpt).toHaveLength(120);
+    expect(card?.excerpt.endsWith("…")).toBe(true);
+    expect(card?.excerpt).not.toContain("长".repeat(200));
+  });
+
   it("keeps historical voice fragments and their local media available", async () => {
     const fragment = createStageTwoFragment({
       id: "voice-fragment",
@@ -207,8 +224,9 @@ describe("listFragmentCardViewModels", () => {
         id: fragment.id,
         contentType: "audio",
         mediaKind: "audio",
-        mediaDurationMs: 12_000,
-        mediaProcessingStatus: "completed",
+        mediaBlob: null,
+        mediaDurationMs: null,
+        mediaProcessingStatus: null,
       }),
     ]);
 

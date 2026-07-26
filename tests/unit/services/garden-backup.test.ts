@@ -12,10 +12,12 @@ import {
 import {
   createGardenBackup,
   GardenBackupError,
+  gardenBackupErrorMessage,
   MAX_GARDEN_BACKUP_BYTES,
   preflightGardenBackup,
   restoreGardenBackup,
 } from "../../../services/garden-backup";
+import { LOCAL_STORAGE_FULL_MESSAGE } from "../../../services/local-persistence-error";
 import { fragmentGardenBackupContainerSchema } from "../../../validation/garden-backup";
 import { BACKUP_TEST_TIME, seedCompleteGarden } from "./garden-backup-fixtures";
 
@@ -185,8 +187,15 @@ describe("garden backup export and restore", () => {
       relationType: "grows_from",
       status: "confirmed",
     });
-    expect(await (await database.mediaAssets.get("image-asset"))?.blob.text()).toBe("image-binary");
-    expect(await (await database.mediaAssets.get("audio-asset"))?.blob.text()).toBe("audio-binary");
+    await expect(database.mediaAssets.get("image-asset")).resolves.toMatchObject({
+      mimeType: "image/png",
+      width: 1,
+      height: 1,
+    });
+    await expect(database.mediaAssets.get("audio-asset")).resolves.toMatchObject({
+      mimeType: "audio/webm",
+      transcript: "编辑后的历史转写",
+    });
     await expect(database.chatMessages.get("legacy-chat")).resolves.toBeDefined();
     await expect(database.fragmentEvents.get("legacy-partner-event")).resolves.toBeDefined();
     await expect(database.externalLinkImports.get("legacy-link-import")).resolves.toMatchObject({
@@ -201,7 +210,7 @@ describe("garden backup export and restore", () => {
       errorCode: "restored_interrupted",
     });
     expect((await database.contentProcessingJobs.get("pending-image-job"))?.sourceBlob?.size).toBe(
-      new Blob(["pending-image"]).size,
+      (await database.mediaAssets.get("image-asset"))?.blob.size,
     );
     await expect(database.contentProcessingJobs.get("sprout-preview-job")).resolves.toMatchObject({
       status: "awaiting_confirmation",
@@ -260,8 +269,17 @@ describe("garden backup export and restore", () => {
     const damagedMedia = await parseBackup(exported.blob);
     const mediaRow = tableRows(damagedMedia, "mediaAssets")[0]!;
     const encodedBlob = mediaRow.blob as Record<string, unknown>;
-    encodedBlob.data = "AA==";
+    encodedBlob.data = String(encodedBlob.data).replace(/[A-Za-z0-9]/gu, "A");
     await expect(preflightGardenBackup(await resignBackup(damagedMedia))).rejects.toMatchObject({
+      code: "incomplete_backup",
+    });
+
+    const damagedAudio = await parseBackup(exported.blob);
+    const audioRow = tableRows(damagedAudio, "mediaAssets").find((row) => row.kind === "audio");
+    if (audioRow === undefined) throw new Error("Missing audio fixture");
+    const encodedAudio = audioRow.blob as Record<string, unknown>;
+    encodedAudio.data = String(encodedAudio.data).replace(/[A-Za-z0-9]/gu, "A");
+    await expect(preflightGardenBackup(await resignBackup(damagedAudio))).rejects.toMatchObject({
       code: "incomplete_backup",
     });
   });
@@ -288,6 +306,35 @@ describe("garden backup export and restore", () => {
     await expect(database.mediaAssets.count()).resolves.toBe(0);
   });
 
+  it("rolls back quota failures and reports local storage instead of a provider error", async () => {
+    await seedCompleteGarden(database);
+    const backup = await createGardenBackup({ database });
+    await database.transaction("rw", database.tables, async () => {
+      for (const table of database.tables) await table.clear();
+      await database.fragments.add(currentFragment());
+      await database.plants.add(currentPlant());
+    });
+
+    let restoreError: unknown;
+    try {
+      await restoreGardenBackup(backup.blob, {
+        database,
+        beforeTableWrite: (tableName) => {
+          if (tableName === "mediaAssets") {
+            throw new DOMException("storage full", "QuotaExceededError");
+          }
+        },
+      });
+    } catch (error) {
+      restoreError = error;
+    }
+
+    expect(gardenBackupErrorMessage(restoreError)).toBe(LOCAL_STORAGE_FULL_MESSAGE);
+    await expect(database.fragments.toArray()).resolves.toEqual([currentFragment()]);
+    await expect(database.plants.toArray()).resolves.toEqual([currentPlant()]);
+    await expect(database.mediaAssets.count()).resolves.toBe(0);
+  });
+
   it("removes its validation database and returns no successful export on failure", async () => {
     const exported = await createGardenBackup({ database });
     await preflightGardenBackup(exported.blob, { createId: () => "known-temp" });
@@ -299,5 +346,17 @@ describe("garden backup export and restore", () => {
         exportDatabase: async () => Promise.reject(new Error("simulated export failure")),
       }),
     ).rejects.toMatchObject({ code: "export_failed" });
+
+    let quotaExportError: unknown;
+    try {
+      await createGardenBackup({
+        database,
+        exportDatabase: async () =>
+          Promise.reject(new DOMException("storage full", "QuotaExceededError")),
+      });
+    } catch (error) {
+      quotaExportError = error;
+    }
+    expect(gardenBackupErrorMessage(quotaExportError)).toBe(LOCAL_STORAGE_FULL_MESSAGE);
   });
 });

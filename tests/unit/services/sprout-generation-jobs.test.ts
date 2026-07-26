@@ -397,6 +397,13 @@ describe("sprout generation jobs", () => {
     await expect(database.fragments.count()).resolves.toBe(2);
     await expect(database.plants.count()).resolves.toBe(2);
     await expect(database.relations.count()).resolves.toBe(1);
+    await expect(database.contentProcessingJobs.get("sprout-job")).resolves.toMatchObject({
+      status: "completed",
+      sourceSnapshot: null,
+      providerTaskId: null,
+      processingRequestId: null,
+      resultMarkdown: null,
+    });
 
     const sourceDetail = await getFragmentDetailViewModel(SOURCE_ID, database);
     const childDetail = await getFragmentDetailViewModel("new-fragment", database);
@@ -437,11 +444,58 @@ describe("sprout generation jobs", () => {
     await expect(database.fragments.get("full-fragment")).resolves.toBeDefined();
   });
 
+  it("confirms the same preview only once across database connections", async () => {
+    await seedTextSource();
+    await createAndProcessJob("cross-tab-sprout-job");
+    const secondDatabase = new FragmentGardenDatabase(database.name);
+    await secondDatabase.open();
+
+    try {
+      const results = await Promise.all([
+        confirmSproutGeneration(
+          { jobId: "cross-tab-sprout-job", title: "跨标签页发芽", markdown: "唯一正文" },
+          {
+            database,
+            createId: createIdSequence([
+              "tab-one-fragment",
+              "tab-one-plant",
+              "tab-one-event",
+              "tab-one-relation",
+            ]),
+          },
+        ),
+        confirmSproutGeneration(
+          { jobId: "cross-tab-sprout-job", title: "重复确认", markdown: "不应创建" },
+          {
+            database: secondDatabase,
+            createId: createIdSequence([
+              "tab-two-fragment",
+              "tab-two-plant",
+              "tab-two-event",
+              "tab-two-relation",
+            ]),
+          },
+        ),
+      ]);
+
+      expect(results.filter((result) => result.created)).toHaveLength(1);
+      expect(new Set(results.map((result) => result.fragmentId)).size).toBe(1);
+      await expect(database.fragments.count()).resolves.toBe(2);
+      await expect(database.plants.count()).resolves.toBe(2);
+      await expect(database.relations.count()).resolves.toBe(1);
+      await expect(
+        database.contentProcessingJobs.get("cross-tab-sprout-job"),
+      ).resolves.toMatchObject({ status: "completed", sourceSnapshot: null, resultMarkdown: null });
+    } finally {
+      secondDatabase.close();
+    }
+  });
+
   it("rolls back confirmation completely when the relation write fails", async () => {
     await seedTextSource();
     await createAndProcessJob("rollback-job");
     vi.spyOn(database.relations, "add").mockRejectedValueOnce(
-      new Error("simulated relation failure"),
+      new DOMException("storage full", "QuotaExceededError"),
     );
 
     await expect(
@@ -457,7 +511,7 @@ describe("sprout generation jobs", () => {
           ]),
         },
       ),
-    ).rejects.toThrow("simulated relation failure");
+    ).rejects.toMatchObject({ name: "QuotaExceededError" });
 
     await expect(database.fragments.get("rollback-fragment")).resolves.toBeUndefined();
     await expect(database.plants.get("rollback-plant")).resolves.toBeUndefined();
@@ -471,6 +525,34 @@ describe("sprout generation jobs", () => {
       updatedAt: CREATED_AT,
       lastInteractedAt: CREATED_AT,
     });
+  });
+
+  it("marks a provider result as locally failed when its preview cannot be persisted", async () => {
+    await seedTextSource();
+    await createSproutGenerationJob(SOURCE_ID, {
+      database,
+      createId: () => "quota-preview-job",
+    });
+    let didThrow = false;
+    database.contentProcessingJobs.hook("updating", (changes) => {
+      if (!didThrow && (changes as { status?: unknown }).status === "awaiting_confirmation") {
+        didThrow = true;
+        throw new DOMException("storage full", "QuotaExceededError");
+      }
+    });
+
+    await expect(
+      processSproutGenerationJob("quota-preview-job", {
+        apiClient: successfulClient(),
+        dependencies: { database, createId: () => "quota-request" },
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "local_storage_full",
+    });
+    await expect(database.fragments.count()).resolves.toBe(1);
+    await expect(database.plants.count()).resolves.toBe(1);
+    await expect(database.relations.count()).resolves.toBe(0);
   });
 
   it("cancels without formal writes and ignores the response that arrives later", async () => {
@@ -507,7 +589,9 @@ describe("sprout generation jobs", () => {
     await expect(processing).resolves.toBeNull();
     await expect(database.contentProcessingJobs.get("cancelled-job")).resolves.toMatchObject({
       status: "cancelled",
+      sourceSnapshot: null,
       resultTitle: null,
+      resultMarkdown: null,
     });
     await expect(database.fragments.count()).resolves.toBe(1);
     await expect(database.plants.count()).resolves.toBe(1);

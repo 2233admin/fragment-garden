@@ -145,6 +145,20 @@ describe("image processing jobs", () => {
     await expect(database.fragmentEvents.count()).resolves.toBe(0);
   });
 
+  it("creates no partial task when local storage is full", async () => {
+    database.contentProcessingJobs.hook("creating", () => {
+      throw new DOMException("storage full", "QuotaExceededError");
+    });
+
+    await expect(createJob("quota-create-job")).rejects.toMatchObject({
+      name: "QuotaExceededError",
+    });
+    await expect(database.contentProcessingJobs.count()).resolves.toBe(0);
+    await expect(database.fragments.count()).resolves.toBe(0);
+    await expect(database.plants.count()).resolves.toBe(0);
+    await expect(database.mediaAssets.count()).resolves.toBe(0);
+  });
+
   it("binds completion to the active request and atomically creates formal records once", async () => {
     await createJob();
     await beginImageProcessingJob("image-job", "request-current", {
@@ -432,5 +446,70 @@ describe("image processing jobs", () => {
       sourceBlob: expect.any(Blob),
       createdFragmentId: null,
     });
+  });
+
+  it("keeps the retryable image Blob and classifies quota failure as local", async () => {
+    await createJob("quota-finalize-job");
+    database.mediaAssets.hook("creating", () => {
+      throw new DOMException("storage full", "QuotaExceededError");
+    });
+
+    await expect(
+      processImageProcessingJob(
+        "quota-finalize-job",
+        {
+          clientRequestId: "quota-request",
+          fetchImplementation: async () => completedApiResponse("quota-request"),
+        },
+        database,
+      ),
+    ).rejects.toMatchObject({ name: "QuotaExceededError" });
+
+    await expect(database.contentProcessingJobs.get("quota-finalize-job")).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "local_storage_full",
+      errorMessage:
+        "当前浏览器的本地存储空间不足。你的已有内容没有被修改，可以删除不需要的内容后重试。",
+      sourceBlob: expect.any(Blob),
+      createdFragmentId: null,
+    });
+    await expect(database.fragments.count()).resolves.toBe(0);
+    await expect(database.plants.count()).resolves.toBe(0);
+    await expect(database.mediaAssets.count()).resolves.toBe(0);
+    await expect(database.fragmentEvents.count()).resolves.toBe(0);
+  });
+
+  it("serializes the same image job across database connections", async () => {
+    await createJob("cross-tab-image-job");
+    const secondDatabase = new FragmentGardenDatabase(database.name);
+    await secondDatabase.open();
+    const fetchImplementation = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestId = String((init?.body as FormData).get("clientRequestId"));
+      return completedApiResponse(requestId);
+    });
+
+    try {
+      const results = await Promise.all([
+        processImageProcessingJob(
+          "cross-tab-image-job",
+          { clientRequestId: "tab-one", fetchImplementation },
+          database,
+        ),
+        processImageProcessingJob(
+          "cross-tab-image-job",
+          { clientRequestId: "tab-two", fetchImplementation },
+          secondDatabase,
+        ),
+      ]);
+
+      expect(fetchImplementation).toHaveBeenCalledOnce();
+      expect(results.filter((result) => result !== null)).toHaveLength(1);
+      await expect(database.fragments.count()).resolves.toBe(1);
+      await expect(database.plants.count()).resolves.toBe(1);
+      await expect(database.mediaAssets.count()).resolves.toBe(1);
+      await expect(database.fragmentEvents.count()).resolves.toBe(1);
+    } finally {
+      secondDatabase.close();
+    }
   });
 });

@@ -7,6 +7,7 @@ import {
   deriveAudioTitleFromTranscript,
   normalizeAudioMimeType,
   normalizeAudioTranscript,
+  validateAudioBlob,
   validateAudioMediaMetadata,
 } from "../../../validation/media-audio";
 
@@ -48,5 +49,23 @@ describe("audio media validation", () => {
     );
     expect(deriveAudioTitleFromTranscript("  记录今天的想法。\n第二句")).toBe("记录今天的想法");
     expect(deriveAudioTitleFromTranscript("\n---\n")).toBeNull();
+  });
+
+  it.each([
+    ["audio/webm", [0x1a, 0x45, 0xdf, 0xa3]],
+    ["audio/ogg", [...new TextEncoder().encode("OggS")]],
+    ["audio/wav", [...new TextEncoder().encode("RIFF0000WAVE")]],
+    ["audio/mpeg", [...new TextEncoder().encode("ID3")]],
+    ["audio/mp4", [0, 0, 0, 12, ...new TextEncoder().encode("ftypM4A ")]],
+  ])("checks persisted %s container bytes", async (mimeType, bytes) => {
+    await expect(
+      validateAudioBlob(new Blob([Uint8Array.from(bytes)], { type: mimeType })),
+    ).resolves.toMatchObject({ mimeType });
+  });
+
+  it("rejects same-sized random audio bytes with a forged MIME type", async () => {
+    await expect(
+      validateAudioBlob(new Blob([Uint8Array.from([0, 0, 0, 0])], { type: "audio/webm" })),
+    ).rejects.toMatchObject({ code: "unsupported_media_type" });
   });
 });

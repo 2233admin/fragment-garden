@@ -192,6 +192,32 @@ describe("addTextSupplement", () => {
     await expect(database.fragmentNotes.count()).resolves.toBe(0);
   });
 
+  it("rolls back every related write when local storage is full", async () => {
+    const fragment = createStageTwoFragment();
+    const plant = createStageTwoPlant();
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+    database.fragmentNotes.hook("creating", () => {
+      throw new DOMException("storage full", "QuotaExceededError");
+    });
+
+    await expect(
+      addTextSupplement(
+        { fragmentId: fragment.id, contentMarkdown: "不会产生半条追加笔记" },
+        {
+          database,
+          createId: createIdSequence(["quota-note", "quota-event"]),
+          now: () => STAGE_TWO_TEST_DATE,
+        },
+      ),
+    ).rejects.toMatchObject({ name: "QuotaExceededError" });
+
+    await expect(database.fragments.get(fragment.id)).resolves.toEqual(fragment);
+    await expect(database.plants.get(plant.id)).resolves.toEqual(plant);
+    await expect(database.fragmentEvents.count()).resolves.toBe(0);
+    await expect(database.fragmentNotes.count()).resolves.toBe(0);
+  });
+
   it("keeps completed content permanently blooming after another supplement", async () => {
     const fragment = createStageTwoFragment({
       completionStatus: "completed",

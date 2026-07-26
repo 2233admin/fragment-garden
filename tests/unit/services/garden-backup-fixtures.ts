@@ -11,6 +11,13 @@ import type { FragmentGardenDatabase } from "../../../data/db";
 
 export const BACKUP_TEST_TIME = "2026-07-26T10:15:00.000Z";
 
+const ONE_BY_ONE_PNG = Uint8Array.from(
+  "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000000020001e221bc330000000049454e44ae426082"
+    .match(/.{2}/gu)
+    ?.map((pair) => Number.parseInt(pair, 16)) ?? [],
+);
+const MINIMAL_WEBM_HEADER = Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81]);
+
 function fragment(
   id: string,
   contentType: Fragment["contentType"],
@@ -83,7 +90,7 @@ function event(
 }
 
 function mediaAsset(fragmentId: string, kind: MediaAsset["kind"]): MediaAsset {
-  const blob = new Blob([kind === "image" ? "image-binary" : "audio-binary"], {
+  const blob = new Blob([kind === "image" ? ONE_BY_ONE_PNG : MINIMAL_WEBM_HEADER], {
     type: kind === "image" ? "image/png" : "audio/webm",
   });
   return {
@@ -94,8 +101,8 @@ function mediaAsset(fragmentId: string, kind: MediaAsset["kind"]): MediaAsset {
     mimeType: blob.type,
     fileName: kind === "image" ? "garden.png" : "history.webm",
     sizeBytes: blob.size,
-    width: kind === "image" ? 640 : null,
-    height: kind === "image" ? 480 : null,
+    width: kind === "image" ? 1 : null,
+    height: kind === "image" ? 1 : null,
     durationMs: kind === "audio" ? 12_000 : null,
     processingStatus: "completed",
     processingRequestId: null,
@@ -118,7 +125,7 @@ function processingJob(
   kind: ContentProcessingJob["kind"],
   status: ContentProcessingJob["status"],
 ): ContentProcessingJob {
-  const sourceBlob = kind === "image" ? new Blob(["pending-image"], { type: "image/png" }) : null;
+  const sourceBlob = kind === "image" ? new Blob([ONE_BY_ONE_PNG], { type: "image/png" }) : null;
   return {
     id,
     kind,
@@ -132,8 +139,8 @@ function processingJob(
     sourceBlob,
     sourceMimeType: sourceBlob?.type ?? null,
     sourceFileName: sourceBlob === null ? null : "pending.png",
-    sourceWidth: sourceBlob === null ? null : 320,
-    sourceHeight: sourceBlob === null ? null : 200,
+    sourceWidth: sourceBlob === null ? null : 1,
+    sourceHeight: sourceBlob === null ? null : 1,
     sourceFragmentId: kind === "sprout" ? "source" : null,
     sourceSnapshot: kind === "sprout" ? JSON.stringify({ source: "snapshot" }) : null,
     createdFragmentId: null,
@@ -228,14 +235,14 @@ export async function seedCompleteGarden(database: FragmentGardenDatabase): Prom
       mediaAsset("image", "image"),
       mediaAsset("audio", "audio"),
     ]);
-    const attachmentBlob = new Blob(["legacy-attachment"], { type: "image/jpeg" });
+    const attachmentBlob = new Blob([ONE_BY_ONE_PNG], { type: "image/png" });
     await database.attachments.add({
       id: "legacy-attachment",
       fragmentId: "source",
       kind: "image",
       blob: attachmentBlob,
       mimeType: attachmentBlob.type,
-      fileName: "legacy.jpg",
+      fileName: "legacy.png",
       sizeBytes: attachmentBlob.size,
       transcript: null,
       extractedText: "历史附件文字",

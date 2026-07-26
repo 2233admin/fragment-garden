@@ -4,11 +4,13 @@ import Dexie from "dexie";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContentProcessingJobRepository } from "../../../data/repositories/content-processing-job-repository";
+import { FragmentGardenDatabase } from "../../../data/db";
 import {
   cancelContentProcessingJob,
   deleteContentProcessingJob,
 } from "../../../services/content-processing-job-lifecycle";
 import { LinkProcessingJobManager } from "../../../services/link-processing-job-manager";
+import { LOCAL_STORAGE_FULL_MESSAGE } from "../../../services/local-persistence-error";
 import type { LinkImportApi } from "../../../services/link-import-api-client";
 import {
   PROCESSING_JOB_TEST_NOW,
@@ -207,6 +209,34 @@ describe("LinkProcessingJobManager", () => {
     await expect(database.externalLinkImports.count()).resolves.toBe(0);
   });
 
+  it("rolls back formal link data and reports local storage quota distinctly", async () => {
+    const job = createLinkProcessingJobRecord({ id: "job-local-quota" });
+    await database.contentProcessingJobs.add(job);
+    database.fragments.hook("creating", () => {
+      throw new DOMException("storage full", "QuotaExceededError");
+    });
+    const api = createFakeApi();
+    api.start.mockResolvedValue(createCompletedJobImportResponse("local-quota"));
+    const onEvent = vi.fn();
+    const manager = track(
+      new LinkProcessingJobManager({ api, localDependencies: { database }, onEvent }),
+    );
+
+    manager.start(job.id);
+    await manager.whenIdle();
+
+    await expect(database.contentProcessingJobs.get(job.id)).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "local_storage_full",
+    });
+    await expect(database.fragments.count()).resolves.toBe(0);
+    await expect(database.plants.count()).resolves.toBe(0);
+    await expect(database.externalLinkImports.count()).resolves.toBe(0);
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "failed", message: LOCAL_STORAGE_FULL_MESSAGE }),
+    );
+  });
+
   it("retries the same failed job without creating a second job", async () => {
     const job = createLinkProcessingJobRecord({ id: "job-retry", status: "failed" });
     await database.contentProcessingJobs.add(job);
@@ -253,8 +283,12 @@ describe("LinkProcessingJobManager", () => {
     const deferred = createDeferred<Awaited<ReturnType<LinkImportApi["start"]>>>();
     const api = createFakeApi();
     api.start.mockImplementation(() => deferred.promise);
+    const secondDatabase = new FragmentGardenDatabase(database.name);
+    await secondDatabase.open();
     const first = track(new LinkProcessingJobManager({ api, localDependencies: { database } }));
-    const second = track(new LinkProcessingJobManager({ api, localDependencies: { database } }));
+    const second = track(
+      new LinkProcessingJobManager({ api, localDependencies: { database: secondDatabase } }),
+    );
 
     first.start(job.id);
     second.start(job.id);
@@ -262,11 +296,15 @@ describe("LinkProcessingJobManager", () => {
     deferred.resolve(createCompletedJobImportResponse("one-manager"));
     await Promise.all([first.whenIdle(), second.whenIdle()]);
 
-    expect(api.start).toHaveBeenCalledOnce();
-    await expect(database.fragments.count()).resolves.toBe(1);
-    await expect(database.contentProcessingJobs.get(job.id)).resolves.toMatchObject({
-      status: "completed",
-    });
+    try {
+      expect(api.start).toHaveBeenCalledOnce();
+      await expect(database.fragments.count()).resolves.toBe(1);
+      await expect(database.contentProcessingJobs.get(job.id)).resolves.toMatchObject({
+        status: "completed",
+      });
+    } finally {
+      secondDatabase.close();
+    }
   });
 });
 

@@ -7,6 +7,7 @@ import { FragmentGardenDatabase } from "../../../data/db";
 import { listFragmentCardViewModels } from "../../../data/queries/fragment-card-query";
 import { createLocalLinkFragment } from "../../../services/create-local-link-fragment";
 import { softDeleteFragment } from "../../../services/soft-delete-fragment";
+import { createLinkProcessingJobRecord } from "../services/content-processing-job-fixtures";
 import {
   STAGE_TWO_TEST_DATE,
   STAGE_TWO_TEST_TIMESTAMP,
@@ -158,6 +159,43 @@ describe("softDeleteFragment", () => {
       terminalNotificationStatus: null,
     });
     await expect(database.chatMessages.count()).resolves.toBe(0);
+  });
+
+  it("atomically cancels an unfinished sprout preview when its source is deleted", async () => {
+    const fragment = createStageTwoFragment();
+    const plant = createStageTwoPlant();
+    const sproutJob = createLinkProcessingJobRecord({
+      id: "source-sprout-job",
+      kind: "sprout",
+      status: "awaiting_confirmation",
+      sourceUrl: null,
+      normalizedSourceUrl: null,
+      initiator: null,
+      sourceFragmentId: fragment.id,
+      sourceSnapshot: "private source snapshot",
+      resultTitle: "temporary title",
+      resultMarkdown: "temporary body",
+    });
+    await database.fragments.add(fragment);
+    await database.plants.add(plant);
+    await database.contentProcessingJobs.add(sproutJob);
+
+    await softDeleteFragment(
+      { fragmentId: fragment.id },
+      {
+        database,
+        createId: createIdSequence(["delete-with-sprout-event"]),
+        now: () => STAGE_TWO_TEST_DATE,
+      },
+    );
+
+    await expect(database.contentProcessingJobs.get(sproutJob.id)).resolves.toMatchObject({
+      status: "cancelled",
+      sourceSnapshot: null,
+      resultTitle: null,
+      resultMarkdown: null,
+      errorCode: "source_missing",
+    });
   });
 
   it("rolls back link-import cancellation when the delete event cannot be saved", async () => {

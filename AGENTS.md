@@ -537,14 +537,14 @@ MediaRecorder 资源清理、语音转写编辑、独立披露、重试和媒体
   Action 与本地 Service 完成，不让模型自由选择工具；
 - 新增 AI 能力必须绑定一个由用户明确选中的 Fragment，并通过服务端 Route Handler；不得让 AI 直接访问
   Dexie、Phaser 或整个花园；
-- 阶段 13 的普通发芽输出必须结构化为 `{ title, markdown }`，先成为可编辑预览。只有用户明确点击
+- 当前普通发芽输出必须结构化为 `{ title, markdown }`，先成为可编辑预览。只有用户明确点击
   “确认种下”，本地事务才可创建新的普通文字 Fragment、Plant 与 confirmed `grows_from` 关系；
 - 发芽不得覆盖原卡片标题、主体或追加笔记，不得自动完成、封存、删除或写入伙伴建议；
 - active、dormant、completed、archived 和无槽位 Fragment 可发芽，deleted 内容不可发芽；保存建议只能按产品
   文档规定转换：dormant 恢复 active，completed 保持永久盛开，archived 不恢复且不占槽位，不得产生其他隐式
   状态或槽位变化；
 - 阶段 9 的 `POST /api/sprout/analyze`、伙伴建议、Prompt 和测试继续作为历史技术实现保留，普通 UI 不再
-  调用或展示。阶段 13 必须使用独立 `POST /api/sprout/generate`、独立 Schema 和版本化
+  调用或展示。阶段 13 已使用独立 `POST /api/sprout/generate`、独立 Schema 和版本化
   `sprout-generate-v1` Prompt；它同样不得使用工具、远端会话、Streaming、Search 或 Agent Loop；
 - 阶段 10 已使用 Dexie V4 `mediaAssets` 实现当前图片输入和保留的 audio 技术基础：原始 Blob 必须先本地保存，Fragment、
   Plant、MediaAsset 和 `created` Event 必须原子创建；图片只走 `POST /api/media/image/analyze`；语音代码只走
@@ -554,7 +554,7 @@ MediaRecorder 资源清理、语音转写编辑、独立披露、重试和媒体
 - 新发芽只能读取当前 `contentMarkdown`、全部用户 FragmentNote、必要来源名称、历史语音 transcript 和
   已确认子笔记标题；不得发送 partner suggestion、原始 Blob、MediaAsset、其他 Fragment 或生命周期字段；
 - 旧 ChatMessage、`/api/companion/respond` 和三个受限工具继续作为不可见的过渡/调试基础设施保留，不得让
-  普通用户重新进入开放聊天；阶段 11～13 只实施内容型卡片、延迟创建与发芽 2.0，不得提前开发
+  普通用户重新进入开放聊天；阶段 11～13 的实现范围只包含内容型卡片、延迟创建与发芽 2.0，不得借机开发
   Embedding、相似碎片、花丛、伙伴移动/动画、云端媒体、备份封版或像素视觉升级；
 - 猫和狗永远共用同一套固定对话、选项、服务、Prompt 和分析逻辑。
 
@@ -584,5 +584,5 @@ voice-to-sprout 兼容或相关测试；已有 audio Fragment 必须继续可播
 - `grows_from` 方向保持 `new/source grows_from original/target`；确认发芽不写 `child_fragment_created` 或
   `partner_suggestion_saved`，不增加隐藏成长分；
 - 旧 `/api/sprout/analyze`、伙伴建议、ChatMessage、开放聊天、语音技术基础和历史数据不得删除，但普通 UI
-  不再引用；
+  不再引用；不得把“可能的方向”、引导问题、推荐动作或保存伙伴建议恢复到普通发芽界面；
 - 阶段 14 才处理备份、恢复、稳定性和 MVP 封版。在阶段 14 通过前不得创建 `mvp-v1` Tag。

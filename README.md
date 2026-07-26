@@ -17,10 +17,10 @@
 3. 用户是否会回看过去保存的内容；
 4. 回看后是否会产生补充、关联、行动或新的想法。
 
-阶段 7A～10 已完成链接读取、规则型 NPC、旧版思维发芽和图片理解等技术闭环。当前正在按新的 MVP
-产品边界连续实施阶段 11～13：卡片改为内容型笔记，链接和图片只在处理成功后创建正式卡片，思维发芽
-改为生成一篇可预览、可编辑的新笔记，并在用户确认后创建新卡片和植物。卡片负责承载内容，花园负责
-表现生命周期与成长状态；普通详情不再承担系统后台职责。
+阶段 7A～10 已完成链接读取、规则型 NPC、旧版思维发芽和图片理解等技术闭环。阶段 11～13 的 MVP
+核心体验重构也已完成：卡片已经收敛为内容型笔记，链接和图片只在处理成功后创建正式卡片，普通思维发芽
+会生成一篇可预览、可编辑的新笔记，并在用户确认后创建新卡片和植物。卡片负责承载内容，花园负责
+表现生命周期与成长状态；普通详情不再承担系统后台职责。阶段 14 尚未开始。
 
 语音录制、audio MediaAsset、转写 Route、转写编辑和自动化测试等技术基础继续保留，但真实语音链路尚未
 稳定通过；普通 MVP 隐藏新建语音和重新转写入口，后续作为 Post-MVP / Experimental 能力重新验证。阶段 7B
@@ -46,7 +46,8 @@
   Markdown 笔记；结果先预览和编辑，确认后才创建新 Fragment、Plant 与来源关系，原卡片始终不被覆盖；
 - 图片支持 PNG、JPEG、WebP（单张、最大 10 MB），可选择文件或从剪贴板粘贴；图片详情使用 Blob URL 预览，
   分析状态和结果保存在本地，并可手动重试；
-- 图片分析使用独立披露与固定 Route（`/api/media/image/analyze`），处理失败不会删除 Fragment、Plant 或原始媒体；
+- 图片分析使用独立披露与固定 Route（`/api/media/image/analyze`）；处理失败会保留含原图的可重试 job，
+  不会创建空 Fragment、Plant 或 MediaAsset；
 - 语音技术基础作为 Post-MVP / Experimental 能力保留：已有 audio Fragment 仍可从卡片和详情读取、播放原始录音、
   查看或编辑已有 transcript，并可在有有效 transcript 或用户补充时进入思维发芽；普通 MVP 不提供新建语音或重新转写入口；
 - 阶段 7B 的开放输入、AI/基础模式和三个受限工具目前仍是技术过渡能力，不是校准后的普通用户入口；
@@ -155,9 +156,9 @@ bundle、日志或 Git；`.env.local` 已被忽略。启用时把 `GETNOTE_LINK_
 `/api/companion/respond`。选择“种下新想法”后，链接表单仍按阶段 7A 的独立披露流程处理 GetNote，猫狗只在
 外观上不同。
 
-### 阶段 9 当前思维发芽实现（已通过真实服务验收）
+### 阶段 9 历史思维发芽实现（已通过真实服务验收）
 
-“思维发芽”是思维层面的产品术语，不等同于植物视觉阶段的发芽。入口位于共享 Fragment 详情，active、
+“思维发芽”是思维层面的产品术语，不等同于植物视觉阶段的发芽。阶段 9 的历史入口位于共享 Fragment 详情，active、
 dormant、completed、archived 和没有花园槽位的内容均可使用，deleted 内容不可使用。流程只读取当前选中的
 标题、原文、补充历史、链接摘要/原文和必要状态，不发送整个花园、其他碎片或旧聊天历史。
 
@@ -174,9 +175,10 @@ strict JSON Schema Structured Output 只返回一个具体化方向、一个引�
 保持封存且不重新占用槽位。AI 不覆盖原文，也不自动执行推荐动作。
 
 阶段 7B 的开放 Chat UI、Route、ChatMessage、OpenAI 服务层和三个受限工具仍保留为不可见的开发调试/过渡
-基础设施，不参与普通 NPC 或思维发芽路径。阶段 10 的图片能力已经接入共享创建和详情流程；语音底层实现与历史
-内容兼容继续保留，但不参与当前普通创建流程。正式伙伴
-移动动画、Embedding、相似碎片和花丛不属于当前阶段。阶段 11 的内容型卡片已经完成，阶段 12 尚未开始。
+基础设施，不参与普通 NPC 或思维发芽路径。阶段 9 的 `/api/sprout/analyze`、伙伴建议写入和测试同样保留，
+但普通详情已经改用阶段 13 的生成预览流程，不再显示“可能的方向”、引导问题、推荐动作或保存伙伴建议。
+阶段 10 的图片能力已经接入共享创建和详情流程；语音底层实现与历史内容兼容继续保留，但不参与当前普通
+创建流程。正式伙伴移动动画、Embedding、相似碎片和花丛不属于当前阶段。
 
 真实服务验收最终使用服务端 `OPENAI_MODEL` 配置的 `gpt-4.1-mini`（响应快照
 `gpt-4.1-mini-2025-04-14`），不发送 reasoning 参数，保持 `max_output_tokens = 700`。正式六次请求均以
@@ -222,15 +224,15 @@ npm run dev
 编辑界面提供标题与必要格式能力；用户追加内容独立存入 `fragmentNotes`，不再混入系统 Event 或伙伴建议。
 卡片列表与详情移除生命周期、成长分、处理状态和系统流水，状态继续只由花园视觉与底层 Domain 使用。
 编辑器采用受限 Lexical 节点和 Markdown transformer，原因是它提供稳定的 React 本地编辑能力而不引入协作或
-云端体系；阅读使用 `react-markdown`，跳过原始 HTML 并限制 URL 协议。阶段 11 的 `contentProcessingJobs`
-仅完成 V5 store 预留，当前保持为空。
+云端体系；阅读使用 `react-markdown`，跳过原始 HTML 并限制 URL 协议。阶段 11 同时在 V5 注册了
+`contentProcessingJobs`，供后续两阶段直接启用而无需再次升级数据库。
 
-阶段 12 将把链接和图片改为延迟创建：披露同意后先写入 V5 `contentProcessingJobs`。链接 job 保存 URL 和
+阶段 12 已把链接和图片改为延迟创建：披露同意后先写入 V5 `contentProcessingJobs`。链接 job 保存 URL 和
 GetNote 任务身份；图片 job 保存临时 Blob。任务不占植物槽位，也不进入卡片列表。成功后才原子创建正式
 Fragment、Plant、created Event，图片同时创建 MediaAsset 并移走 job 中的重复 Blob；失败可重试或取消，
 不会留下空卡片。
 
-阶段 13 将新增 `POST /api/sprout/generate` 和 `sprout-generate-v1` Prompt。生成输入只包含当前笔记的 Markdown、
+阶段 13 已新增 `POST /api/sprout/generate` 和 `sprout-generate-v1` Prompt。生成输入只包含当前笔记的 Markdown、
 所有用户追加笔记、必要来源说明和已有子笔记标题，不发送图片/音频 Blob、其他 Fragment、伙伴建议或生命周期
 字段。输出固定为 `{ title, markdown }`，先存入 sprout job 并显示可编辑预览；只有用户点击“确认种下”后，
 才原子创建一张普通文字卡片、一株植物和 confirmed `grows_from` 关系。旧 `/api/sprout/analyze`、

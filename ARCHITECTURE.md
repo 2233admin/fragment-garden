@@ -104,7 +104,7 @@ OpenAI API
 
 阶段 7B 的技术实现已经验证了服务端 OpenAI Responses API、受限工具和本地降级，但它不再是普通用户
 入口。`/api/companion/respond`、ChatMessage、开放 Chat 组件和三个工具仍作为过渡/开发调试基础设施保留。
-阶段 8 已把用户入口切换为规则型 NPC；阶段 13 将普通发芽入口改为持久化生成任务：
+阶段 8 已把用户入口切换为规则型 NPC；阶段 13 已把普通发芽入口改为持久化生成任务：
 
 ```text
 规则型 NPC 对话（已实现）
@@ -263,6 +263,7 @@ fragment-garden/
 │   ├── api/
 │   │   ├── companion/respond/route.ts
 │   │   ├── sprout/analyze/route.ts
+│   │   ├── sprout/generate/route.ts
 │   │   ├── media/
 │   │   │   ├── image/analyze/route.ts
 │   │   │   └── audio/transcribe/route.ts
@@ -321,6 +322,10 @@ fragment-garden/
 │       ├── sprout-client.ts
 │       ├── sprout-context.ts
 │       ├── sprout-errors.ts
+│       ├── sprout-generate-client.ts
+│       ├── sprout-generate-context.ts
+│       ├── sprout-generate-prompt.ts
+│       ├── sprout-generate-schema.ts
 │       ├── sprout-prompt.ts
 │       └── sprout-schema.ts
 ├── validation/
@@ -795,8 +800,8 @@ user FragmentNote；不修改原 Event、partner suggestion、媒体 Blob、关�
 版本的 store 集合。迁移异常由 Dexie 回滚整个升级。
 
 阶段 11 已启用 `fragmentNotes`，并以受限 Lexical 编辑器生成规范化 Markdown；阅读端通过不解析原始 HTML
-的 `react-markdown` 渲染，并限制链接协议。`contentProcessingJobs` 已注册但尚无普通业务写入，阶段 12
-才启用 link/image job。
+的 `react-markdown` 渲染，并限制链接协议。阶段 12 已启用 link/image job，阶段 13 已启用 sprout job；
+三类 job 共用 V5 store，但都不属于正式卡片或花园植物。
 
 ---
 
@@ -1769,8 +1774,9 @@ GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，�
 
 ## 17. 开发顺序与重新规划状态
 
-当前实现顺序已经推进并收敛到阶段 10：图片输入与真实分析已经可用；10B 的语音代码、自动化测试和构建已完成，
-但真实语音链路尚未稳定通过，因此延期为 Post-MVP / Experimental。接下来按顺序实施：
+当前实现顺序已经推进并收敛到阶段 13：图片输入与真实分析已经可用；10B 的语音代码、自动化测试和构建已完成，
+但真实语音链路尚未稳定通过，因此延期为 Post-MVP / Experimental。阶段 11～13 的核心体验重构已经完成；
+阶段 14 尚未开始。实现顺序为：
 
 1. 项目初始化与 Dexie；
 2. 文字碎片和卡片模式；
@@ -1798,4 +1804,4 @@ NPC。阶段 8 已隐藏普通用户的开放聊天入口并实现固定对话�
 语音延期是为了避免浏览器录音、媒体编码、权限与转写兼容成本影响 MVP 稳定展示，并不代表底层实现无效。未经重新规划和
 真实麦克风/provider 验收，不得恢复普通语音入口。阶段 10 收敛不创建 `m3-ai-inputs` 或替代 Tag。Embedding、相似碎片、花丛、
 云端媒体、正式伙伴移动/像素动画和阶段 14 不在本轮。导入导出已有基础实现，只在阶段 14
-统一处理。阶段 11～13 必须逐阶段通过测试门槛并提交，不得跳序。
+统一处理。阶段 11～13 已按顺序完成，阶段 14 不得在新的明确任务前开始。

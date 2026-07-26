@@ -232,6 +232,7 @@ async function seedFragments(page: Page, fragments: readonly SeedFragment[]): Pr
         title: fragmentSeed.title,
         rawText: fragmentSeed.rawText,
         sourceUrl: null,
+        contentMarkdown: fragmentSeed.rawText,
         summary: null,
         keywords: [],
         lifecycleStatus: fragmentSeed.lifecycleStatus,
@@ -452,13 +453,17 @@ test("shows local garden counts and opens only dormant fragments through shared 
 
   const detail = page.getByRole("dialog", { name: OLD_FRAGMENT_TITLE });
   await expect(detail).toBeVisible();
-  await expect(detail.getByText("活跃", { exact: true }).first()).toBeVisible();
+  await expect(detail).toContainText("那天绕开大路，沿着河边慢慢走了一圈。");
+  await expect(detail.getByText(/内容状态|成长分|成长阶段|成长与状态记录|系统事件/u)).toHaveCount(
+    0,
+  );
+  await expect(detail.getByRole("button", { name: /标记完成|封存/u })).toHaveCount(0);
   const openedState = await readFragmentPersistenceState(page, OLD_FRAGMENT_ID);
   expect(openedState.lifecycleStatus).toBe("active");
   expect(openedState.events.filter((event) => event === "viewed")).toHaveLength(1);
   expect(openedState.events.filter((event) => event === "restored")).toHaveLength(1);
   expect(openedState.recommendations).toEqual([]);
-  await detail.getByRole("button", { name: "关闭详情" }).click();
+  await detail.getByRole("button", { name: "返回", exact: true }).click();
 
   dialog = await openCompanionFromButton(page);
   main = getNpcScreen(dialog, "伙伴主菜单");
@@ -539,7 +544,10 @@ test("requests recommendations only on demand and persists opened and dismissed 
   expect(openedState.recommendations).toHaveLength(1);
   expect(openedState.recommendations[0]?.openedAt).not.toBeNull();
   expect(openedState.recommendations[0]?.dismissedAt).toBeNull();
-  await detail.getByRole("button", { name: "关闭详情" }).click();
+  await expect(detail.getByText(/内容状态|成长分|成长阶段|成长与状态记录|系统事件/u)).toHaveCount(
+    0,
+  );
+  await detail.getByRole("button", { name: "返回", exact: true }).click();
 
   dialog = await openCompanionFromButton(page);
   main = getNpcScreen(dialog, "伙伴主菜单");
@@ -615,11 +623,15 @@ test("reuses the existing text creation flow from the NPC", async ({ context, pa
   await expect(page.getByTestId("garden-interaction-status")).toHaveText(
     "已经种下了。以后再回来看看，它也许会慢慢长出新的方向。",
   );
-  await expect(page.getByRole("button", { name: `打开碎片：${NPC_CREATED_TITLE}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `打开笔记：${NPC_CREATED_TITLE}` })).toBeVisible();
 
   const persistence = await readFragmentGardenPersistence(page);
   const fragment = persistence.fragments.find(({ title }) => title === NPC_CREATED_TITLE);
-  expect(fragment).toMatchObject({ contentType: "text", rawText: NPC_CREATED_TEXT });
+  expect(fragment).toMatchObject({
+    contentMarkdown: NPC_CREATED_TEXT,
+    contentType: "text",
+    rawText: NPC_CREATED_TEXT,
+  });
   expect(persistence.plants.filter(({ fragmentId }) => fragmentId === fragment?.id)).toHaveLength(
     1,
   );

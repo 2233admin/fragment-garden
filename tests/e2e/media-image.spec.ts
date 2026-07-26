@@ -90,12 +90,14 @@ test("image fragments are saved locally before analysis and survive refresh", as
   await expect(page.getByText("截图里的小计划", { exact: true })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-  await expect(page.getByRole("button", { name: "打开碎片：截图里的小计划" })).toBeVisible();
-  await page.getByRole("button", { name: "打开碎片：截图里的小计划" }).click();
+  await expect(page.getByRole("button", { name: "打开笔记：截图里的小计划" })).toBeVisible();
+  await page.getByRole("button", { name: "打开笔记：截图里的小计划" }).click();
   const detail = page.getByRole("dialog", { name: "截图里的小计划" });
   await expect(detail.getByAltText("用户上传的图片：截图里的小计划")).toBeVisible();
   await expect(detail.getByText("一张包含简单计划的截图。", { exact: true })).toBeVisible();
   await expect(detail.getByText("今天先整理一个小步骤", { exact: true })).toBeVisible();
+  await expect(detail).not.toContainText(/分析完成|处理状态|图片摘要|可见文字|成长分|成长阶段/u);
+  await expect(detail.getByRole("button", { name: /分析图片|重新分析/u })).toHaveCount(0);
 });
 
 test("local-only image choice does not call the analysis route", async ({ context, page }) => {

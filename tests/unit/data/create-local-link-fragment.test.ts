@@ -82,6 +82,8 @@ describe("createLocalLinkFragment", () => {
       title: "来自 example.com 的链接",
       rawText: null,
       sourceUrl: "https://EXAMPLE.com/article/?utm_source=newsletter&item=keep#section",
+      contentMarkdown:
+        "来源链接：https://EXAMPLE.com/article/?utm\\_source=newsletter&item=keep\\#section",
       summary: null,
       keywords: [],
       lifecycleStatus: "active",

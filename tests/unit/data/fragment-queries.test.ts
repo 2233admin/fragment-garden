@@ -31,6 +31,7 @@ describe("listFragmentCardViewModels", () => {
   it("joins visible text and link fragments with plants and import status", async () => {
     const visibleFragment = createStageTwoFragment({
       id: "visible-fragment",
+      contentMarkdown: "第一行\n第二行",
       rawText: "  第一行\n第二行  ",
     });
     const deletedFragment = createStageTwoFragment({
@@ -40,6 +41,7 @@ describe("listFragmentCardViewModels", () => {
     const linkFragment = createStageTwoFragment({
       id: "link-fragment",
       contentType: "link",
+      contentMarkdown: "已经提取的链接摘要",
       rawText: null,
       summary: "已经提取的链接摘要",
       sourceUrl: "https://www.example.com/article",
@@ -94,56 +96,66 @@ describe("listFragmentCardViewModels", () => {
     const cards = await listFragmentCardViewModels(database);
 
     expect(cards).toHaveLength(2);
-    expect(cards).toContainEqual({
-      id: visibleFragment.id,
-      plantId: "visible-plant",
-      contentType: "text",
-      title: visibleFragment.title,
-      rawText: visibleFragment.rawText,
-      excerpt: "第一行 第二行",
-      searchText: visibleFragment.rawText,
-      sourceUrl: null,
-      sourceHostname: null,
-      analysisStatus: visibleFragment.analysisStatus,
-      linkImportStatus: null,
-      linkImportErrorMessage: null,
-      mediaKind: null,
-      mediaProcessingStatus: null,
-      mediaSizeBytes: null,
-      mediaDurationMs: null,
-      createdAt: visibleFragment.createdAt,
-      lastInteractedAt: visibleFragment.lastInteractedAt,
-      lifecycleStatus: visibleFragment.lifecycleStatus,
-      completionStatus: visibleFragment.completionStatus,
-      plantStage: "growing",
-      growthScore: 1,
-      isPlacedInGarden: true,
-    });
-    expect(cards).toContainEqual({
-      id: linkFragment.id,
-      plantId: "link-plant",
-      contentType: "link",
-      title: linkFragment.title,
-      rawText: "",
-      excerpt: linkFragment.summary,
-      searchText: `${linkFragment.summary} ${linkFragment.sourceUrl}`,
-      sourceUrl: linkFragment.sourceUrl,
-      sourceHostname: "example.com",
-      analysisStatus: "completed",
-      linkImportStatus: "completed",
-      linkImportErrorMessage: null,
-      mediaKind: null,
-      mediaProcessingStatus: null,
-      mediaSizeBytes: null,
-      mediaDurationMs: null,
-      createdAt: linkFragment.createdAt,
-      lastInteractedAt: linkFragment.lastInteractedAt,
-      lifecycleStatus: linkFragment.lifecycleStatus,
-      completionStatus: linkFragment.completionStatus,
-      plantStage: "seedling",
-      growthScore: 0,
-      isPlacedInGarden: true,
-    });
+    expect(cards).toContainEqual(
+      expect.objectContaining({
+        id: visibleFragment.id,
+        plantId: "visible-plant",
+        contentType: "text",
+        title: visibleFragment.title,
+        contentMarkdown: visibleFragment.contentMarkdown,
+        rawText: visibleFragment.rawText,
+        excerpt: "第一行 第二行",
+        searchText: expect.stringContaining("第一行"),
+        sourceUrl: null,
+        sourceHostname: null,
+        analysisStatus: visibleFragment.analysisStatus,
+        linkImportStatus: null,
+        linkImportErrorMessage: null,
+        mediaKind: null,
+        mediaProcessingStatus: null,
+        mediaSizeBytes: null,
+        mediaDurationMs: null,
+        mediaBlob: null,
+        createdAt: visibleFragment.createdAt,
+        updatedAt: visibleFragment.updatedAt,
+        lastInteractedAt: visibleFragment.lastInteractedAt,
+        lifecycleStatus: visibleFragment.lifecycleStatus,
+        completionStatus: visibleFragment.completionStatus,
+        plantStage: "growing",
+        growthScore: 1,
+        isPlacedInGarden: true,
+      }),
+    );
+    expect(cards).toContainEqual(
+      expect.objectContaining({
+        id: linkFragment.id,
+        plantId: "link-plant",
+        contentType: "link",
+        title: linkFragment.title,
+        contentMarkdown: linkFragment.contentMarkdown,
+        rawText: "",
+        excerpt: linkFragment.summary,
+        searchText: expect.stringContaining(linkFragment.sourceUrl ?? ""),
+        sourceUrl: linkFragment.sourceUrl,
+        sourceHostname: "example.com",
+        analysisStatus: "completed",
+        linkImportStatus: "completed",
+        linkImportErrorMessage: null,
+        mediaKind: null,
+        mediaProcessingStatus: null,
+        mediaSizeBytes: null,
+        mediaDurationMs: null,
+        mediaBlob: null,
+        createdAt: linkFragment.createdAt,
+        updatedAt: linkFragment.updatedAt,
+        lastInteractedAt: linkFragment.lastInteractedAt,
+        lifecycleStatus: linkFragment.lifecycleStatus,
+        completionStatus: linkFragment.completionStatus,
+        plantStage: "seedling",
+        growthScore: 0,
+        isPlacedInGarden: true,
+      }),
+    );
   });
 
   it("reports the broken Fragment-to-Plant invariant instead of hiding content", async () => {
@@ -254,6 +266,8 @@ describe("getFragmentDetailViewModel", () => {
 
     await expect(getFragmentDetailViewModel(fragment.id, database)).resolves.toEqual({
       fragment,
+      contentMarkdown: fragment.contentMarkdown,
+      notes: [],
       plant,
       externalLinkImport: null,
       textSupplements: [

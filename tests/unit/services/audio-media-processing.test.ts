@@ -110,6 +110,7 @@ describe("audio media processing boundaries", () => {
       transcriptEditedAt: null,
     });
     expect(result?.fragment.title).toBe("记录今天要重新整理花园");
+    expect(result?.fragment.contentMarkdown).toBe("记录今天要重新整理花园。  \n下一句不会成为标题");
     await expect(
       database.fragmentEvents.where("fragmentId").equals(created.fragment.id).count(),
     ).resolves.toBe(1);
@@ -145,6 +146,9 @@ describe("audio media processing boundaries", () => {
       transcript: "用户修订后的文字",
       originalTranscript: "新的 provider 结果",
     });
+    await expect(database.fragments.get(created.fragment.id)).resolves.toMatchObject({
+      contentMarkdown: "用户修订后的文字",
+    });
 
     await beginAudioTranscription(created.mediaAsset.id, "request-3", { database });
     await applyAudioTranscriptionResult(
@@ -160,6 +164,9 @@ describe("audio media processing boundaries", () => {
       transcript: "确认替换后的文字",
       originalTranscript: "确认替换后的文字",
       transcriptEditedAt: null,
+    });
+    await expect(database.fragments.get(created.fragment.id)).resolves.toMatchObject({
+      contentMarkdown: "确认替换后的文字",
     });
   });
 
@@ -182,6 +189,7 @@ describe("audio media processing boundaries", () => {
 
     await expect(database.fragments.get(created.fragment.id)).resolves.toMatchObject({
       lifecycleStatus: "active",
+      contentMarkdown: "用户补充了背景",
       lastInteractedAt: "2026-07-24T09:00:00.000Z",
     });
     await expect(database.plants.get(created.plant.id)).resolves.toMatchObject({

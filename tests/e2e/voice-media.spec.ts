@@ -244,15 +244,13 @@ test("keeps historical voice playback and transcript editing without exposing re
   await page.reload();
   await page.getByRole("button", { name: "卡片模式", exact: true }).click();
 
-  const cardButton = page.getByRole("button", { name: `打开碎片：${VOICE_TITLE}` });
+  const cardButton = page.getByRole("button", { name: `打开笔记：${VOICE_TITLE}` });
   await expect(cardButton).toBeVisible();
-  await expect(
-    cardButton.locator("xpath=ancestor::article").getByText("语音", { exact: true }),
-  ).toBeVisible();
+  await expect(cardButton.getByText(/历史语音/u)).toBeVisible();
   await cardButton.click();
 
   const detail = page.getByRole("dialog", { name: VOICE_TITLE });
-  const audio = detail.getByLabel(`用户上传的语音：${VOICE_TITLE}`);
+  const audio = detail.getByLabel(`用户录制的语音：${VOICE_TITLE}`);
   await expect(audio).toBeVisible();
   await expect(audio).toHaveAttribute("src", /^blob:/u);
   const localAudio = await audio.evaluate(async (element) => {
@@ -262,20 +260,23 @@ test("keeps historical voice playback and transcript editing without exposing re
   });
   expect(localAudio).toEqual({ size: 4_044, type: "audio/wav" });
 
-  await expect(detail.getByText("当前版本暂不提供新的语音转写。", { exact: true })).toBeVisible();
   await expect(detail.getByRole("button", { name: "重新转写", exact: true })).toHaveCount(0);
   await expect(detail.getByRole("button", { name: "转写录音", exact: true })).toHaveCount(0);
+  await expect(detail.getByText(ORIGINAL_TRANSCRIPT, { exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "编辑转写", exact: true }).click();
   const transcriptInput = detail.getByLabel("编辑转写文字");
   await expect(transcriptInput).toHaveValue(ORIGINAL_TRANSCRIPT);
 
   await transcriptInput.fill(EDITED_TRANSCRIPT);
-  await detail.getByRole("button", { name: "保存转写修改", exact: true }).click();
+  await detail.getByRole("button", { name: "保存修改", exact: true }).click();
   await expect
     .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets[0]?.transcript)
     .toBe(EDITED_TRANSCRIPT);
-  await expect(detail.getByText("查看原始转写", { exact: true })).toBeVisible();
+  await expect(detail.getByText(EDITED_TRANSCRIPT, { exact: true })).toBeVisible();
+  await expect(detail.getByText("查看最初转写", { exact: true })).toBeVisible();
+  await expect(detail).not.toContainText(/转写完成|处理状态|成长分|成长阶段/u);
 
-  await detail.getByRole("button", { name: "让伙伴帮它发芽", exact: true }).click();
+  await detail.getByRole("button", { name: "发芽", exact: true }).click();
   const sproutDialog = page.getByRole("dialog", { name: "思维发芽" });
   await expect(sproutDialog.getByRole("heading", { name: "伙伴建议" })).toBeVisible();
   await expect(

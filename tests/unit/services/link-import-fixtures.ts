@@ -50,6 +50,7 @@ export async function seedLinkImport(
     title: `用户标题 ${key}`,
     rawText: null,
     sourceUrl,
+    contentMarkdown: `来源链接：${sourceUrl}`,
     summary: null,
     keywords: [],
     lifecycleStatus: "active",

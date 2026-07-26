@@ -38,10 +38,10 @@ describe("addTextSupplement", () => {
     await database.fragmentEvents.add(createdEvent);
 
     const result = await addTextSupplement(
-      { fragmentId: fragment.id, text: "  新的补充  " },
+      { fragmentId: fragment.id, contentMarkdown: "  新的补充  " },
       {
         database,
-        createId: createIdSequence(["text-added-event", "restored-event"]),
+        createId: createIdSequence(["fragment-note", "text-added-event", "restored-event"]),
         now: () => STAGE_TWO_TEST_DATE,
       },
     );
@@ -53,6 +53,14 @@ describe("addTextSupplement", () => {
       payload: { text: "新的补充" },
       occurredAt: STAGE_TWO_TEST_TIMESTAMP,
       ruleVersion: 1,
+    });
+    expect(result.note).toEqual({
+      id: "fragment-note",
+      fragmentId: fragment.id,
+      contentMarkdown: "新的补充",
+      source: "user",
+      createdAt: STAGE_TWO_TEST_TIMESTAMP,
+      updatedAt: STAGE_TWO_TEST_TIMESTAMP,
     });
     expect(result.fragment).toMatchObject({
       rawText: fragment.rawText,
@@ -71,6 +79,8 @@ describe("addTextSupplement", () => {
       type: "restored",
       payload: { reason: "content_updated" },
     });
+    await expect(database.fragmentNotes.get(result.note.id)).resolves.toEqual(result.note);
+    await expect(database.fragmentNotes.count()).resolves.toBe(1);
   });
 
   it("saves repeated same-day supplements but scores the event type once", async () => {
@@ -80,18 +90,18 @@ describe("addTextSupplement", () => {
     await database.plants.add(plant);
 
     await addTextSupplement(
-      { fragmentId: fragment.id, text: "上午补充" },
+      { fragmentId: fragment.id, contentMarkdown: "上午补充" },
       {
         database,
-        createId: createIdSequence(["same-day-event-1"]),
+        createId: createIdSequence(["same-day-note-1", "same-day-event-1"]),
         now: () => new Date("2026-07-24T08:00:00.000Z"),
       },
     );
     const secondResult = await addTextSupplement(
-      { fragmentId: fragment.id, text: "下午补充" },
+      { fragmentId: fragment.id, contentMarkdown: "下午补充" },
       {
         database,
-        createId: createIdSequence(["same-day-event-2"]),
+        createId: createIdSequence(["same-day-note-2", "same-day-event-2"]),
         now: () => new Date("2026-07-24T16:00:00.000Z"),
       },
     );
@@ -101,6 +111,7 @@ describe("addTextSupplement", () => {
     await expect(database.fragmentEvents.where("type").equals("text_added").count()).resolves.toBe(
       2,
     );
+    await expect(database.fragmentNotes.count()).resolves.toBe(2);
   });
 
   it("scores another text supplement on the next UTC date", async () => {
@@ -110,24 +121,25 @@ describe("addTextSupplement", () => {
     await database.plants.add(plant);
 
     await addTextSupplement(
-      { fragmentId: fragment.id, text: "第一天" },
+      { fragmentId: fragment.id, contentMarkdown: "第一天" },
       {
         database,
-        createId: createIdSequence(["day-one-event"]),
+        createId: createIdSequence(["day-one-note", "day-one-event"]),
         now: () => new Date("2026-07-24T23:00:00.000Z"),
       },
     );
     const nextDayResult = await addTextSupplement(
-      { fragmentId: fragment.id, text: "第二天" },
+      { fragmentId: fragment.id, contentMarkdown: "第二天" },
       {
         database,
-        createId: createIdSequence(["day-two-event"]),
+        createId: createIdSequence(["day-two-note", "day-two-event"]),
         now: () => new Date("2026-07-25T00:01:00.000Z"),
       },
     );
 
     expect(nextDayResult.plant.growthScore).toBe(2);
     expect(nextDayResult.plant.stage).toBe("growing");
+    await expect(database.fragmentNotes.count()).resolves.toBe(2);
   });
 
   it("rejects whitespace-only supplements without writing anything", async () => {
@@ -138,10 +150,10 @@ describe("addTextSupplement", () => {
 
     await expect(
       addTextSupplement(
-        { fragmentId: fragment.id, text: " \n\t " },
+        { fragmentId: fragment.id, contentMarkdown: " \n\t " },
         {
           database,
-          createId: createIdSequence(["unused-event"]),
+          createId: createIdSequence(["unused-note", "unused-event"]),
           now: () => STAGE_TWO_TEST_DATE,
         },
       ),
@@ -150,6 +162,7 @@ describe("addTextSupplement", () => {
     await expect(database.fragments.get(fragment.id)).resolves.toEqual(fragment);
     await expect(database.plants.get(plant.id)).resolves.toEqual(plant);
     await expect(database.fragmentEvents.count()).resolves.toBe(0);
+    await expect(database.fragmentNotes.count()).resolves.toBe(0);
   });
 
   it("rolls back fragment and plant updates when the event write fails", async () => {
@@ -164,10 +177,10 @@ describe("addTextSupplement", () => {
 
     await expect(
       addTextSupplement(
-        { fragmentId: fragment.id, text: "应当整体回滚" },
+        { fragmentId: fragment.id, contentMarkdown: "应当整体回滚" },
         {
           database,
-          createId: createIdSequence([existingEvent.id, "restored-event"]),
+          createId: createIdSequence(["rollback-note", existingEvent.id, "restored-event"]),
           now: () => STAGE_TWO_TEST_DATE,
         },
       ),
@@ -176,6 +189,7 @@ describe("addTextSupplement", () => {
     await expect(database.fragments.get(fragment.id)).resolves.toEqual(fragment);
     await expect(database.plants.get(plant.id)).resolves.toEqual(plant);
     await expect(database.fragmentEvents.toArray()).resolves.toEqual([existingEvent]);
+    await expect(database.fragmentNotes.count()).resolves.toBe(0);
   });
 
   it("keeps completed content permanently blooming after another supplement", async () => {
@@ -202,10 +216,10 @@ describe("addTextSupplement", () => {
     ]);
 
     const result = await addTextSupplement(
-      { fragmentId: fragment.id, text: "完成后的补充" },
+      { fragmentId: fragment.id, contentMarkdown: "完成后的补充" },
       {
         database,
-        createId: createIdSequence(["completed-text-event"]),
+        createId: createIdSequence(["completed-note", "completed-text-event"]),
         now: () => STAGE_TWO_TEST_DATE,
       },
     );
@@ -217,6 +231,7 @@ describe("addTextSupplement", () => {
     await expect(database.fragmentEvents.where("type").equals("completed").count()).resolves.toBe(
       1,
     );
+    await expect(database.fragmentNotes.get("completed-note")).resolves.toEqual(result.note);
   });
 
   it("allows an archived fragment to be supplemented without returning it to the garden", async () => {
@@ -226,10 +241,10 @@ describe("addTextSupplement", () => {
     await database.plants.add(plant);
 
     const result = await addTextSupplement(
-      { fragmentId: fragment.id, text: "封存后的补充" },
+      { fragmentId: fragment.id, contentMarkdown: "封存后的补充" },
       {
         database,
-        createId: createIdSequence(["archived-text-event"]),
+        createId: createIdSequence(["archived-note", "archived-text-event"]),
         now: () => STAGE_TWO_TEST_DATE,
       },
     );
@@ -237,5 +252,6 @@ describe("addTextSupplement", () => {
     expect(result.fragment.lifecycleStatus).toBe("archived");
     expect(result.plant.slotId).toBeNull();
     expect(result.plant.growthScore).toBe(1);
+    await expect(database.fragmentNotes.get("archived-note")).resolves.toEqual(result.note);
   });
 });

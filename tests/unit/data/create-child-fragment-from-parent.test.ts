@@ -64,6 +64,7 @@ describe("createChildFragmentFromParent", () => {
     expect(result.childFragment).toMatchObject({
       id: "child-fragment",
       title: "从旧想法长出来的新方向",
+      contentMarkdown: "从旧想法长出来的新方向  \n先做一个小实验。",
       lifecycleStatus: "active",
       completionStatus: "open",
       parentFragmentId: "fragment-1",

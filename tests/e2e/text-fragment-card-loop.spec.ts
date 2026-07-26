@@ -5,8 +5,31 @@ import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
 const RAW_TEXT = "在周末搭一个安静的阅读角\n把窗边整理出来。";
 const GENERATED_TITLE = "在周末搭一个安静的阅读角";
 const SEARCH_TERM = "窗边整理";
-const SUPPLEMENT_TEXT = "先挑一本短篇小说。";
 const UPDATED_TITLE = "周末阅读角计划";
+const UPDATED_BODY = "把窗边改造成可以每天坐十分钟的阅读角。";
+const UPDATED_BODY_SEARCH_TERM = "每天坐十分钟";
+const NOTE_TEXT = "先挑一本短篇小说。";
+const UPDATED_NOTE_TEXT = "先挑一本短篇小说，再把阅读灯放到窗边。";
+
+type StoredTextState = Readonly<{
+  fragmentId: string;
+  contentMarkdown: string;
+  rawText: string | null;
+  notes: ReadonlyArray<
+    Readonly<{
+      contentMarkdown: string;
+      id: string;
+    }>
+  >;
+}>;
+
+function getTextCard(page: Page, title: string) {
+  return page.getByRole("button", { name: `打开笔记：${title}` });
+}
+
+async function expectAtMostOneCanvas(page: Page): Promise<void> {
+  await expect.poll(async () => page.locator("canvas").count()).toBeLessThanOrEqual(1);
+}
 
 async function countViewedEvents(page: Page): Promise<number> {
   return page.evaluate(async () => {
@@ -27,7 +50,79 @@ async function countViewedEvents(page: Page): Promise<number> {
   });
 }
 
-test("completes the text fragment card loop", async ({ context, page }) => {
+async function readStoredTextState(page: Page): Promise<StoredTextState> {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("fragment-garden");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+
+    if (!database.objectStoreNames.contains("fragmentNotes")) {
+      database.close();
+      throw new Error("The V5 fragmentNotes store is missing");
+    }
+
+    const transaction = database.transaction(["fragments", "fragmentNotes"], "readonly");
+    const readAll = <T>(storeName: string): Promise<T[]> =>
+      new Promise<T[]>((resolve, reject) => {
+        const request = transaction.objectStore(storeName).getAll();
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result as T[]);
+      });
+    const [fragments, notes] = await Promise.all([
+      readAll<{
+        contentMarkdown?: string;
+        contentType: string;
+        id: string;
+        rawText: string | null;
+      }>("fragments"),
+      readAll<{
+        contentMarkdown: string;
+        fragmentId: string;
+        id: string;
+      }>("fragmentNotes"),
+    ]);
+    const fragment = fragments.find((candidate) => candidate.contentType === "text");
+
+    database.close();
+    if (fragment === undefined) {
+      throw new Error("The text Fragment was not found");
+    }
+
+    return {
+      fragmentId: fragment.id,
+      contentMarkdown: fragment.contentMarkdown ?? "",
+      rawText: fragment.rawText,
+      notes: notes
+        .filter((note) => note.fragmentId === fragment.id)
+        .sort((left, right) => left.id.localeCompare(right.id))
+        .map((note) => ({ id: note.id, contentMarkdown: note.contentMarkdown })),
+    };
+  });
+}
+
+async function expectContentOnlyDetail(page: Page, title: string): Promise<void> {
+  const detail = page.getByRole("dialog", { name: title });
+
+  await expect(detail.getByRole("button", { name: "返回", exact: true })).toBeVisible();
+  await expect(detail.getByRole("button", { name: "编辑", exact: true })).toBeVisible();
+  await expect(detail.getByRole("button", { name: "删除", exact: true })).toBeVisible();
+  await expect(detail.getByRole("button", { name: "追加笔记", exact: true })).toBeVisible();
+  await expect(detail.getByRole("button", { name: "发芽", exact: true })).toBeVisible();
+
+  await expect(detail.getByText(/成长分|成长阶段|生命周期|处理状态/u)).toHaveCount(0);
+  await expect(detail.getByText("种下了这条碎片", { exact: true })).toHaveCount(0);
+  await expect(detail.getByText("补充了一段新内容", { exact: true })).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "标记完成", exact: true })).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "封存", exact: true })).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "发展成新想法", exact: true })).toHaveCount(0);
+}
+
+test("keeps the text note flow content-first across edits, notes, and refreshes", async ({
+  context,
+  page,
+}) => {
   const baseURL = test.info().project.use.baseURL;
 
   if (typeof baseURL !== "string") {
@@ -41,112 +136,149 @@ test("completes the text fragment card loop", async ({ context, page }) => {
   });
   await cdpSession.detach();
 
-  await test.step("1. 打开页面并进入卡片工作区", async () => {
+  await test.step("create a text note and keep the existing card/search loop", async () => {
     await page.goto("/garden");
     await completeCompanionOnboardingIfNeeded(page);
     await expect(page.getByRole("heading", { name: "碎片花园" })).toBeVisible();
+    await expectAtMostOneCanvas(page);
+
     await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-    await expect(page.getByRole("button", { name: "卡片模式", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-  });
-
-  await test.step("2. 显示空状态", async () => {
     await expect(page.getByText("还没有种下碎片", { exact: true })).toBeVisible();
-  });
-
-  await test.step("3. 打开文字碎片创建对话框", async () => {
     await page.getByRole("button", { name: "种下碎片", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "种下文字碎片" })).toBeVisible();
-  });
 
-  await test.step("4. 不填写标题并输入多行文字", async () => {
     const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
     await expect(createDialog.getByLabel("标题（可选）")).toHaveValue("");
     await createDialog.getByLabel("内容").fill(RAW_TEXT);
-  });
-
-  await test.step("5. 保存文字碎片", async () => {
-    const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
     await createDialog.getByRole("button", { name: "种下", exact: true }).click();
     await expect(createDialog).toBeHidden();
-  });
+    await expect(getTextCard(page, GENERATED_TITLE)).toBeVisible();
 
-  await test.step("6. 新卡片立即出现", async () => {
-    await expect(page.getByRole("button", { name: `打开碎片：${GENERATED_TITLE}` })).toBeVisible();
-  });
-
-  await test.step("7. 刷新页面", async () => {
     await page.reload();
-    await expect(page.getByRole("heading", { name: "碎片花园" })).toBeVisible();
+    await completeCompanionOnboardingIfNeeded(page);
     await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-  });
-
-  await test.step("8. 刷新后卡片仍然存在", async () => {
-    await expect(page.getByRole("button", { name: `打开碎片：${GENERATED_TITLE}` })).toBeVisible();
-  });
-
-  await test.step("9. 可以通过原始内容搜索", async () => {
     await page.getByLabel("搜索碎片").fill(SEARCH_TERM);
-    await expect(page.getByRole("button", { name: `打开碎片：${GENERATED_TITLE}` })).toBeVisible();
+    await expect(getTextCard(page, GENERATED_TITLE)).toBeVisible();
+    await expectAtMostOneCanvas(page);
   });
 
-  await test.step("10. 打开碎片详情", async () => {
-    await page.getByRole("button", { name: `打开碎片：${GENERATED_TITLE}` }).click();
-    await expect(page.getByRole("dialog", { name: GENERATED_TITLE })).toBeVisible();
+  await test.step("show content without lifecycle, growth, processing, or system-event UI", async () => {
+    await getTextCard(page, GENERATED_TITLE).click();
+    const detail = page.getByRole("dialog", { name: GENERATED_TITLE });
+
+    await expect(detail).toContainText("在周末搭一个安静的阅读角");
+    await expect(detail).toContainText("把窗边整理出来。");
+    await expect(
+      detail.getByText("还没有追加笔记。新的资料、判断或进展可以单独记在这里。", { exact: true }),
+    ).toBeVisible();
+    await expectContentOnlyDetail(page, GENERATED_TITLE);
     await expect.poll(() => countViewedEvents(page)).toBe(1);
+    await expectAtMostOneCanvas(page);
   });
 
-  await test.step("11. 添加文字补充", async () => {
-    const detailDialog = page.getByRole("dialog", { name: GENERATED_TITLE });
-    await detailDialog.getByLabel("添加新补充").fill(SUPPLEMENT_TEXT);
-    await detailDialog.getByRole("button", { name: "保存补充" }).click();
-    await expect(detailDialog.getByText(SUPPLEMENT_TEXT, { exact: true })).toBeVisible();
-    await expect(detailDialog.getByLabel("添加新补充")).toHaveValue("");
+  let editedBodyMarkdown = "";
+
+  await test.step("edit the title and Markdown body in one form", async () => {
+    const detail = page.getByRole("dialog", { name: GENERATED_TITLE });
+    await detail.getByRole("button", { name: "编辑", exact: true }).click();
+
+    await detail.getByRole("textbox", { name: "标题", exact: true }).fill(UPDATED_TITLE);
+    const bodyEditor = detail.getByRole("textbox", { name: "编辑主体内容", exact: true });
+    await bodyEditor.fill(UPDATED_BODY);
+    await detail
+      .getByRole("toolbar", { name: "文字格式" })
+      .getByRole("button", { name: "标题", exact: true })
+      .click();
+    await detail.getByRole("button", { name: "保存修改", exact: true }).click();
+
+    const updatedDetail = page.getByRole("dialog", { name: UPDATED_TITLE });
+    await expect(updatedDetail).toBeVisible();
+    await expect(
+      updatedDetail.getByRole("heading", { name: UPDATED_BODY, level: 2 }),
+    ).toBeVisible();
+
+    const stored = await readStoredTextState(page);
+    editedBodyMarkdown = stored.contentMarkdown;
+    expect(editedBodyMarkdown).toContain(UPDATED_BODY);
+    expect(stored.rawText).toBe(RAW_TEXT);
+    expect(stored.notes).toEqual([]);
   });
 
-  await test.step("12. 成长分和阶段立即变化", async () => {
-    const detailDialog = page.getByRole("dialog", { name: GENERATED_TITLE });
-    await expect(detailDialog.getByText(/成长分\s*[：:]\s*1/)).toBeVisible();
-    await expect(detailDialog.getByText(/成长阶段\s*[：:]\s*(生长|growing)/i)).toBeVisible();
+  await test.step("create and edit an independent appended note without merging the body", async () => {
+    const detail = page.getByRole("dialog", { name: UPDATED_TITLE });
+    await detail.getByRole("button", { name: "追加笔记", exact: true }).click();
+    await detail.getByRole("textbox", { name: "追加笔记内容", exact: true }).fill(NOTE_TEXT);
+    await detail.getByRole("button", { name: "保存笔记", exact: true }).click();
+    await expect(detail.getByText(NOTE_TEXT, { exact: true })).toBeVisible();
+
+    const afterCreate = await readStoredTextState(page);
+    expect(afterCreate.contentMarkdown).toBe(editedBodyMarkdown);
+    expect(afterCreate.notes).toHaveLength(1);
+    expect(afterCreate.notes[0]?.contentMarkdown).toContain(NOTE_TEXT);
+
+    await detail.getByRole("button", { name: "编辑第 1 条追加笔记" }).click();
+    await detail
+      .getByRole("textbox", { name: "编辑第 1 条追加笔记", exact: true })
+      .fill(UPDATED_NOTE_TEXT);
+    await detail.getByRole("button", { name: "保存修改", exact: true }).click();
+    await expect(detail.getByText(UPDATED_NOTE_TEXT, { exact: true })).toBeVisible();
+    await expect(detail.getByText(NOTE_TEXT, { exact: true })).toHaveCount(0);
+
+    const afterEdit = await readStoredTextState(page);
+    expect(afterEdit.contentMarkdown).toBe(editedBodyMarkdown);
+    expect(afterEdit.notes).toHaveLength(1);
+    expect(afterEdit.notes[0]?.contentMarkdown).toContain(UPDATED_NOTE_TEXT);
+    await expectContentOnlyDetail(page, UPDATED_TITLE);
   });
 
-  await test.step("13. 修改标题", async () => {
-    const detailDialog = page.getByRole("dialog", { name: GENERATED_TITLE });
-    await detailDialog.getByLabel("编辑标题").fill(UPDATED_TITLE);
-    await detailDialog.getByRole("button", { name: "保存修改" }).click();
-    await expect(page.getByRole("dialog", { name: UPDATED_TITLE })).toBeVisible();
-  });
+  await test.step("persist the unified edit and edited note across refresh", async () => {
+    const detail = page.getByRole("dialog", { name: UPDATED_TITLE });
+    await detail.getByRole("button", { name: "返回", exact: true }).click();
+    await expect(getTextCard(page, UPDATED_TITLE)).toBeVisible();
 
-  await test.step("14. 关闭详情", async () => {
-    const detailDialog = page.getByRole("dialog", { name: UPDATED_TITLE });
-    await detailDialog.getByRole("button", { name: "关闭详情" }).click();
-    await expect(detailDialog).toBeHidden();
-  });
+    await page.reload();
+    await completeCompanionOnboardingIfNeeded(page);
+    await page.getByRole("button", { name: "卡片模式", exact: true }).click();
+    await page.getByLabel("搜索碎片").fill(UPDATED_BODY_SEARCH_TERM);
+    await expect(getTextCard(page, UPDATED_TITLE)).toBeVisible();
+    await getTextCard(page, UPDATED_TITLE).click();
 
-  await test.step("15. 卡片显示修改后的标题", async () => {
-    await expect(page.getByRole("button", { name: `打开碎片：${UPDATED_TITLE}` })).toBeVisible();
-  });
-
-  await test.step("16. 重新打开并确认软删除", async () => {
-    await page.getByRole("button", { name: `打开碎片：${UPDATED_TITLE}` }).click();
-    const detailDialog = page.getByRole("dialog", { name: UPDATED_TITLE });
+    const refreshedDetail = page.getByRole("dialog", { name: UPDATED_TITLE });
+    await expect(
+      refreshedDetail.getByRole("heading", { name: UPDATED_BODY, level: 2 }),
+    ).toBeVisible();
+    await expect(refreshedDetail.getByText(UPDATED_NOTE_TEXT, { exact: true })).toBeVisible();
     await expect.poll(() => countViewedEvents(page)).toBe(2);
-    await detailDialog.getByRole("button", { name: "删除碎片" }).click();
-
-    const confirmDialog = page.getByRole("alertdialog", { name: "确认删除碎片" });
-    await expect(confirmDialog).toBeVisible();
-    await confirmDialog.getByRole("button", { name: "取消", exact: true }).click();
-    await expect(confirmDialog).toBeHidden();
-    await expect(detailDialog).toBeVisible();
-
-    await detailDialog.getByRole("button", { name: "删除碎片" }).click();
-    await expect(confirmDialog).toBeVisible();
-    await confirmDialog.getByRole("button", { name: "确认删除", exact: true }).click();
+    await expectContentOnlyDetail(page, UPDATED_TITLE);
+    await expectAtMostOneCanvas(page);
   });
 
-  await test.step("17. 卡片从默认列表消失", async () => {
-    await expect(page.getByRole("button", { name: `打开碎片：${UPDATED_TITLE}` })).toHaveCount(0);
+  await test.step("delete only the appended note and keep the body after another refresh", async () => {
+    const detail = page.getByRole("dialog", { name: UPDATED_TITLE });
+    await detail.getByRole("button", { name: "删除第 1 条追加笔记" }).click();
+
+    const confirm = page.getByRole("alertdialog", { name: "删除这条追加笔记？" });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", { name: "删除笔记", exact: true }).click();
+    await expect(confirm).toBeHidden();
+    await expect(detail.getByText(UPDATED_NOTE_TEXT, { exact: true })).toHaveCount(0);
+    await expect(
+      detail.getByText("还没有追加笔记。新的资料、判断或进展可以单独记在这里。", { exact: true }),
+    ).toBeVisible();
+
+    const afterDelete = await readStoredTextState(page);
+    expect(afterDelete.contentMarkdown).toBe(editedBodyMarkdown);
+    expect(afterDelete.notes).toEqual([]);
+
+    await detail.getByRole("button", { name: "返回", exact: true }).click();
+    await page.reload();
+    await completeCompanionOnboardingIfNeeded(page);
+    await page.getByRole("button", { name: "卡片模式", exact: true }).click();
+    await getTextCard(page, UPDATED_TITLE).click();
+
+    const finalDetail = page.getByRole("dialog", { name: UPDATED_TITLE });
+    await expect(finalDetail.getByRole("heading", { name: UPDATED_BODY, level: 2 })).toBeVisible();
+    await expect(finalDetail.getByText(UPDATED_NOTE_TEXT, { exact: true })).toHaveCount(0);
+    expect((await readStoredTextState(page)).contentMarkdown).toBe(editedBodyMarkdown);
+    await expectAtMostOneCanvas(page);
   });
 });

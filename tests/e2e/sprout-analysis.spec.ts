@@ -89,26 +89,26 @@ async function createTextFragment(page: Page, title: string, rawText: string): P
   await createDialog.getByLabel("内容").fill(rawText);
   await createDialog.getByRole("button", { name: "种下", exact: true }).click();
   await expect(createDialog).toBeHidden();
-  await expect(page.getByRole("button", { name: `打开碎片：${title}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `打开笔记：${title}` })).toBeVisible();
 }
 
 async function openFragment(page: Page, title: string): Promise<Locator> {
-  await page.getByRole("button", { name: `打开碎片：${title}` }).click();
+  await page.getByRole("button", { name: `打开笔记：${title}` }).click();
   const detailDialog = page.getByRole("dialog", { name: title });
   await expect(detailDialog).toBeVisible();
-  await expect(detailDialog.getByRole("button", { name: "让伙伴帮它发芽" })).toBeVisible();
+  await expect(detailDialog.getByRole("button", { name: "发芽", exact: true })).toBeVisible();
   return detailDialog;
 }
 
 async function openSprout(detailDialog: Locator): Promise<Locator> {
-  await detailDialog.getByRole("button", { name: "让伙伴帮它发芽" }).click();
+  await detailDialog.getByRole("button", { name: "发芽", exact: true }).click();
   const sproutDialog = detailDialog.page().getByRole("dialog", { name: "思维发芽" });
   await expect(sproutDialog).toBeVisible();
   return sproutDialog;
 }
 
 async function closeDetail(detailDialog: Locator): Promise<void> {
-  await detailDialog.getByRole("button", { name: "关闭详情" }).click();
+  await detailDialog.getByRole("button", { name: "返回", exact: true }).click();
   await expect(detailDialog).toBeHidden();
 }
 
@@ -485,10 +485,7 @@ test("replaces an unsaved direction and persists two later suggestions with one 
   await page.reload();
   await page.getByRole("button", { name: "卡片模式", exact: true }).click();
   detailDialog = await openFragment(page, ROTATION_TITLE);
-  await expect(detailDialog.getByText("伙伴建议", { exact: true })).toHaveCount(2);
-  await expect(detailDialog.getByText(suggestions[0]!.direction, { exact: true })).toHaveCount(0);
-  await expect(detailDialog.getByText(suggestions[1]!.direction, { exact: true })).toBeVisible();
-  await expect(detailDialog.getByText(suggestions[2]!.direction, { exact: true })).toBeVisible();
+  await expect(detailDialog.getByText(ROTATION_BODY, { exact: true })).toBeVisible();
   persistence = findFragmentState(await readFragmentGardenPersistence(page), ROTATION_TITLE);
   expect(persistence.partnerEvents).toHaveLength(2);
   expect(persistence.plant.growthScore).toBe(1);
@@ -597,14 +594,13 @@ test("preserves fragment states and opens existing follow-up flows without auto-
   await sproutDialog.getByRole("button", { name: "保存这条建议" }).click();
   await expect(sproutDialog.getByRole("status")).toContainText("已经记在");
   await sproutDialog.getByRole("button", { name: "按建议继续" }).click();
-  await expect(detailDialog.getByRole("heading", { name: "添加新补充" })).toBeVisible();
-  await expect(detailDialog.getByLabel("添加新补充")).toBeFocused();
+  await expect(detailDialog.getByRole("heading", { name: "追加一条笔记" })).toBeVisible();
+  await expect(detailDialog.getByLabel("追加笔记内容")).toBeFocused();
   let persisted = findFragmentState(await readFragmentGardenPersistence(page), ACTIVE_TITLE);
   expect(persisted.fragment.lifecycleStatus).toBe("active");
   expect(persisted.plant.growthScore).toBe(1);
   await closeDetail(detailDialog);
 
-  await page.getByRole("button", { name: "休眠", exact: true }).click();
   detailDialog = await openFragment(page, DORMANT_TITLE);
   sproutDialog = await openSprout(detailDialog);
   await sproutDialog.getByRole("button", { name: "保存这条建议" }).click();
@@ -620,7 +616,6 @@ test("preserves fragment states and opens existing follow-up flows without auto-
   ).toHaveLength(1);
   await closeDetail(detailDialog);
 
-  await page.getByRole("button", { name: "已完成", exact: true }).click();
   detailDialog = await openFragment(page, COMPLETED_TITLE);
   sproutDialog = await openSprout(detailDialog);
   await expect(sproutDialog.getByText("发展成一个新想法", { exact: true })).toBeVisible();
@@ -628,15 +623,12 @@ test("preserves fragment states and opens existing follow-up flows without auto-
   await sproutDialog.getByRole("button", { name: "保存这条建议" }).click();
   await expect(sproutDialog.getByRole("status")).toContainText("已经记在");
   await sproutDialog.getByRole("button", { name: "按建议继续" }).click();
-  const childDialog = page.getByRole("dialog", { name: "让它长成一个新想法" });
-  await expect(childDialog).toBeVisible();
-  await childDialog.getByRole("button", { name: "取消" }).click();
+  await expect(detailDialog.getByRole("status")).toContainText("这条方向没有自动执行");
   persisted = findFragmentState(await readFragmentGardenPersistence(page), COMPLETED_TITLE);
   expect(persisted.fragment.completionStatus).toBe("completed");
   expect(persisted.plant.stage).toBe("permanent_bloom");
   await closeDetail(detailDialog);
 
-  await page.getByRole("button", { name: "已封存", exact: true }).click();
   detailDialog = await openFragment(page, ARCHIVED_TITLE);
   sproutDialog = await openSprout(detailDialog);
   await sproutDialog.getByRole("button", { name: "保存这条建议" }).click();
@@ -647,17 +639,14 @@ test("preserves fragment states and opens existing follow-up flows without auto-
   expect(persisted.plant.slotId).toBeNull();
   await closeDetail(detailDialog);
 
-  await page.getByRole("button", { name: "当前", exact: true }).click();
   detailDialog = await openFragment(page, COMPLETE_ACTION_TITLE);
   sproutDialog = await openSprout(detailDialog);
   await expect(sproutDialog.getByText("标记为完成", { exact: true })).toBeVisible();
   await sproutDialog.getByRole("button", { name: "按建议继续" }).click();
-  const completionDialog = page.getByRole("dialog", { name: "标记为已完成" });
-  await expect(completionDialog).toBeVisible();
+  await expect(detailDialog.getByRole("status")).toContainText("这条方向没有自动执行");
   persisted = findFragmentState(await readFragmentGardenPersistence(page), COMPLETE_ACTION_TITLE);
   expect(persisted.fragment.completionStatus).toBe("open");
   expect(persisted.partnerEvents).toEqual([]);
-  await completionDialog.getByRole("button", { name: "取消" }).click();
 
   const completedRequest = requests.find((request) => request.fragment.title === COMPLETED_TITLE);
   expect(completedRequest?.fragment.isCompleted).toBe(true);

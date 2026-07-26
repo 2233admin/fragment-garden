@@ -21,6 +21,7 @@ function createFragment(id: string): Fragment {
     title: "仓库测试",
     rawText: "原始内容",
     sourceUrl: null,
+    contentMarkdown: "原始内容",
     summary: null,
     keywords: [],
     lifecycleStatus: "active",

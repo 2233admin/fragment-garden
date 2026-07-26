@@ -11,6 +11,7 @@ function createFragment(id: string, overrides: Partial<Fragment> = {}): Fragment
     title: `标题 ${id}`,
     rawText: `不应进入 Phaser 的正文 ${id}`,
     sourceUrl: null,
+    contentMarkdown: `不应进入 Phaser 的正文 ${id}`,
     summary: null,
     keywords: [],
     lifecycleStatus: "active",

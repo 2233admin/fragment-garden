@@ -33,7 +33,7 @@ async function createTextFragment(page: Page): Promise<void> {
   await dialog.getByLabel("内容").fill(FRAGMENT_TEXT);
   await dialog.getByRole("button", { name: "种下", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("button", { name: `打开碎片：${FRAGMENT_TITLE}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `打开笔记：${FRAGMENT_TITLE}` })).toBeVisible();
 }
 
 async function clickCanvasWorld(page: Page, worldX: number, worldY: number): Promise<void> {
@@ -142,7 +142,7 @@ test("moves through the fixed garden and opens fragments through plants", async 
     expect(await countViewedEvents(page)).toBe(1);
     await page
       .getByRole("dialog", { name: FRAGMENT_TITLE })
-      .getByRole("button", { name: "关闭详情" })
+      .getByRole("button", { name: "返回", exact: true })
       .click();
   });
 
@@ -194,7 +194,7 @@ test("moves through the fixed garden and opens fragments through plants", async 
     expect(await countViewedEvents(page)).toBe(2);
     await page
       .getByRole("dialog", { name: FRAGMENT_TITLE })
-      .getByRole("button", { name: "关闭详情" })
+      .getByRole("button", { name: "返回", exact: true })
       .click();
     await expect(directOpenButton).toBeFocused();
     await page.waitForTimeout(500);
@@ -211,8 +211,8 @@ test("moves through the fixed garden and opens fragments through plants", async 
     const detailDialog = page.getByRole("dialog", { name: FRAGMENT_TITLE });
     await expect(detailDialog).toBeVisible({ timeout: 12_000 });
     expect(await countViewedEvents(page)).toBe(3);
-    await detailDialog.getByRole("button", { name: "删除碎片" }).click();
-    const confirmDialog = page.getByRole("alertdialog", { name: "确认删除碎片" });
+    await detailDialog.getByRole("button", { name: "删除", exact: true }).click();
+    const confirmDialog = page.getByRole("alertdialog", { name: "删除这条笔记？" });
     await confirmDialog.getByRole("button", { name: "确认删除", exact: true }).click();
 
     await expect(detailDialog).toBeHidden();

@@ -109,6 +109,7 @@ describe("createMediaFragment", () => {
       contentType: "image",
       title: "我的截图",
       rawText: "补充说明",
+      contentMarkdown: "补充说明",
       analysisStatus: "pending",
     });
     expect(result.plant).toMatchObject({
@@ -168,6 +169,7 @@ describe("createMediaFragment", () => {
     );
 
     expect(result.fragment.title).toMatch(/^图片想法 · /u);
+    expect(result.fragment.contentMarkdown).toBe("这张图片暂时没有可用的整理笔记。");
     expect(result.mediaAsset.temporaryTitle).toBe(result.fragment.title);
     expect(result.plant.slotId).toBeNull();
   });
@@ -189,6 +191,7 @@ describe("createMediaFragment", () => {
     );
 
     expect(result.fragment.contentType).toBe("audio");
+    expect(result.fragment.contentMarkdown).toBe("这段语音暂时没有可用的转写。");
     expect(result.mediaAsset).toMatchObject({
       kind: "audio",
       mimeType: "audio/webm",

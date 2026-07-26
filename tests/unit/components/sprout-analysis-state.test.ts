@@ -16,6 +16,7 @@ function createFragment(changes: Partial<Fragment> = {}): Fragment {
     title: "整理一个周末阅读角",
     rawText: "先明确希望谁来使用，以及第一次开放需要准备什么。",
     sourceUrl: null,
+    contentMarkdown: "先明确希望谁来使用，以及第一次开放需要准备什么。",
     summary: null,
     keywords: [],
     lifecycleStatus: "active",

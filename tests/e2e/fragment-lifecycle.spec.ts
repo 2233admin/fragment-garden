@@ -6,15 +6,19 @@ const DORMANT_TITLE = "等待重新发现的想法";
 const COMPLETED_TITLE = "把阅读角真正搭起来";
 const CHILD_TITLE = "阅读角的第一场分享";
 const ARCHIVED_TITLE = "暂时收好的旅行清单";
-const ARCHIVED_COMPLETED_PARENT_TITLE = "已经完成的社区读书会";
-const ARCHIVED_PARENT_CHILD_TITLE = "读书会长出的交换书架";
+
+type StoredFragmentSnapshot = Readonly<{
+  completionStatus: string;
+  fragmentId: string;
+  growthScore: number;
+  lifecycleStatus: string;
+  slotId: string | null;
+  stage: string;
+}>;
 
 async function clearIndexedDb(context: BrowserContext, page: Page): Promise<void> {
   const baseURL = test.info().project.use.baseURL;
-
-  if (typeof baseURL !== "string") {
-    throw new Error("The Playwright project must define a baseURL.");
-  }
+  if (typeof baseURL !== "string") throw new Error("The Playwright project must define a baseURL.");
 
   const cdpSession = await context.newCDPSession(page);
   await cdpSession.send("Storage.clearDataForOrigin", {
@@ -30,14 +34,14 @@ async function selectMode(page: Page, mode: "花园模式" | "卡片模式"): Pr
   await expect(button).toHaveAttribute("aria-pressed", "true");
 }
 
-async function createTextFragment(page: Page, title: string, rawText: string): Promise<void> {
+async function createTextFragment(page: Page, title: string, content: string): Promise<void> {
   await page.getByRole("button", { name: "种下碎片", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "种下文字碎片" });
   await dialog.getByLabel("标题（可选）").fill(title);
-  await dialog.getByLabel("内容").fill(rawText);
+  await dialog.getByLabel("内容").fill(content);
   await dialog.getByRole("button", { name: "种下", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("button", { name: `打开碎片：${title}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `打开笔记：${title}` })).toBeVisible();
 }
 
 async function clickCanvasWorld(page: Page, worldX: number, worldY: number): Promise<void> {
@@ -45,19 +49,10 @@ async function clickCanvasWorld(page: Page, worldX: number, worldY: number): Pro
   const scale = await canvas.evaluate((element) => {
     const canvasElement = element as HTMLCanvasElement;
     const bounds = canvasElement.getBoundingClientRect();
-
-    return {
-      x: bounds.width / canvasElement.width,
-      y: bounds.height / canvasElement.height,
-    };
+    return { x: bounds.width / canvasElement.width, y: bounds.height / canvasElement.height };
   });
 
-  await canvas.click({
-    position: {
-      x: worldX * scale.x,
-      y: worldY * scale.y,
-    },
-  });
+  await canvas.click({ position: { x: worldX * scale.x, y: worldY * scale.y } });
 }
 
 async function makeFragmentOlderThanDormancyThreshold(page: Page, title: string): Promise<void> {
@@ -76,18 +71,12 @@ async function makeFragmentOlderThanDormancyThreshold(page: Page, title: string)
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const fragment = (
-            request.result as Array<{
-              id: string;
-              title: string;
-              lastInteractedAt: string;
-            }>
+            request.result as Array<{ title: string; lastInteractedAt: string }>
           ).find((candidate) => candidate.title === fragmentTitle);
-
           if (fragment === undefined) {
             reject(new Error(`Fragment ${fragmentTitle} was not found`));
             return;
           }
-
           fragment.lastInteractedAt = new Date(Date.now() - 73 * 60 * 60 * 1_000).toISOString();
           store.put(fragment);
         };
@@ -95,14 +84,13 @@ async function makeFragmentOlderThanDormancyThreshold(page: Page, title: string)
         transaction.onerror = () => reject(transaction.error);
         transaction.onabort = () => reject(transaction.error);
       });
-
       database.close();
     },
     { fragmentTitle: title },
   );
 }
 
-async function readFragmentSlot(page: Page, title: string): Promise<string | null> {
+async function readFragmentSnapshot(page: Page, title: string): Promise<StoredFragmentSnapshot> {
   return page.evaluate(
     async ({ fragmentTitle }) => {
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -110,18 +98,20 @@ async function readFragmentSlot(page: Page, title: string): Promise<string | nul
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
       });
-      const result = await new Promise<string | null>((resolve, reject) => {
+
+      const snapshot = await new Promise<StoredFragmentSnapshot>((resolve, reject) => {
         const transaction = database.transaction(["fragments", "plants"], "readonly");
         const fragmentRequest = transaction.objectStore("fragments").getAll();
         fragmentRequest.onerror = () => reject(fragmentRequest.error);
         fragmentRequest.onsuccess = () => {
           const fragment = (
             fragmentRequest.result as Array<{
+              completionStatus: string;
               id: string;
+              lifecycleStatus: string;
               title: string;
             }>
           ).find((candidate) => candidate.title === fragmentTitle);
-
           if (fragment === undefined) {
             reject(new Error(`Fragment ${fragmentTitle} was not found`));
             return;
@@ -133,14 +123,25 @@ async function readFragmentSlot(page: Page, title: string): Promise<string | nul
             .get(fragment.id);
           plantRequest.onerror = () => reject(plantRequest.error);
           plantRequest.onsuccess = () => {
-            const plant = plantRequest.result as { slotId: string | null } | undefined;
-            resolve(plant?.slotId ?? null);
+            const plant = plantRequest.result as
+              { growthScore: number; slotId: string | null; stage: string } | undefined;
+            if (plant === undefined) {
+              reject(new Error(`Plant for ${fragmentTitle} was not found`));
+              return;
+            }
+            resolve({
+              completionStatus: fragment.completionStatus,
+              fragmentId: fragment.id,
+              growthScore: plant.growthScore,
+              lifecycleStatus: fragment.lifecycleStatus,
+              slotId: plant.slotId,
+              stage: plant.stage,
+            });
           };
         };
       });
-
       database.close();
-      return result;
+      return snapshot;
     },
     { fragmentTitle: title },
   );
@@ -155,12 +156,14 @@ async function countEvents(page: Page, type: string): Promise<number> {
         request.onsuccess = () => resolve(request.result);
       });
       const count = await new Promise<number>((resolve, reject) => {
-        const transaction = database.transaction("fragmentEvents", "readonly");
-        const request = transaction.objectStore("fragmentEvents").index("type").count(eventType);
+        const request = database
+          .transaction("fragmentEvents", "readonly")
+          .objectStore("fragmentEvents")
+          .index("type")
+          .count(eventType);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
       });
-
       database.close();
       return count;
     },
@@ -168,7 +171,156 @@ async function countEvents(page: Page, type: string): Promise<number> {
   );
 }
 
-test("persists automatic dormancy and restores through the same plant detail flow", async ({
+async function prepareCompletedRelation(
+  page: Page,
+  parentTitle: string,
+  childTitle: string,
+): Promise<void> {
+  await page.evaluate(
+    async ({ childFragmentTitle, parentFragmentTitle }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("fragment-garden");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction(["fragments", "plants", "relations"], "readwrite");
+        const fragmentStore = transaction.objectStore("fragments");
+        const fragmentsRequest = fragmentStore.getAll();
+        fragmentsRequest.onerror = () => reject(fragmentsRequest.error);
+        fragmentsRequest.onsuccess = () => {
+          const fragments = fragmentsRequest.result as Array<{
+            completedAt: string | null;
+            completionStatus: string;
+            id: string;
+            title: string;
+            updatedAt: string;
+          }>;
+          const parent = fragments.find((fragment) => fragment.title === parentFragmentTitle);
+          const child = fragments.find((fragment) => fragment.title === childFragmentTitle);
+          if (parent === undefined || child === undefined) {
+            reject(new Error("Parent or child Fragment was not found"));
+            return;
+          }
+
+          const now = new Date().toISOString();
+          parent.completionStatus = "completed";
+          parent.completedAt = now;
+          parent.updatedAt = now;
+          fragmentStore.put(parent);
+
+          const plantRequest = transaction.objectStore("plants").index("fragmentId").get(parent.id);
+          plantRequest.onerror = () => reject(plantRequest.error);
+          plantRequest.onsuccess = () => {
+            const plant = plantRequest.result as { stage: string; updatedAt: string } | undefined;
+            if (plant === undefined) {
+              reject(new Error("Parent Plant was not found"));
+              return;
+            }
+            plant.stage = "permanent_bloom";
+            plant.updatedAt = now;
+            transaction.objectStore("plants").put(plant);
+          };
+
+          transaction.objectStore("relations").put({
+            confirmedAt: now,
+            createdAt: now,
+            explanation: null,
+            id: crypto.randomUUID(),
+            relationType: "grows_from",
+            similarityScore: null,
+            sourceFragmentId: child.id,
+            status: "confirmed",
+            targetFragmentId: parent.id,
+          });
+        };
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      database.close();
+    },
+    { childFragmentTitle: childTitle, parentFragmentTitle: parentTitle },
+  );
+}
+
+async function prepareArchivedCompletedFragment(page: Page, title: string): Promise<void> {
+  await page.evaluate(
+    async ({ fragmentTitle }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("fragment-garden");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction(["fragments", "plants"], "readwrite");
+        const fragmentStore = transaction.objectStore("fragments");
+        const fragmentsRequest = fragmentStore.getAll();
+        fragmentsRequest.onerror = () => reject(fragmentsRequest.error);
+        fragmentsRequest.onsuccess = () => {
+          const fragment = (
+            fragmentsRequest.result as Array<{
+              completedAt: string | null;
+              completionStatus: string;
+              id: string;
+              lifecycleStatus: string;
+              title: string;
+              updatedAt: string;
+            }>
+          ).find((candidate) => candidate.title === fragmentTitle);
+          if (fragment === undefined) {
+            reject(new Error(`Fragment ${fragmentTitle} was not found`));
+            return;
+          }
+
+          const now = new Date().toISOString();
+          fragment.lifecycleStatus = "archived";
+          fragment.completionStatus = "completed";
+          fragment.completedAt = now;
+          fragment.updatedAt = now;
+          fragmentStore.put(fragment);
+
+          const plantRequest = transaction
+            .objectStore("plants")
+            .index("fragmentId")
+            .get(fragment.id);
+          plantRequest.onerror = () => reject(plantRequest.error);
+          plantRequest.onsuccess = () => {
+            const plant = plantRequest.result as
+              { slotId: string | null; stage: string; updatedAt: string } | undefined;
+            if (plant === undefined) {
+              reject(new Error("Plant was not found"));
+              return;
+            }
+            plant.slotId = null;
+            plant.stage = "permanent_bloom";
+            plant.updatedAt = now;
+            transaction.objectStore("plants").put(plant);
+          };
+        };
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      database.close();
+    },
+    { fragmentTitle: title },
+  );
+}
+
+async function addNoteFromDetail(
+  detail: ReturnType<Page["getByRole"]>,
+  text: string,
+): Promise<void> {
+  await detail.getByRole("button", { name: "追加笔记", exact: true }).click();
+  await detail.getByLabel("追加笔记内容").fill(text);
+  await detail.getByRole("button", { name: "保存笔记", exact: true }).click();
+  await expect(detail.getByText(text, { exact: true })).toBeVisible();
+}
+
+test("persists automatic dormancy and restores without exposing lifecycle in cards or details", async ({
   context,
   page,
 }) => {
@@ -184,35 +336,38 @@ test("persists automatic dormancy and restores through the same plant detail flo
   await page.reload();
 
   await selectMode(page, "卡片模式");
-  const dormantCard = page
-    .getByRole("button", { name: `打开碎片：${DORMANT_TITLE}` })
-    .locator("xpath=ancestor::article");
-  await expect(dormantCard).toContainText("休眠");
+  const card = page.getByRole("button", { name: `打开笔记：${DORMANT_TITLE}` });
+  await expect(card).not.toContainText(/休眠|活跃|成长分|成长阶段/u);
+  await expect
+    .poll(async () => (await readFragmentSnapshot(page, DORMANT_TITLE)).lifecycleStatus)
+    .toBe("dormant");
   await expect.poll(() => countEvents(page, "dormant")).toBe(1);
 
   await selectMode(page, "花园模式");
   const summary = page.getByTestId("garden-accessibility-summary");
   await expect(summary.getByText(new RegExp(`${DORMANT_TITLE}.*休眠`, "u"))).toBeAttached();
-
   await clickCanvasWorld(page, 112, 60);
+
   const detail = page.getByRole("dialog", { name: DORMANT_TITLE });
   await expect(detail).toBeVisible({ timeout: 12_000 });
-  await expect(detail.getByText("活跃", { exact: true }).first()).toBeVisible();
+  await expect(detail).not.toContainText(/内容状态|成长分|成长阶段|成长与状态记录/u);
+  await expect
+    .poll(async () => (await readFragmentSnapshot(page, DORMANT_TITLE)).lifecycleStatus)
+    .toBe("active");
   await expect.poll(() => countEvents(page, "restored")).toBe(1);
-  await detail.getByRole("button", { name: "关闭详情" }).click();
-
+  await detail.getByRole("button", { name: "返回", exact: true }).click();
   await expect(summary.getByText(new RegExp(`${DORMANT_TITLE}.*活跃`, "u"))).toBeAttached();
-  await selectMode(page, "卡片模式");
-  await expect(dormantCard).toContainText("活跃");
 
   await makeFragmentOlderThanDormancyThreshold(page, DORMANT_TITLE);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(dormantCard).toContainText("休眠");
+  await expect
+    .poll(async () => (await readFragmentSnapshot(page, DORMANT_TITLE)).lifecycleStatus)
+    .toBe("dormant");
   await expect.poll(() => countEvents(page, "dormant")).toBe(2);
   expect(pageErrors).toEqual([]);
 });
 
-test("keeps permanent bloom while growing and opening a related child idea", async ({
+test("keeps completed plants permanently blooming while notes and relations stay content-first", async ({
   context,
   page,
 }) => {
@@ -224,44 +379,30 @@ test("keeps permanent bloom while growing and opening a related child idea", asy
   await completeCompanionOnboardingIfNeeded(page);
   await selectMode(page, "卡片模式");
   await createTextFragment(page, COMPLETED_TITLE, "整理窗边，搭一个真的会使用的阅读角。");
-  await page.getByRole("button", { name: `打开碎片：${COMPLETED_TITLE}` }).click();
+  await createTextFragment(page, CHILD_TITLE, "邀请朋友来交换一本最近喜欢的书。");
+  await prepareCompletedRelation(page, COMPLETED_TITLE, CHILD_TITLE);
+  await page.reload();
+  await selectMode(page, "卡片模式");
 
-  let parentDetail = page.getByRole("dialog", { name: COMPLETED_TITLE });
-  await parentDetail.getByLabel("添加新补充").fill("先清出一块可以坐下的位置。");
-  await parentDetail.getByRole("button", { name: "保存补充" }).click();
-  await expect(parentDetail.getByText(/成长分\s*[：:]\s*1/u)).toBeVisible();
+  const parentCard = page.getByRole("button", { name: `打开笔记：${COMPLETED_TITLE}` });
+  await expect(parentCard).not.toContainText(/已完成|永久盛开|成长分|成长阶段/u);
+  await parentCard.click();
+  const parentDetail = page.getByRole("dialog", { name: COMPLETED_TITLE });
+  await addNoteFromDetail(parentDetail, "先清出一块可以坐下的位置。");
+  await expect(parentDetail).not.toContainText(/已完成|永久盛开|成长分|成长阶段/u);
 
-  await parentDetail.getByRole("button", { name: "标记为已完成" }).click();
-  const completionDialog = page.getByRole("dialog", { name: "标记为已完成" });
-  await completionDialog.getByLabel("它最后变成了什么？（可选）").fill("真的搭好了阅读角");
-  await completionDialog.getByRole("button", { name: "确认完成" }).click();
-  await expect(completionDialog).toBeHidden();
-  await expect(parentDetail.getByText(/成长阶段\s*[：:]\s*永久盛开/u)).toBeVisible();
-  await expect(parentDetail.getByText("真的搭好了阅读角", { exact: true })).toBeVisible();
+  const parentSnapshot = await readFragmentSnapshot(page, COMPLETED_TITLE);
+  expect(parentSnapshot.completionStatus).toBe("completed");
+  expect(parentSnapshot.stage).toBe("permanent_bloom");
+  expect(parentSnapshot.growthScore).toBe(1);
 
-  await parentDetail.getByLabel("添加新补充").fill("坐下来读完了第一篇短篇。");
-  await parentDetail.getByRole("button", { name: "保存补充" }).click();
-  await expect(parentDetail.getByText(/成长阶段\s*[：:]\s*永久盛开/u)).toBeVisible();
-
-  await parentDetail.getByRole("button", { name: "让它长成一个新想法" }).click();
-  const childDialog = page.getByRole("dialog", { name: "让它长成一个新想法" });
-  await childDialog.getByLabel("新想法标题（可选）").fill(CHILD_TITLE);
-  await childDialog.getByLabel("新想法内容").fill("邀请朋友来交换一本最近喜欢的书。");
-  await childDialog.getByRole("button", { name: "种下新想法" }).click();
-  await expect(childDialog).toBeHidden();
-  await parentDetail.getByRole("button", { name: "打开新想法" }).click();
-
+  await parentDetail.getByRole("button", { name: `延伸到「${CHILD_TITLE}」` }).click();
   const childDetail = page.getByRole("dialog", { name: CHILD_TITLE });
-  await expect(childDetail).toBeVisible();
-  await expect(childDetail.getByText(COMPLETED_TITLE, { exact: true })).toBeVisible();
-  await childDetail.getByRole("button", { name: "关闭详情" }).click();
-
-  await expect(page.getByRole("button", { name: `打开碎片：${CHILD_TITLE}` })).toBeVisible();
-  await page.getByRole("button", { name: `打开碎片：${COMPLETED_TITLE}` }).click();
-  parentDetail = page.getByRole("dialog", { name: COMPLETED_TITLE });
-  await expect(parentDetail.getByText(CHILD_TITLE, { exact: true })).toBeVisible();
-  await expect(parentDetail.getByText("已完成", { exact: true }).first()).toBeVisible();
-  await parentDetail.getByRole("button", { name: "关闭详情" }).click();
+  await expect(
+    childDetail.getByRole("button", { name: `源自「${COMPLETED_TITLE}」` }),
+  ).toBeVisible();
+  await expect(childDetail).not.toContainText(/活跃|未完成|成长分|成长阶段/u);
+  await childDetail.getByRole("button", { name: "返回", exact: true }).click();
 
   await selectMode(page, "花园模式");
   const summary = page.getByTestId("garden-accessibility-summary");
@@ -272,7 +413,7 @@ test("keeps permanent bloom while growing and opening a related child idea", asy
   expect(pageErrors).toEqual([]);
 });
 
-test("records no-longer-needed only after archive confirmation and restores its slot", async ({
+test("keeps archived completed content readable and editable without restoring its garden slot", async ({
   context,
   page,
 }) => {
@@ -284,184 +425,36 @@ test("records no-longer-needed only after archive confirmation and restores its 
   await completeCompanionOnboardingIfNeeded(page);
   await selectMode(page, "卡片模式");
   await createTextFragment(page, ARCHIVED_TITLE, "先收好这份旅行清单，等季节合适时再回来。");
-  const originalSlotId = await readFragmentSlot(page, ARCHIVED_TITLE);
-  expect(originalSlotId).not.toBeNull();
-
-  await page.getByRole("button", { name: `打开碎片：${ARCHIVED_TITLE}` }).click();
-  let detail = page.getByRole("dialog", { name: ARCHIVED_TITLE });
-  await detail.getByRole("button", { name: "不再需要" }).click();
-  const dispositionDialog = page.getByRole("alertdialog", {
-    name: "这条碎片不再需要了吗？",
-  });
-  await dispositionDialog.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(dispositionDialog).toBeHidden();
-  await expect(detail).toBeVisible();
-  await expect.poll(() => countEvents(page, "reviewed")).toBe(0);
-
-  await detail.getByRole("button", { name: "不再需要" }).click();
-  await dispositionDialog.getByRole("button", { name: "封存", exact: true }).click();
-  await expect(dispositionDialog).toBeHidden();
-  await expect(detail.getByRole("button", { name: "恢复到花园" })).toBeVisible();
-  await expect.poll(() => countEvents(page, "reviewed")).toBe(1);
-  await detail.getByRole("button", { name: "关闭详情" }).click();
-
-  await expect(page.getByRole("button", { name: `打开碎片：${ARCHIVED_TITLE}` })).toHaveCount(0);
-  await selectMode(page, "花园模式");
-  await expect(page.getByTestId("garden-accessibility-summary")).toHaveAttribute(
-    "data-plant-count",
-    "0",
-  );
+  await prepareArchivedCompletedFragment(page, ARCHIVED_TITLE);
+  await page.reload();
   await selectMode(page, "卡片模式");
-  await page.getByRole("button", { name: "已封存", exact: true }).click();
-  await page.getByLabel("搜索碎片").fill("旅行清单");
-  await expect(page.getByRole("button", { name: `打开碎片：${ARCHIVED_TITLE}` })).toBeVisible();
-  await page.getByRole("button", { name: `打开碎片：${ARCHIVED_TITLE}` }).click();
 
-  detail = page.getByRole("dialog", { name: ARCHIVED_TITLE });
-  await expect(detail.getByText(/封存/u).first()).toBeVisible();
-  await detail.getByRole("button", { name: "恢复到花园" }).click();
-  await expect(detail.getByText(/内容已恢复到花园/u)).toBeVisible();
-  await detail.getByRole("button", { name: "关闭详情" }).click();
+  const archivedCard = page.getByRole("button", { name: `打开笔记：${ARCHIVED_TITLE}` });
+  await expect(archivedCard).toBeVisible();
+  await expect(archivedCard).not.toContainText(/已封存|已完成|永久盛开|成长分/u);
+  await archivedCard.click();
 
-  await page.getByRole("button", { name: "当前", exact: true }).click();
-  await page.getByLabel("搜索碎片").fill("");
-  await expect(page.getByRole("button", { name: `打开碎片：${ARCHIVED_TITLE}` })).toBeVisible();
-  await selectMode(page, "花园模式");
-  await expect(page.getByTestId("garden-accessibility-summary")).toHaveAttribute(
-    "data-plant-count",
-    "1",
-  );
-  expect(await readFragmentSlot(page, ARCHIVED_TITLE)).not.toBeNull();
-  expect(pageErrors).toEqual([]);
-});
-
-test("keeps review gates and archived completed parent-child state consistent", async ({
-  context,
-  page,
-}) => {
-  const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  await clearIndexedDb(context, page);
-
-  await page.goto("/garden");
-  await completeCompanionOnboardingIfNeeded(page);
-  await selectMode(page, "卡片模式");
-  await createTextFragment(
-    page,
-    ARCHIVED_COMPLETED_PARENT_TITLE,
-    "社区读书会已经办完，但还可以从这次经验长出新的方向。",
-  );
-  await page.getByRole("button", { name: `打开碎片：${ARCHIVED_COMPLETED_PARENT_TITLE}` }).click();
-
-  let parentDetail = page.getByRole("dialog", { name: ARCHIVED_COMPLETED_PARENT_TITLE });
-  await parentDetail.getByRole("button", { name: "暂时用不上" }).click();
+  const detail = page.getByRole("dialog", { name: ARCHIVED_TITLE });
   await expect(
-    parentDetail.getByText("它会先安静地休息，想起来时再来看就好。", { exact: true }),
+    detail.getByText("先收好这份旅行清单，等季节合适时再回来。", { exact: true }),
   ).toBeVisible();
-  await expect(parentDetail.getByText("休眠", { exact: true }).first()).toBeVisible();
+  await expect(detail.getByRole("button", { name: "恢复到花园" })).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "标记为已完成" })).toHaveCount(0);
+  await expect(detail).not.toContainText(/已封存|已完成|永久盛开|成长阶段|成长分/u);
+  await addNoteFromDetail(detail, "补记：先保留春天适合去的两个地点。");
 
-  await parentDetail.getByRole("button", { name: "仍然感兴趣" }).click();
-  await expect(
-    parentDetail.getByText("已经记下，你以后还可以再回来看看。", { exact: true }),
-  ).toBeVisible();
-  await expect(parentDetail.getByText("活跃", { exact: true }).first()).toBeVisible();
-
-  await parentDetail.getByRole("button", { name: "标记为已完成" }).click();
-  const completionDialog = page.getByRole("dialog", { name: "标记为已完成" });
-  await completionDialog
-    .getByLabel("它最后变成了什么？（可选）")
-    .fill("办成了一次轻松的社区读书会");
-  await completionDialog.getByRole("button", { name: "确认完成" }).click();
-  await expect(completionDialog).toBeHidden();
-  await expect(parentDetail.getByText("已完成", { exact: true }).first()).toBeVisible();
-  await expect(parentDetail.getByText(/成长阶段\s*[：:]\s*永久盛开/u)).toBeVisible();
-  await expect(parentDetail.getByRole("button", { name: "暂时用不上" })).toHaveCount(0);
-  await expect(parentDetail.getByRole("button", { name: "标记为已完成" })).toHaveCount(0);
-  await expect(parentDetail.getByRole("button", { name: "仍然感兴趣" })).toBeVisible();
-
-  await parentDetail.getByRole("button", { name: "不再需要" }).click();
-  const dispositionDialog = page.getByRole("alertdialog", {
-    name: "这条碎片不再需要了吗？",
-  });
-  await dispositionDialog.getByRole("button", { name: "封存", exact: true }).click();
-  await expect(dispositionDialog).toBeHidden();
-  await expect(parentDetail.getByText("已封存", { exact: true }).first()).toBeVisible();
-  await expect(parentDetail.getByText("已完成", { exact: true }).first()).toBeVisible();
-  await expect(parentDetail.getByRole("button", { name: "恢复到花园" })).toBeVisible();
-  await expect(parentDetail.getByRole("heading", { name: "这条碎片现在怎么样？" })).toHaveCount(0);
-  await expect(parentDetail.getByRole("button", { name: "仍然感兴趣" })).toHaveCount(0);
-  await expect(parentDetail.getByRole("button", { name: "不再需要" })).toHaveCount(0);
-  await parentDetail.getByRole("button", { name: "关闭详情" }).click();
-
-  const parentCard = page
-    .getByRole("button", {
-      name: `打开碎片：${ARCHIVED_COMPLETED_PARENT_TITLE}`,
-    })
-    .locator("xpath=ancestor::article");
-  await expect(parentCard).toHaveCount(0);
-  await page.getByRole("button", { name: "已完成", exact: true }).click();
-  await expect(parentCard).toHaveCount(0);
-  await page.getByRole("button", { name: "已封存", exact: true }).click();
-  await expect(parentCard).toBeVisible();
-  await expect(parentCard).toContainText("已封存");
-  await expect(parentCard).toContainText("已完成");
+  const snapshot = await readFragmentSnapshot(page, ARCHIVED_TITLE);
+  expect(snapshot.lifecycleStatus).toBe("archived");
+  expect(snapshot.completionStatus).toBe("completed");
+  expect(snapshot.stage).toBe("permanent_bloom");
+  expect(snapshot.slotId).toBeNull();
+  expect(snapshot.growthScore).toBe(1);
+  await detail.getByRole("button", { name: "返回", exact: true }).click();
 
   await selectMode(page, "花园模式");
   await expect(page.getByTestId("garden-accessibility-summary")).toHaveAttribute(
     "data-plant-count",
     "0",
   );
-  await selectMode(page, "卡片模式");
-  await parentCard
-    .getByRole("button", {
-      name: `打开碎片：${ARCHIVED_COMPLETED_PARENT_TITLE}`,
-    })
-    .click();
-
-  parentDetail = page.getByRole("dialog", { name: ARCHIVED_COMPLETED_PARENT_TITLE });
-  await parentDetail.getByRole("button", { name: "让它长成一个新想法" }).click();
-  const childDialog = page.getByRole("dialog", { name: "让它长成一个新想法" });
-  await childDialog.getByLabel("新想法标题（可选）").fill(ARCHIVED_PARENT_CHILD_TITLE);
-  await childDialog.getByLabel("新想法内容").fill("搭一个可以自由交换读完书籍的小书架。");
-  await childDialog.getByRole("button", { name: "种下新想法" }).click();
-  await expect(childDialog).toBeHidden();
-  await expect(parentDetail.getByText(ARCHIVED_PARENT_CHILD_TITLE, { exact: true })).toBeVisible();
-  await expect(parentDetail.getByText("已封存", { exact: true }).first()).toBeVisible();
-  await expect(parentDetail.getByText("已完成", { exact: true }).first()).toBeVisible();
-  await parentDetail.getByRole("button", { name: "关闭详情" }).click();
-
-  await expect(parentCard).toBeVisible();
-  await page.getByRole("button", { name: "当前", exact: true }).click();
-  await expect(parentCard).toHaveCount(0);
-  const childCard = page
-    .getByRole("button", {
-      name: `打开碎片：${ARCHIVED_PARENT_CHILD_TITLE}`,
-    })
-    .locator("xpath=ancestor::article");
-  await expect(childCard).toBeVisible();
-  await expect(childCard).toContainText("活跃");
-
-  await selectMode(page, "花园模式");
-  const summary = page.getByTestId("garden-accessibility-summary");
-  await expect(summary).toHaveAttribute("data-plant-count", "1");
-  await expect(
-    summary.getByText(new RegExp(`${ARCHIVED_PARENT_CHILD_TITLE}.*幼苗.*活跃`, "u")),
-  ).toBeAttached();
-  await expect(summary.locator('li[data-stage="permanent_bloom"]')).toHaveCount(0);
-
-  await selectMode(page, "卡片模式");
-  await childCard
-    .getByRole("button", {
-      name: `打开碎片：${ARCHIVED_PARENT_CHILD_TITLE}`,
-    })
-    .click();
-  const childDetail = page.getByRole("dialog", { name: ARCHIVED_PARENT_CHILD_TITLE });
-  await expect(
-    childDetail.getByText(ARCHIVED_COMPLETED_PARENT_TITLE, { exact: true }),
-  ).toBeVisible();
-  await expect(childDetail.getByText("活跃", { exact: true }).first()).toBeVisible();
-  await expect(childDetail.getByText("未完成", { exact: true }).first()).toBeVisible();
-  await childDetail.getByRole("button", { name: "关闭详情" }).click();
-
   expect(pageErrors).toEqual([]);
 });

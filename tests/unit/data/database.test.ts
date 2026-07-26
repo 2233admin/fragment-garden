@@ -35,6 +35,7 @@ function createFragment(id: string): Fragment {
     title: "测试碎片",
     rawText: "一段本地保存的文字",
     sourceUrl: null,
+    contentMarkdown: "一段本地保存的文字",
     summary: null,
     keywords: [],
     lifecycleStatus: "active",
@@ -89,8 +90,10 @@ describe("FragmentGardenDatabase", () => {
         "attachments",
         "chatMessages",
         "clusters",
+        "contentProcessingJobs",
         "externalLinkImports",
         "fragmentEvents",
+        "fragmentNotes",
         "fragments",
         "mediaAssets",
         "plants",
@@ -144,6 +147,19 @@ describe("FragmentGardenDatabase", () => {
     expect(database.mediaAssets.schema.indexes.map((index) => index.name)).toEqual(
       expect.arrayContaining(["fragmentId", "kind", "processingStatus", "createdAt"]),
     );
+    expect(database.fragmentNotes.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["fragmentId", "source", "createdAt", "updatedAt"]),
+    );
+    expect(database.contentProcessingJobs.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "kind",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "sourceFragmentId",
+        "createdFragmentId",
+      ]),
+    );
   });
 
   it("upgrades a V3 database without changing old records and starts with no media assets", async () => {
@@ -155,13 +171,17 @@ describe("FragmentGardenDatabase", () => {
     await legacyDatabase.open();
 
     const fragment = createFragment("v3-fragment");
-    const plant = createPlant("v3-plant", fragment.id, "slot-04");
+    const legacyFragment: Omit<Fragment, "contentMarkdown"> & { contentMarkdown?: string } = {
+      ...fragment,
+    };
+    delete legacyFragment.contentMarkdown;
+    const plant = createPlant("v3-plant", legacyFragment.id, "slot-04");
     const event: FragmentEvent = {
       id: "v3-created-event",
-      fragmentId: fragment.id,
+      fragmentId: legacyFragment.id,
       type: "created",
       payload: null,
-      occurredAt: fragment.createdAt,
+      occurredAt: legacyFragment.createdAt,
       ruleVersion: 1,
     };
     const settings: Settings = {
@@ -178,13 +198,13 @@ describe("FragmentGardenDatabase", () => {
     };
     const message: ChatMessage = {
       id: "v3-message",
-      fragmentId: fragment.id,
+      fragmentId: legacyFragment.id,
       role: "assistant",
       content: "legacy message",
-      createdAt: fragment.createdAt,
+      createdAt: legacyFragment.createdAt,
     };
 
-    await legacyDatabase.table<Fragment>("fragments").add(fragment);
+    await legacyDatabase.table("fragments").add(legacyFragment);
     await legacyDatabase.table<Plant>("plants").add(plant);
     await legacyDatabase.table<FragmentEvent>("fragmentEvents").add(event);
     await legacyDatabase.table<Settings>("settings").add(settings);
@@ -194,12 +214,17 @@ describe("FragmentGardenDatabase", () => {
     const upgradedDatabase = createTestDatabase(databaseName);
     await upgradedDatabase.open();
 
-    await expect(upgradedDatabase.fragments.get(fragment.id)).resolves.toEqual(fragment);
+    await expect(upgradedDatabase.fragments.get(legacyFragment.id)).resolves.toEqual({
+      ...legacyFragment,
+      contentMarkdown: "一段本地保存的文字",
+    });
     await expect(upgradedDatabase.plants.get(plant.id)).resolves.toEqual(plant);
     await expect(upgradedDatabase.fragmentEvents.get(event.id)).resolves.toEqual(event);
     await expect(upgradedDatabase.settings.get(settings.id)).resolves.toEqual(settings);
     await expect(upgradedDatabase.chatMessages.get(message.id)).resolves.toEqual(message);
     await expect(upgradedDatabase.mediaAssets.count()).resolves.toBe(0);
+    await expect(upgradedDatabase.fragmentNotes.count()).resolves.toBe(0);
+    await expect(upgradedDatabase.contentProcessingJobs.count()).resolves.toBe(0);
   });
 
   it("upgrades V1 data without loss and releases retired fragment slots", async () => {

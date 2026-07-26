@@ -34,7 +34,7 @@ async function createTextFragment(page: Page, title: string, content: string): P
   await dialog.getByLabel("内容").fill(content);
   await dialog.getByRole("button", { name: "种下", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("button", { name: `打开碎片：${title}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `打开笔记：${title}` })).toBeVisible();
 }
 
 async function expectGardenPlantCount(page: Page, count: number): Promise<void> {
@@ -43,6 +43,48 @@ async function expectGardenPlantCount(page: Page, count: number): Promise<void> 
   await expect(summary).toContainText(`花园中有 ${count} 株已放置植物`);
   await expect(page.getByTestId("garden-canvas-host").locator("canvas")).toHaveCount(1);
   await expect(page.locator("canvas")).toHaveCount(1);
+}
+
+async function readPlantStage(page: Page, title: string): Promise<string> {
+  return page.evaluate(
+    async ({ fragmentTitle }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("fragment-garden");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+      const stage = await new Promise<string>((resolve, reject) => {
+        const transaction = database.transaction(["fragments", "plants"], "readonly");
+        const fragmentsRequest = transaction.objectStore("fragments").getAll();
+        fragmentsRequest.onerror = () => reject(fragmentsRequest.error);
+        fragmentsRequest.onsuccess = () => {
+          const fragment = (fragmentsRequest.result as Array<{ id: string; title: string }>).find(
+            (candidate) => candidate.title === fragmentTitle,
+          );
+          if (fragment === undefined) {
+            reject(new Error(`Fragment ${fragmentTitle} was not found`));
+            return;
+          }
+          const plantRequest = transaction
+            .objectStore("plants")
+            .index("fragmentId")
+            .get(fragment.id);
+          plantRequest.onerror = () => reject(plantRequest.error);
+          plantRequest.onsuccess = () => {
+            const plant = plantRequest.result as { stage: string } | undefined;
+            if (plant === undefined) {
+              reject(new Error(`Plant for ${fragmentTitle} was not found`));
+              return;
+            }
+            resolve(plant.stage);
+          };
+        };
+      });
+      database.close();
+      return stage;
+    },
+    { fragmentTitle: title },
+  );
 }
 
 test("renders and synchronizes local plants in the fixed garden", async ({ context, page }) => {
@@ -79,16 +121,19 @@ test("renders and synchronizes local plants in the fixed garden", async ({ conte
     await expectGardenPlantCount(page, 2);
   });
 
-  await test.step("5. 模式切换保留搜索，文字补充同步更新植物阶段", async () => {
+  await test.step("5. 模式切换保留搜索，追加笔记后花园投影同步成长", async () => {
     await selectMode(page, "卡片模式");
     await expect(page.getByLabel("搜索碎片")).toHaveValue("雨天");
     await page.getByLabel("搜索碎片").fill("");
-    await page.getByRole("button", { name: `打开碎片：${FIRST_TITLE}` }).click();
+    await page.getByRole("button", { name: `打开笔记：${FIRST_TITLE}` }).click();
     const detailDialog = page.getByRole("dialog", { name: FIRST_TITLE });
-    await detailDialog.getByLabel("添加新补充").fill(SUPPLEMENT_TEXT);
-    await detailDialog.getByRole("button", { name: "保存补充" }).click();
-    await expect(detailDialog.getByText(/成长阶段\s*[：:]\s*(生长|growing)/i)).toBeVisible();
-    await detailDialog.getByRole("button", { name: "关闭详情" }).click();
+    await detailDialog.getByRole("button", { name: "追加笔记", exact: true }).click();
+    await detailDialog.getByLabel("追加笔记内容").fill(SUPPLEMENT_TEXT);
+    await detailDialog.getByRole("button", { name: "保存笔记", exact: true }).click();
+    await expect(detailDialog.getByText(SUPPLEMENT_TEXT, { exact: true })).toBeVisible();
+    await expect(detailDialog).not.toContainText(/成长阶段|成长分|活跃|休眠/u);
+    await expect.poll(() => readPlantStage(page, FIRST_TITLE)).toBe("growing");
+    await detailDialog.getByRole("button", { name: "返回", exact: true }).click();
 
     await selectMode(page, "花园模式");
     await expectGardenPlantCount(page, 2);
@@ -101,12 +146,12 @@ test("renders and synchronizes local plants in the fixed garden", async ({ conte
 
   await test.step("6. 软删除后对应植物从花园移除", async () => {
     await selectMode(page, "卡片模式");
-    await page.getByRole("button", { name: `打开碎片：${SECOND_TITLE}` }).click();
+    await page.getByRole("button", { name: `打开笔记：${SECOND_TITLE}` }).click();
     const detailDialog = page.getByRole("dialog", { name: SECOND_TITLE });
-    await detailDialog.getByRole("button", { name: "删除碎片" }).click();
-    const confirmDialog = page.getByRole("alertdialog", { name: "确认删除碎片" });
+    await detailDialog.getByRole("button", { name: "删除", exact: true }).click();
+    const confirmDialog = page.getByRole("alertdialog", { name: "删除这条笔记？" });
     await confirmDialog.getByRole("button", { name: "确认删除", exact: true }).click();
-    await expect(page.getByRole("button", { name: `打开碎片：${SECOND_TITLE}` })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: `打开笔记：${SECOND_TITLE}` })).toHaveCount(0);
 
     await selectMode(page, "花园模式");
     await expectGardenPlantCount(page, 1);

@@ -15,6 +15,7 @@ export function createStageTwoFragment(overrides: Partial<Fragment> = {}): Fragm
     title: "原始标题",
     rawText: "原始正文",
     sourceUrl: null,
+    contentMarkdown: "原始正文",
     summary: null,
     keywords: [],
     lifecycleStatus: "active",

@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 describe("updateFragmentContent", () => {
-  it("updates title and raw text without adding growth events", async () => {
+  it("updates title and Markdown without changing legacy source text or growth events", async () => {
     const fragment = createStageTwoFragment({ lifecycleStatus: "dormant" });
     const plant = createStageTwoPlant({
       vitality: "dormant",
@@ -46,7 +46,7 @@ describe("updateFragmentContent", () => {
       {
         fragmentId: fragment.id,
         title: "  修改后的标题  ",
-        rawText: "  保留正文格式\n以及换行  ",
+        contentMarkdown: "  ## 保留正文格式\r\n以及换行  ",
       },
       {
         database,
@@ -57,7 +57,8 @@ describe("updateFragmentContent", () => {
 
     expect(result.fragment).toMatchObject({
       title: "修改后的标题",
-      rawText: "  保留正文格式\n以及换行  ",
+      rawText: fragment.rawText,
+      contentMarkdown: "## 保留正文格式\n以及换行",
       lifecycleStatus: "active",
       updatedAt: STAGE_TWO_TEST_TIMESTAMP,
       lastInteractedAt: STAGE_TWO_TEST_TIMESTAMP,
@@ -86,7 +87,7 @@ describe("updateFragmentContent", () => {
       {
         fragmentId: fragment.id,
         title: "封存后的标题",
-        rawText: "封存后仍可编辑",
+        contentMarkdown: "封存后仍可编辑",
       },
       { database, now: () => STAGE_TWO_TEST_DATE },
     );
@@ -106,7 +107,7 @@ describe("updateFragmentContent", () => {
       {
         fragmentId: fragment.id,
         title: "   ",
-        rawText: "\n  新的   第一行  \n第二行",
+        contentMarkdown: "\n## 新的 第一行\n第二行",
       },
       { database, now: () => STAGE_TWO_TEST_DATE },
     );
@@ -122,7 +123,7 @@ describe("updateFragmentContent", () => {
 
     await expect(
       updateFragmentContent(
-        { fragmentId: fragment.id, rawText: " \n\t " },
+        { fragmentId: fragment.id, contentMarkdown: " \n\t " },
         { database, now: () => STAGE_TWO_TEST_DATE },
       ),
     ).rejects.toThrow("cannot be empty");
@@ -131,7 +132,7 @@ describe("updateFragmentContent", () => {
     await expect(database.plants.get(plant.id)).resolves.toEqual(plant);
   });
 
-  it("allows an empty link body, marks its title as user-provided, and does not restart import", async () => {
+  it("edits a link title without replacing its generated body or restarting import", async () => {
     const created = await createLocalLinkFragment(
       {
         sourceUrl: "https://example.com/article",
@@ -158,7 +159,8 @@ describe("updateFragmentContent", () => {
       {
         fragmentId: created.fragment.id,
         title: "我补上的链接标题",
-        rawText: "",
+        contentMarkdown: "",
+        editedFields: { title: true, contentMarkdown: false },
       },
       { database, now: () => STAGE_TWO_TEST_DATE },
     );
@@ -167,6 +169,7 @@ describe("updateFragmentContent", () => {
     expect(result.fragment).toMatchObject({
       title: "我补上的链接标题",
       rawText: null,
+      contentMarkdown: created.fragment.contentMarkdown,
       analysisStatus: "pending",
     });
     expect(storedImport).toMatchObject({
@@ -205,7 +208,7 @@ describe("updateFragmentContent", () => {
       {
         fragmentId: created.fragment.id,
         title: created.fragment.title,
-        rawText: "用户手动补写的链接正文",
+        contentMarkdown: "用户手动补写的链接正文",
       },
       { database, now: () => STAGE_TWO_TEST_DATE },
     );
@@ -243,22 +246,23 @@ describe("updateFragmentContent", () => {
 
     await database.fragments.update(created.fragment.id, {
       title: "第三方刚写回的标题",
-      rawText: "第三方正文",
+      contentMarkdown: "第三方正文",
     });
 
     const result = await updateFragmentContent(
       {
         fragmentId: created.fragment.id,
         title: created.fragment.title,
-        rawText: "用户只修改了正文",
-        editedFields: { title: false, rawText: true },
+        contentMarkdown: "用户只修改了正文",
+        editedFields: { title: false, contentMarkdown: true },
       },
       { database, now: () => STAGE_TWO_TEST_DATE },
     );
 
     expect(result.fragment).toMatchObject({
       title: "第三方刚写回的标题",
-      rawText: "用户只修改了正文",
+      rawText: null,
+      contentMarkdown: "用户只修改了正文",
     });
     await expect(
       database.externalLinkImports.get(created.externalLinkImport.id),
@@ -293,22 +297,23 @@ describe("updateFragmentContent", () => {
 
     await database.fragments.update(created.fragment.id, {
       title: "第三方标题",
-      rawText: "第三方刚写回的正文",
+      contentMarkdown: "第三方刚写回的正文",
     });
 
     const result = await updateFragmentContent(
       {
         fragmentId: created.fragment.id,
         title: "用户只修改了标题",
-        rawText: "",
-        editedFields: { title: true, rawText: false },
+        contentMarkdown: "",
+        editedFields: { title: true, contentMarkdown: false },
       },
       { database, now: () => STAGE_TWO_TEST_DATE },
     );
 
     expect(result.fragment).toMatchObject({
       title: "用户只修改了标题",
-      rawText: "第三方刚写回的正文",
+      rawText: null,
+      contentMarkdown: "第三方刚写回的正文",
     });
     await expect(
       database.externalLinkImports.get(created.externalLinkImport.id),
@@ -332,7 +337,7 @@ describe("updateFragmentContent", () => {
         {
           fragmentId: fragment.id,
           title: "不应保存",
-          rawText: "不应保存的正文",
+          contentMarkdown: "不应保存的正文",
         },
         { database, now: () => STAGE_TWO_TEST_DATE },
       ),

@@ -6,6 +6,7 @@ import { clearFragmentGardenIndexedDb, readFragmentGardenPersistence } from "./h
 const IMAGE_TITLE = "周末花园截图";
 const IMAGE_SUMMARY = "一张包含简单标签的花园截图。";
 const IMAGE_VISIBLE_TEXT = "从这里开始";
+const IMAGE_NOTE = "记录这张图里的布局。";
 
 // A tiny valid PNG keeps the test deterministic and avoids checking in binary fixtures.
 const PNG_BYTES = Buffer.from(
@@ -15,9 +16,7 @@ const PNG_BYTES = Buffer.from(
 
 function getBaseUrl(): string {
   const baseURL = test.info().project.use.baseURL;
-  if (typeof baseURL !== "string") {
-    throw new Error("The Playwright project must define a baseURL.");
-  }
+  if (typeof baseURL !== "string") throw new Error("The Playwright project must define a baseURL.");
   return baseURL;
 }
 
@@ -38,46 +37,21 @@ async function openImageCreator(page: Page) {
   return imageDialog;
 }
 
-test("keeps image local before disclosure and persists the later analysis", async ({
+test("keeps image local before disclosure and renders the persisted analysis as note content", async ({
   context,
   page,
 }) => {
-  await initializeGarden(context, page);
-
-  const imageDialog = await openImageCreator(page);
-  await imageDialog.locator('input[type="file"]').setInputFiles({
-    name: "garden.png",
-    mimeType: "image/png",
-    buffer: PNG_BYTES,
-  });
-  await expect(imageDialog.getByAltText("待保存的图片预览")).toBeVisible();
-  await imageDialog.getByLabel("标题（可选）").fill(IMAGE_TITLE);
-  await imageDialog.getByLabel("补充说明（可选）").fill("记录这张图里的布局。");
-  await imageDialog.getByRole("button", { name: "种下图片", exact: true }).click();
-  await expect(imageDialog).toBeHidden();
-
-  await expect(page.getByRole("button", { name: `打开碎片：${IMAGE_TITLE}` })).toBeVisible();
-  await expect
-    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets)
-    .toHaveLength(1);
-  let persistence = await readFragmentGardenPersistence(page);
-  expect(persistence.fragments).toHaveLength(1);
-  expect(persistence.fragments[0]?.contentType).toBe("image");
-  expect(persistence.mediaAssets[0]?.processingStatus).toBe("pending");
-  expect(persistence.mediaAssets[0]?.blobSize).toBe(PNG_BYTES.byteLength);
-
-  const disclosure = page.getByRole("dialog", { name: "发送当前图片前，请先确认" });
-  await expect(disclosure).toBeVisible();
-  await disclosure.getByRole("button", { name: "仅保存在本地", exact: true }).click();
-  await expect(disclosure).toBeHidden();
-
-  persistence = await readFragmentGardenPersistence(page);
-  expect(persistence.mediaAssets[0]?.processingStatus).toBe("local_only");
-
   let analysisRequestCount = 0;
+  let releaseAnalysis!: () => void;
+  const analysisBlocked = new Promise<void>((resolve) => {
+    releaseAnalysis = resolve;
+  });
   await page.route("**/api/media/image/analyze", async (route) => {
     analysisRequestCount += 1;
-    const clientRequestId = route.request().headers()["x-client-request-id"] ?? "image-e2e-request";
+    const body = (await route.request().postDataBuffer())?.toString("utf8") ?? "";
+    const clientRequestId =
+      body.match(/name="clientRequestId"\r?\n\r?\n([^\r\n]+)/u)?.[1] ?? "image-e2e-request";
+    await analysisBlocked;
     await route.fulfill({
       body: JSON.stringify({
         requestId: "00000000-0000-4000-8000-000000000001",
@@ -94,28 +68,60 @@ test("keeps image local before disclosure and persists the later analysis", asyn
     });
   });
 
-  await page.getByRole("button", { name: `打开碎片：${IMAGE_TITLE}` }).click();
-  const detail = page.getByRole("dialog", { name: IMAGE_TITLE });
-  await expect(detail).toBeVisible();
-  await detail.getByRole("button", { name: "分析图片", exact: true }).click();
+  await initializeGarden(context, page);
+  const imageDialog = await openImageCreator(page);
+  await imageDialog.locator('input[type="file"]').setInputFiles({
+    name: "garden.png",
+    mimeType: "image/png",
+    buffer: PNG_BYTES,
+  });
+  await expect(imageDialog.getByAltText("待保存的图片预览")).toBeVisible();
+  await imageDialog.getByLabel("标题（可选）").fill(IMAGE_TITLE);
+  await imageDialog.getByLabel("补充说明（可选）").fill(IMAGE_NOTE);
+  await imageDialog.getByRole("button", { name: "种下图片", exact: true }).click();
+  await expect(imageDialog).toBeHidden();
+
+  await expect(page.getByRole("button", { name: `打开笔记：${IMAGE_TITLE}` })).toBeVisible();
+  await expect
+    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets)
+    .toHaveLength(1);
+  const localState = await readFragmentGardenPersistence(page);
+  expect(localState.fragments).toHaveLength(1);
+  expect(localState.fragments[0]?.contentType).toBe("image");
+  expect(localState.mediaAssets[0]?.processingStatus).toBe("pending");
+  expect(localState.mediaAssets[0]?.blobSize).toBe(PNG_BYTES.byteLength);
+
+  const disclosure = page.getByRole("dialog", { name: "发送当前图片前，请先确认" });
   await expect(disclosure).toBeVisible();
   await disclosure.getByRole("button", { name: "同意并分析", exact: true }).click();
-
   await expect.poll(() => analysisRequestCount).toBe(1);
   await expect
     .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets[0]?.processingStatus)
+    .toBe("processing");
+
+  releaseAnalysis();
+  await expect
+    .poll(async () => (await readFragmentGardenPersistence(page)).mediaAssets[0]?.processingStatus)
     .toBe("completed");
+  expect((await readFragmentGardenPersistence(page)).fragments[0]?.title).toBe(IMAGE_TITLE);
+
+  await page.getByRole("button", { name: `打开笔记：${IMAGE_TITLE}` }).click();
+  const detail = page.getByRole("dialog", { name: IMAGE_TITLE });
+  await expect(detail.getByAltText(`用户上传的图片：${IMAGE_TITLE}`)).toBeVisible();
   await expect(detail.getByText(IMAGE_SUMMARY, { exact: true })).toBeVisible();
   await expect(detail.getByText(IMAGE_VISIBLE_TEXT, { exact: true })).toBeVisible();
-  await expect(detail.getByRole("heading", { name: IMAGE_TITLE })).toBeVisible();
+  await expect(detail.getByText(IMAGE_NOTE, { exact: true })).toBeVisible();
+  await expect(detail).not.toContainText(/分析完成|处理状态|图片摘要|可见文字|成长分|成长阶段/u);
+  await expect(detail.getByRole("button", { name: /分析图片|重新分析/u })).toHaveCount(0);
 
-  await detail.getByRole("button", { name: "关闭详情" }).click();
+  await detail.getByRole("button", { name: "返回", exact: true }).click();
   await page.reload();
   await page.getByRole("button", { name: "卡片模式", exact: true }).click();
-  await page.getByRole("button", { name: `打开碎片：${IMAGE_TITLE}` }).click();
+  await page.getByRole("button", { name: `打开笔记：${IMAGE_TITLE}` }).click();
   const refreshedDetail = page.getByRole("dialog", { name: IMAGE_TITLE });
-  await expect(refreshedDetail.getByText(IMAGE_SUMMARY, { exact: true })).toBeVisible();
   await expect(refreshedDetail.getByAltText(`用户上传的图片：${IMAGE_TITLE}`)).toBeVisible();
+  await expect(refreshedDetail.getByText(IMAGE_SUMMARY, { exact: true })).toBeVisible();
+  await expect(refreshedDetail.getByText(IMAGE_VISIBLE_TEXT, { exact: true })).toBeVisible();
   expect((await readFragmentGardenPersistence(page)).mediaAssets[0]?.processingStatus).toBe(
     "completed",
   );

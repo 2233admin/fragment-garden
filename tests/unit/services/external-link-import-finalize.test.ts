@@ -62,6 +62,7 @@ describe("external link import finalization", () => {
     expect(result.fragment).toMatchObject({
       title: seeded.fragment.title,
       rawText: "读取后的完整正文",
+      contentMarkdown: "读取后的完整正文\n\n读取后的摘要",
       summary: "读取后的摘要",
       sourceUrl: seeded.fragment.sourceUrl,
       analysisStatus: "completed",
@@ -111,6 +112,7 @@ describe("external link import finalization", () => {
     await expect(database.fragments.get(seeded.fragment.id)).resolves.toMatchObject({
       title: "Provider 标题",
       rawText: null,
+      contentMarkdown: "Provider 标题\n\n来源链接：https://example.com/automatic-title",
       summary: null,
       analysisStatus: "completed",
     });
@@ -125,6 +127,7 @@ describe("external link import finalization", () => {
     });
     await database.fragments.update(seeded.fragment.id, {
       rawText: "用户手动保留的正文",
+      contentMarkdown: "用户手动保留的正文",
     });
 
     const result = await completeExternalLinkImport(
@@ -149,6 +152,7 @@ describe("external link import finalization", () => {
     await expect(database.fragments.get(seeded.fragment.id)).resolves.toMatchObject({
       title: "Provider 新标题",
       rawText: "用户手动保留的正文",
+      contentMarkdown: "用户手动保留的正文",
       summary: "Provider 新摘要",
       analysisStatus: "completed",
     });

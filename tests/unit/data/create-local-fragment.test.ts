@@ -67,6 +67,7 @@ describe("createLocalFragment", () => {
 
     expect(result.fragment.title).toBe("自动 生成标题");
     expect(result.fragment.rawText).toBe("\n  自动   生成标题  \n不会使用第二行");
+    expect(result.fragment.contentMarkdown).toBe("自动   生成标题    \n不会使用第二行");
   });
 
   it("preserves a manually supplied non-empty title", async () => {
@@ -74,6 +75,7 @@ describe("createLocalFragment", () => {
       {
         title: "  用户标题  ",
         rawText: "正文第一行",
+        contentMarkdown: "  ## 正文第一行  ",
       },
       {
         database,
@@ -87,6 +89,7 @@ describe("createLocalFragment", () => {
     );
 
     expect(result.fragment.title).toBe("用户标题");
+    expect(result.fragment.contentMarkdown).toBe("## 正文第一行");
   });
 
   it("rejects whitespace-only text without writing records", async () => {
@@ -125,6 +128,7 @@ describe("createLocalFragment", () => {
       title: "新的想法",
       rawText: "保留原始文字，不等待 AI。",
       sourceUrl: null,
+      contentMarkdown: "保留原始文字，不等待 AI。",
       summary: null,
       keywords: [],
       lifecycleStatus: "active",

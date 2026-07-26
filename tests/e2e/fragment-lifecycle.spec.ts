@@ -396,10 +396,10 @@ test("keeps completed plants permanently blooming while notes and relations stay
   expect(parentSnapshot.stage).toBe("permanent_bloom");
   expect(parentSnapshot.growthScore).toBe(1);
 
-  await parentDetail.getByRole("button", { name: `延伸到「${CHILD_TITLE}」` }).click();
+  await parentDetail.getByRole("button", { name: `查看「${CHILD_TITLE}」` }).click();
   const childDetail = page.getByRole("dialog", { name: CHILD_TITLE });
   await expect(
-    childDetail.getByRole("button", { name: `源自「${COMPLETED_TITLE}」` }),
+    childDetail.getByRole("button", { name: `发芽自「${COMPLETED_TITLE}」` }),
   ).toBeVisible();
   await expect(childDetail).not.toContainText(/活跃|未完成|成长分|成长阶段/u);
   await childDetail.getByRole("button", { name: "返回", exact: true }).click();

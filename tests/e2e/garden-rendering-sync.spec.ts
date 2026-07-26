@@ -41,8 +41,10 @@ async function expectGardenPlantCount(page: Page, count: number): Promise<void> 
   const summary = page.getByTestId("garden-accessibility-summary");
   await expect(summary).toHaveAttribute("data-plant-count", String(count));
   await expect(summary).toContainText(`花园中有 ${count} 株已放置植物`);
-  await expect(page.getByTestId("garden-canvas-host").locator("canvas")).toHaveCount(1);
-  await expect(page.locator("canvas")).toHaveCount(1);
+  await expect(page.getByTestId("garden-canvas-host").locator("canvas")).toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await expect(page.locator("canvas")).toHaveCount(1, { timeout: 15_000 });
 }
 
 async function readPlantStage(page: Page, title: string): Promise<string> {

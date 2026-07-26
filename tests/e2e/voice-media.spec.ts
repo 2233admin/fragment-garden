@@ -8,16 +8,11 @@ const ORIGINAL_TRANSCRIPT = "今天记录一个可以慢慢整理的想法。";
 const EDITED_TRANSCRIPT = "今天先整理这个想法最重要的第一步。";
 
 type CapturedSproutRequest = {
-  avoidDirections: string[];
-  fragment: {
-    additions: Array<{ content: string; source: "partner" | "user" }>;
-    body: string | null;
-    linkSummary: string | null;
-    linkText: string | null;
-    mediaContentKind?: string | null;
-    mediaSummary?: string;
-    mediaTranscript?: string;
-    mediaVisibleText?: string;
+  source: {
+    contentMarkdown: string;
+    notes: Array<{ contentMarkdown: string; createdAt: string }>;
+    sourceName: string | null;
+    sourceType: "voice";
     title: string;
   };
 };
@@ -57,7 +52,7 @@ async function seedHistoricalVoiceFragment(page: Page): Promise<void> {
         transaction.onabort = () => reject(transaction.error);
       });
       const timestamp = "2026-07-25T08:00:00.000Z";
-      const fragmentId = "historical-voice-fragment";
+      const fragmentId = "44444444-4444-4444-8444-444444444444";
 
       const sampleRate = 8_000;
       const sampleCount = 2_000;
@@ -164,13 +159,11 @@ async function seedHistoricalVoiceFragment(page: Page): Promise<void> {
   );
 }
 
-async function fulfillSproutSuggestion(route: Route): Promise<void> {
+async function fulfillSproutNote(route: Route): Promise<void> {
   await route.fulfill({
     body: JSON.stringify({
-      type: "suggestion",
-      direction: "先把语音里提到的第一步写成一句可以执行的话。",
-      guidingQuestion: "完成这一步时，你希望看到什么具体结果？",
-      recommendedAction: "record_next_step",
+      title: "语音里最重要的第一步",
+      markdown: "## 下一步\n\n先把语音中最重要的第一步写清楚。",
     }),
     contentType: "application/json",
     status: 200,
@@ -227,6 +220,7 @@ test("keeps historical voice playback and transcript editing without exposing re
   page,
 }) => {
   let transcriptionRequests = 0;
+  let legacySproutRequests = 0;
   const sproutRequests: CapturedSproutRequest[] = [];
   let sproutRequestBody = "";
   await page.route("**/api/media/audio/transcribe", async (route) => {
@@ -234,9 +228,13 @@ test("keeps historical voice playback and transcript editing without exposing re
     await route.fulfill({ body: "{}", contentType: "application/json", status: 500 });
   });
   await page.route("**/api/sprout/analyze", async (route) => {
+    legacySproutRequests += 1;
+    await route.fulfill({ body: "unexpected legacy request", status: 500 });
+  });
+  await page.route("**/api/sprout/generate", async (route) => {
     sproutRequestBody = route.request().postData() ?? "";
     sproutRequests.push(route.request().postDataJSON() as CapturedSproutRequest);
-    await fulfillSproutSuggestion(route);
+    await fulfillSproutNote(route);
   });
 
   await initializeGarden(context, page);
@@ -277,11 +275,11 @@ test("keeps historical voice playback and transcript editing without exposing re
   await expect(detail).not.toContainText(/转写完成|处理状态|成长分|成长阶段/u);
 
   await detail.getByRole("button", { name: "发芽", exact: true }).click();
-  const sproutDialog = page.getByRole("dialog", { name: "思维发芽" });
-  await expect(sproutDialog.getByRole("heading", { name: "伙伴建议" })).toBeVisible();
-  await expect(
-    sproutDialog.getByText("先把语音里提到的第一步写成一句可以执行的话。", { exact: true }),
-  ).toBeVisible();
+  const sproutDialog = page.getByRole("dialog", { name: "生成一条新笔记" });
+  await expect(sproutDialog.getByRole("heading", { name: "新笔记预览" })).toBeVisible();
+  await expect(sproutDialog.locator('input[id^="sprout-title-"]')).toHaveValue(
+    "语音里最重要的第一步",
+  );
 
   expect(sproutRequests).toHaveLength(1);
   const sproutRequest = sproutRequests[0];
@@ -289,21 +287,20 @@ test("keeps historical voice playback and transcript editing without exposing re
   if (sproutRequest === undefined) {
     throw new Error("Expected the historical voice fragment to request thought sprouting");
   }
-  expect(sproutRequest.fragment).toMatchObject({
-    additions: [],
-    body: null,
-    linkSummary: null,
-    linkText: null,
-    mediaTranscript: EDITED_TRANSCRIPT,
+  expect(sproutRequest.source).toMatchObject({
+    contentMarkdown: EDITED_TRANSCRIPT,
+    notes: [],
+    sourceName: "historical-voice.wav",
+    sourceType: "voice",
     title: VOICE_TITLE,
   });
-  expect(sproutRequest.fragment).not.toHaveProperty("mediaSummary");
-  expect(sproutRequest.fragment).not.toHaveProperty("mediaVisibleText");
-  expect(sproutRequest.fragment).not.toHaveProperty("mediaContentKind");
-  expect(sproutRequest.fragment).not.toHaveProperty("blob");
+  expect(sproutRequest.source).not.toHaveProperty("blob");
+  expect(sproutRequest.source).not.toHaveProperty("audio");
   expect(sproutRequestBody).not.toContain("audio/wav");
-  expect(sproutRequestBody).not.toContain("historical-voice.wav");
   expect(sproutRequestBody).not.toContain("RIFF");
+  expect(sproutRequestBody).not.toContain(ORIGINAL_TRANSCRIPT);
+  expect(legacySproutRequests).toBe(0);
   expect(transcriptionRequests).toBe(0);
+  await sproutDialog.getByRole("button", { name: "放弃", exact: true }).click();
   expect(await page.locator("canvas").count()).toBeLessThanOrEqual(1);
 });

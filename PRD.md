@@ -940,9 +940,9 @@ MIME、文件名、大小、图片尺寸或音频时长、处理请求 ID、处�
 - 首次分析前显示独立图片披露。选择“仅保存在本地”会将状态设为 `local_only`；取消只关闭披露，不删除已创建内容；
 - 图片只通过 `POST /api/media/image/analyze` 发送当前文件和 request id。客户端不能提交 model、Prompt、tools、Base URL、
   API Key、完整数据库对象或其他 Fragment；服务端使用 `OPENAI_IMAGE_MODEL`、Responses API、`input_image`、`store: false`、
-  版本化 `IMAGE_ANALYSIS_PROMPT_VERSION = "image-analysis-v1"` 和 strict Structured Output；
-- 结果字段为 `title`、`summary`、`visibleText`（无清晰文字时为 `null`）和 `contentKind`。服务端与客户端均用 Zod 校验，
-  `title` 不超过 100 字符、`summary` 不超过 800 字符、`visibleText` 不超过 6,000 字符；不保存 provider 原始 Response、
+  版本化 `IMAGE_ANALYSIS_PROMPT_VERSION = "image-analysis-v2"` 和 strict Structured Output；Prompt 明确要求标题与 Markdown
+  默认使用简体中文，即使原图是英文也以中文整理，仅按需保留专有名词、代码、命令、API 名称、路径和引用的 UI 文案；
+- 结果字段为 `title` 和 `markdown`。服务端与客户端均用 Zod 校验，`title` 不超过 100 字符、`markdown` 不超过 8,000 字符；不保存 provider 原始 Response、
   reasoning 或远端 file id；图片中的指令不改变系统 Prompt 或输出结构，也不用于猜测人物身份或敏感属性；
 - 只有 Fragment 标题仍等于系统临时标题时才可使用生成标题，用户修改后的标题不得被迟到结果覆盖；分析完成不增加成长分。
 - 未启用、未配置、格式不支持、过大、超时、限流、认证失败、模型不可用、响应不完整或结构非法时，界面只显示可理解的失败

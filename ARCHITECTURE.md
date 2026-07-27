@@ -1325,7 +1325,9 @@ Base URL、API Key、Fragment 完整对象或其他 Fragment。Route 校验 PNG/
 超时或不支持的媒体，并把错误映射为稳定安全码。
 
 服务端从 `OPENAI_IMAGE_MODEL` 读取模型，使用官方 Responses API 的 `input_image`、`detail: "auto"`、`store: false` 和
-版本化 Prompt `IMAGE_ANALYSIS_PROMPT_VERSION = "image-analysis-v1"`。阶段 12 新建流程的响应只保留并由 Zod 二次校验：
+版本化 Prompt `IMAGE_ANALYSIS_PROMPT_VERSION = "image-analysis-v2"`。Prompt 和 Structured Output 字段说明都明确要求用户可见的
+标题与 Markdown 默认使用简体中文；即使图片原文是英文，也以中文总结整理，仅按需保留专有名词、代码、命令、API 名称、路径和
+引用的 UI 文案。阶段 12 新建流程的响应只保留并由 Zod 二次校验：
 
 ```ts
 {

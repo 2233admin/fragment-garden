@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const IMAGE_ANALYSIS_PROMPT_VERSION = "image-analysis-v1" as const;
+export const IMAGE_ANALYSIS_PROMPT_VERSION = "image-analysis-v2" as const;
 export const IMAGE_TITLE_MAX_CHARACTERS = 100;
 export const IMAGE_MARKDOWN_MAX_CHARACTERS = 8_000;
 

@@ -27,8 +27,18 @@ export const IMAGE_ANALYSIS_RESPONSE_FORMAT: ResponseFormatTextJSONSchemaConfig 
   schema: {
     type: "object",
     properties: {
-      title: { type: "string", minLength: 1, maxLength: 100 },
-      markdown: { type: "string", minLength: 1, maxLength: 8_000 },
+      title: {
+        type: "string",
+        description: "A concise title written primarily in Simplified Chinese.",
+        minLength: 1,
+        maxLength: 100,
+      },
+      markdown: {
+        type: "string",
+        description: "A self-contained Markdown note written primarily in Simplified Chinese.",
+        minLength: 1,
+        maxLength: 8_000,
+      },
     },
     required: ["title", "markdown"],
     additionalProperties: false,

@@ -36,7 +36,7 @@ export function ImageCardThumbnail({ blob, title }: ImageCardThumbnailProps) {
   }, []);
 
   return (
-    <div className="aspect-[16/9] w-full overflow-hidden rounded-md bg-garden-soft" ref={rootRef}>
+    <div className="h-28 w-full shrink-0 overflow-hidden rounded-md bg-garden-soft" ref={rootRef}>
       {objectUrl !== null && failedObjectUrl !== objectUrl ? (
         // The URL is created lazily and revoked when this card leaves the tree.
         // eslint-disable-next-line @next/next/no-img-element

@@ -67,8 +67,8 @@ function createProviderResponse(result: unknown): OpenAIResponse {
 }
 
 const VALID_RESULT = {
-  title: "A small garden note",
-  markdown: "## What is visible\n\nA simple screenshot with the label **Start here**.",
+  title: "一张小花园笔记",
+  markdown: "## 画面内容\n\n这是一张带有 **Start here** 界面文案的简洁截图。",
 } as const;
 
 describe("image analysis Route Handler", () => {
@@ -125,17 +125,28 @@ describe("image analysis Route Handler", () => {
       required: ["title", "markdown"],
       additionalProperties: false,
       properties: {
-        title: { maxLength: 100 },
-        markdown: { maxLength: 8_000 },
+        title: {
+          description: expect.stringContaining("Simplified Chinese"),
+          maxLength: 100,
+        },
+        markdown: {
+          description: expect.stringContaining("Simplified Chinese"),
+          maxLength: 8_000,
+        },
       },
     });
     expect(request?.instructions).toContain("untrusted content");
     expect(request?.instructions).toMatch(/Do\s+not emit raw HTML/u);
+    expect(request?.instructions).toContain("Simplified Chinese (zh-CN)");
+    expect(request?.instructions).toContain("even when the image contains English");
     expect(request).not.toHaveProperty("tools");
     expect(request).not.toHaveProperty("reasoning");
     expect(request).not.toHaveProperty("previous_response_id");
     expect(request).not.toHaveProperty("conversation");
     const imageInput = request?.input?.[0]?.content?.[1];
+    const textInput = request?.input?.[0]?.content?.[0];
+    expect(textInput).toMatchObject({ type: "input_text" });
+    expect((textInput as { text?: string }).text).toContain("Simplified Chinese Markdown note");
     expect(imageInput).toMatchObject({ type: "input_image", detail: "auto" });
     expect((imageInput as { image_url?: string }).image_url).toMatch(/^data:image\/png;base64,/u);
     expect(openAiSdkMock.create.mock.calls[0]?.[1]).toEqual({ signal: routeRequest.signal });

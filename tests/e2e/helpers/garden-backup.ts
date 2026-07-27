@@ -180,9 +180,15 @@ export async function seedGardenBackupFixture(
       }
 
       if (includeInterruptedJobs) {
+        const pendingImageBinary = atob(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgAAAAAgAB4iG8MAAAAABJRU5ErkJggg==",
+        );
+        const pendingImageBytes = Uint8Array.from(pendingImageBinary, (character) =>
+          character.charCodeAt(0),
+        );
         const createJob = (id: string, kind: "link" | "image" | "sprout") => {
           const sourceBlob =
-            kind === "image" ? new Blob(["pending-image"], { type: "image/png" }) : null;
+            kind === "image" ? new Blob([pendingImageBytes], { type: "image/png" }) : null;
           return {
             id,
             kind,

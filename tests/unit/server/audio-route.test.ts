@@ -146,12 +146,14 @@ describe("audio transcription Route Handler", () => {
   });
 
   it("rejects a multipart body above the hard cap", async () => {
-    const oversized = new File(
-      [new Uint8Array(AUDIO_ROUTE_REQUEST_MAX_BYTES + 1)],
-      "oversized.webm",
-      { type: "audio/webm" },
+    const response = await POST(
+      new Request("http://localhost/api/media/audio/transcribe", {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=vitest-boundary" },
+        body: new Uint8Array(AUDIO_ROUTE_REQUEST_MAX_BYTES + 1),
+      }),
     );
-    const response = await POST(createRequest(oversized));
+
     expect(response.status).toBe(413);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "file_too_large" },

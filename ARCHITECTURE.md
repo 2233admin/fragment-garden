@@ -971,22 +971,29 @@ AI 不访问 Dexie、整个花园或其他 Fragment，也不直接修改 Fragmen
 
 ## 8. 固定地图
 
-阶段 3 使用代码配置的 `960 × 640` 固定逻辑地图，不引入 Tiled 或第三方美术素材。配置集中在 `game/config/garden-map.ts`，包含草地、纵向道路、小水池、玩家出生点、预留伙伴位置、可行走区域、障碍区域和 36 个植物槽位。
+花园使用 `960 × 640` 固定世界、`30 × 20` 导航网格和 `32px` 运行时 Tile。正式地图由
+`public/assets/garden/maps/garden-map.json` 的 Tiled JSON 驱动；`game/config/tiled-garden-map.ts`
+负责校验 Layer 和资源，`game/config/garden-map.ts` 从同一地图读取碰撞、道路、水域、出生点、
+伙伴位置和 36 个植物槽位。地图资源失败时回退到独立的 Graphics 地图，卡片模式仍然可访问。
+
+渲染层包括基础地面、花坛、道路、水面、低中高环境装饰，以及全局和六个区域的渐进成长层。
+`Collision` Layer 提供固定导航障碍，`Anchors` Object Layer 提供玩家、伙伴和植物交互坐标；
+空槽位不显示土坑或占位标记。
 
 地图配置：
 
 ```ts
 type GardenMapConfig = {
-  width: number;
-  height: number;
-  playerSpawn: { x: number; y: number };
+  collisionGridPositions: GridPosition[];
   companionPosition: { x: number; y: number };
-  grassAreas: Rectangle[];
-  roadArea: Rectangle;
-  pondArea: Rectangle;
-  walkableAreas: Rectangle[];
-  obstacleAreas: Rectangle[];
+  height: number;
+  pathGridPositions: GridPosition[];
   plantSlots: PlantSlotConfig[];
+  playerSpawn: { x: number; y: number };
+  tileSize: number;
+  walkableAreas: Rectangle[];
+  waterGridPositions: GridPosition[];
+  width: number;
 };
 ```
 
@@ -999,29 +1006,31 @@ type PlantSlotConfig = {
   y: number;
   interactionX: number;
   interactionY: number;
+  zoneId: GardenZoneId;
 };
 ```
 
-第一版建议预留 36 个槽位。
+当前 36 个槽位继续复用领域层的 `slot-01` 至 `slot-36`。Plant 只持久化 `slotId`，世界坐标和区域归属在
+运行时从地图读取，因此旧存档和备份无需数据库迁移即可适配新版地图。坐标测试保证槽位完整、唯一、
+避开道路和固定障碍，interaction point 均可从出生点到达。
 
-当前 36 个槽位直接复用领域层的 `slot-01` 至 `slot-36`，每个槽位都有固定显示坐标和为阶段 4 预留的 interaction point。坐标通过单元测试保证完整、唯一、位于地图内、避开道路和水池，并保持最小间距。
+玩家使用四方向 idle/walk 像素 Sprite，并按脚底参与 y-sort。固定伙伴使用猫或狗 Sprite 与克制待机动画；
+两种外观共用同一位置、点击区域、Bridge 事件和 React 功能链路，不自由寻路。
 
-阶段 6 在固定 `companionPosition` 渲染唯一伙伴。React 只把已完成 onboarding 的
-`{ type: "cat" | "dog" }` 发送给 Phaser；未选择或 Settings 读取失败时发送 `null`，场景不渲染伙伴。猫狗使用相同位置、点击区域、hover 和点击行为，只以简单颜色与耳形占位图区分外观，不移动、不跟随人物，也没有养成状态。
+### 8.1 导航网格
 
-### 8.1 阶段 4 导航网格
-
-阶段 4 在固定地图上使用 `32px` 格心网格：
+固定地图使用 `32px` 格心网格：
 
 ```text
 960 ÷ 32 = 30 列
 640 ÷ 32 = 20 行
 ```
 
-出生点、36 个植物本体格和 36 个 interaction point 均对齐统一格心。场景创建时从 `walkableAreas`、`obstacleAreas` 和固定植物槽生成一次可行走网格并缓存：
+出生点、36 个植物本体格和 36 个 interaction point 均对齐统一格心。场景创建时从 Tiled `Collision`
+Layer、地图边界和固定植物槽生成一次可行走网格并缓存：
 
 - 地图边界不可走；
-- 水池和固定装饰树篱不可走；
+- 水面、建筑、树干和围栏不可走；
 - 植物本体所在格不可走；
 - interaction point 保持可走；
 - 道路与草地属于同一连通可行走区域。
@@ -1058,6 +1067,16 @@ type PlantViewModel = {
 
 React 通过花园查询服务在一个只读事务中批量读取 Fragment 和 Plant，再调用纯函数组装快照。deleted、archived、孤立 Plant 和 `slotId = null` 的植物不会发送给 Phaser；未放置植物只进入 `unplacedPlantCount`。输出按 `slotId` 和 `plantId` 稳定排序，不包含 `rawText`、事件历史或附件。
 
+### 8.3 内容植物与生命周期反馈
+
+内容植物使用暖阳花、蓝紫绒球花和粉白星花三个家族。已有 `speciesId` 优先映射；空值通过 `plantId`
+稳定哈希选择家族，不随机、不补写数据库。五个业务阶段映射到集中配置的 Sprite 帧和显示尺寸，
+脚底 origin、阴影、点击区、dormant tint 与 reduced-motion 行为均由同一配置管理。
+
+`LOAD_GARDEN` 只建立当前快照，不播放一次性反馈。新建、休眠、恢复和到达植物分别通过
+`PLAY_PLANT_FEEDBACK` 播放短暂且可中断的场景反馈；一次性反馈不进入 IndexedDB 或备份。
+正式素材加载失败时回退到 Graphics 植物，点击和卡片访问保持可用。
+
 ---
 
 ## 9. GameBridge
@@ -1070,6 +1089,11 @@ type ReactToGameEvent =
   | { type: "ADD_PLANT"; plant: PlantViewModel }
   | { type: "UPDATE_PLANT"; plant: PlantViewModel }
   | { type: "REMOVE_PLANT"; plantId: string }
+  | {
+      type: "PLAY_PLANT_FEEDBACK";
+      plantId: string;
+      feedback: "created" | "dormant" | "restored" | "arrived";
+    }
   | { type: "CANCEL_INTERACTION" }
   | {
       type: "SET_COMPANION";
@@ -1077,7 +1101,7 @@ type ReactToGameEvent =
     };
 ```
 
-每个 `GardenCanvas` 创建独立 Bridge 实例。React 的 live query 初次和后续变化都发送完整 `LOAD_GARDEN`；`GardenScene` 按 `plantId` 做确定性新增、更新和移除。伙伴选择变化通过独立的
+每个 `GardenCanvas` 创建独立 Bridge 实例。React 的 live query 初次和后续变化都发送完整 `LOAD_GARDEN`；`GardenScene` 按 `plantId` 做确定性新增、更新和移除。一次性植物反馈携带明确原因，初始化不会误播，Scene 销毁后队列和 tween 一并清理。伙伴选择变化通过独立的
 `SET_COMPANION` 同步，重复发送同一类型不会重复创建，类型变化会先销毁旧实例，`null` 会移除实例，因此同一场景最多只有一个伙伴。Bridge 不访问 Dexie 或 React state，场景关闭时取消订阅，组件清理时销毁实例。
 
 植物数据变化不会重置普通地面移动；当前交互目标植物被移除时，Phaser 取消目标并安全发送 `plant_unavailable`。
@@ -1776,9 +1800,8 @@ GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，�
 
 ## 17. 开发顺序与重新规划状态
 
-当前实现顺序已经推进并收敛到阶段 13：图片输入与真实分析已经可用；10B 的语音代码、自动化测试和构建已完成，
-但真实语音链路尚未稳定通过，因此延期为 Post-MVP / Experimental。阶段 11～13 的核心体验重构已经完成；
-阶段 14 尚未开始。实现顺序为：
+当前文字、链接、图片、内容型卡片、追加笔记、思维发芽、完整备份恢复和像素花园均已形成闭环。
+语音代码、自动化测试和历史数据兼容继续保留，但真实语音链路延期为 Post-MVP / Experimental。实现顺序为：
 
 1. 项目初始化与 Dexie；
 2. 文字碎片和卡片模式；
@@ -1793,7 +1816,8 @@ GetNote 和真实 OpenAI 在自动测试中使用 Route、SDK 或 fetch Mock，�
 11. 内容型卡片、`contentMarkdown`、独立 FragmentNote 与简化详情。
 12. 链接和图片 processing job，成功后才创建正式卡片与植物。
 13. `/api/sprout/generate`、可编辑预览、确认后创建新卡片与来源关系。
-14. 备份、恢复、稳定性与 MVP 封版（尚未开始）。
+14. 完整备份、安全恢复和稳定性收尾。
+15. 像素庭院、渐进环境、内容植物、正式玩家与伙伴，以及克制的植物生命周期反馈。
 
 阶段 7B 验证了服务端 AI、安全边界、受限工具和本地持久化能力；产品验证后已将伙伴定位校准为规则型
 NPC。阶段 8 已隐藏普通用户的开放聊天入口并实现固定对话、固定选项和本地 Action；阶段 7B 的服务层与
@@ -1803,7 +1827,6 @@ NPC。阶段 8 已隐藏普通用户的开放聊天入口并实现固定对话�
 发芽派生文本接入作为未激活基础保留。媒体 AI 自动完成不增加成长分。阶段 9/10 自动化不调用真实 OpenAI；阶段 9 独立真实服务冒烟已完成六次受控
 请求，验证结构化输出、内容边界、单请求并发、保存幂等和生命周期保持。
 
-语音延期是为了避免浏览器录音、媒体编码、权限与转写兼容成本影响 MVP 稳定展示，并不代表底层实现无效。未经重新规划和
-真实麦克风/provider 验收，不得恢复普通语音入口。阶段 10 收敛不创建 `m3-ai-inputs` 或替代 Tag。Embedding、相似碎片、花丛、
-云端媒体、正式伙伴移动/像素动画和阶段 14 不在本轮。导入导出已有基础实现，只在阶段 14
-统一处理。阶段 11～13 已按顺序完成，阶段 14 不得在新的明确任务前开始。
+语音延期是为了避免浏览器录音、媒体编码、权限与转写兼容成本影响稳定展示，并不代表底层实现无效。未经重新规划和
+真实麦克风/provider 验收，不得恢复普通语音入口。Embedding、相似碎片、云端媒体、天气季节、伙伴自由寻路、
+来源植物到发芽植物的连接特效，以及公开商业版原创素材替换属于后续范围。完整备份与安全恢复已经统一实现。

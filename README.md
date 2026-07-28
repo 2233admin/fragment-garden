@@ -98,6 +98,9 @@ cp .env.example .env.local
 - 发芽预览、编辑和确认
 - 新旧笔记的来源关系
 - 完整本地备份与安全恢复
+- 会随内容积累逐渐繁茂的像素花园
+- 与卡片稳定对应的内容植物、成长阶段和休眠恢复
+- 可在花园中散步的主人，以及猫或狗伙伴
 
 当前暂不支持：
 
@@ -106,7 +109,7 @@ cp .env.example .env.local
 - 移动端适配
 - 普通用户语音输入
 - 相似笔记与知识图谱
-- 多花园和正式像素美术
+- 多花园、天气、季节和角色换装
 
 ## 开发文档
 
@@ -116,5 +119,6 @@ cp .env.example .env.local
 - [技术架构与数据模型](./ARCHITECTURE.md)
 - [开发与 Codex 协作规则](./AGENTS.md)
 - [开发计划与完成记录](./DEVELOPMENT_PLAN.md)
+- [花园视觉系统与当前限制](./docs/GARDEN_VISUAL_SYSTEM.md)
 
 技术概览：项目使用 TypeScript、Next.js、React、Phaser 和 Dexie 构建，数据默认保存在浏览器本地。

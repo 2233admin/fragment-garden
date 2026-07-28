@@ -6,6 +6,7 @@ import {
   type ContentPlantPreviewMode,
 } from "../config/content-plant-preview";
 import { PLANT_SLOT_CONFIGS } from "../config/garden-map";
+import type { PlantFeedbackKind } from "../config/plant-feedback";
 import { PlantSprite, type PlantClickHandler } from "../entities/PlantSprite";
 import { calculatePlantRenderDiff } from "./plant-render-diff";
 
@@ -85,6 +86,26 @@ export class PlantRenderSystem {
     for (const [currentPlantId, sprite] of this.sprites) {
       sprite.setSelected(currentPlantId === plantId);
     }
+  }
+
+  playFeedback(plantId: string, feedback: PlantFeedbackKind, onComplete?: () => void): boolean {
+    const sprite = this.sprites.get(plantId);
+
+    if (sprite === undefined) {
+      return false;
+    }
+
+    const canvas = this.scene.game.canvas;
+    canvas.dataset.plantFeedback = feedback;
+    canvas.dataset.plantFeedbackId = plantId;
+    sprite.playFeedback(feedback, () => {
+      if (canvas.dataset.plantFeedback === feedback && canvas.dataset.plantFeedbackId === plantId) {
+        delete canvas.dataset.plantFeedback;
+        delete canvas.dataset.plantFeedbackId;
+      }
+      onComplete?.();
+    });
+    return true;
   }
 
   removePlant(plantId: string): void {

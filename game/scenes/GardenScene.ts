@@ -141,6 +141,9 @@ export class GardenScene extends Phaser.Scene {
         case "REMOVE_PLANT":
           renderSystem.removePlant(event.plantId);
           break;
+        case "PLAY_PLANT_FEEDBACK":
+          renderSystem.playFeedback(event.plantId, event.feedback);
+          return;
       }
 
       this.pathfindingSystem?.setOccupiedPlantSlots(renderSystem.getOccupiedSlotIds());

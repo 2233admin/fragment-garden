@@ -446,9 +446,9 @@ export function GardenWorkspace() {
         <div
           aria-atomic="true"
           aria-live={interactionFeedback?.kind === "error" ? "assertive" : "polite"}
-          className={`mx-auto max-w-[960px] text-sm font-semibold ${
-            interactionFeedback === null ? "h-2" : "mt-3 min-h-6"
-          } ${interactionFeedback?.kind === "error" ? "text-garden-danger" : "text-garden-accent"}`}
+          className={`mx-auto mt-3 min-h-6 max-w-[960px] text-sm font-semibold ${
+            interactionFeedback?.kind === "error" ? "text-garden-danger" : "text-garden-accent"
+          }`}
           data-testid="garden-interaction-status"
           role={interactionFeedback?.kind === "error" ? "alert" : "status"}
         >

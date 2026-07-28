@@ -115,11 +115,22 @@ export class InteractionSystem {
       }
 
       this.movement.faceTarget({ x: slot.x, y: slot.y });
-      this.finishRequest();
-      this.bridge.publishToReact({
-        type: "PLAYER_REACHED_PLANT",
-        plantId: plant.plantId,
-      });
+      const publishArrival = (): void => {
+        if (this.isDestroyed || generation !== this.requestGeneration) {
+          return;
+        }
+
+        this.finishRequest();
+        this.bridge.publishToReact({
+          type: "PLAYER_REACHED_PLANT",
+          plantId: plant.plantId,
+        });
+      };
+      const didStartFeedback = this.plants.playFeedback(plant.plantId, "arrived", publishArrival);
+
+      if (!didStartFeedback) {
+        publishArrival();
+      }
     });
   }
 

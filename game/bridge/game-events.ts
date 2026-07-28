@@ -1,5 +1,6 @@
 import type { CompanionViewModel } from "../../domain/garden/companion-view-model";
 import type { PlantViewModel } from "../../domain/garden/plant-view-model";
+import type { PlantFeedbackKind } from "../config/plant-feedback";
 
 export type ReactToGameEvent =
   | {
@@ -17,6 +18,11 @@ export type ReactToGameEvent =
   | {
       type: "REMOVE_PLANT";
       plantId: string;
+    }
+  | {
+      type: "PLAY_PLANT_FEEDBACK";
+      plantId: string;
+      feedback: PlantFeedbackKind;
     }
   | {
       type: "CANCEL_INTERACTION";

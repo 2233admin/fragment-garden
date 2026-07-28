@@ -126,6 +126,7 @@ test("moves through the fixed garden and opens fragments through plants", async 
     await createTextFragment(page);
     await selectMode(page, "花园模式");
     await expect(page.locator("canvas")).toHaveCount(1);
+    await expect(page.locator("canvas")).toHaveAttribute("data-plant-feedback", "created");
     await expect(page.getByTestId("garden-accessibility-summary")).toHaveAttribute(
       "data-plant-count",
       "1",
@@ -185,6 +186,13 @@ test("moves through the fixed garden and opens fragments through plants", async 
     await expect(page.locator("canvas")).toHaveCount(0);
     await selectMode(page, "花园模式");
     await expect(page.locator("canvas")).toHaveCount(1);
+    await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute("aria-busy", "false");
+    await page.locator("canvas").evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
     const beforePondClick = await readPlayerPosition(page);
     await clickCanvasWorld(
       page,

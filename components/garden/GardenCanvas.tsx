@@ -13,6 +13,14 @@ import {
 } from "@/game/config/content-plant-preview";
 import { GARDEN_MAP_CONFIG } from "@/game/config/garden-map";
 import { resolveGardenStagePreview } from "@/game/config/garden-stage-preview";
+import {
+  resolvePlantFeedbackPreview,
+  resolvePlantFeedbackPreviewTarget,
+} from "@/game/config/plant-feedback-preview";
+import {
+  collectGardenPlantFeedbacks,
+  type GardenPlantTransitionFeedbackKind,
+} from "@/game/config/plant-feedback";
 import type { GardenGameRuntime, GardenRuntimeFailure } from "@/game/start-garden-game";
 
 import { GardenErrorState, type GardenErrorKind } from "./GardenErrorState";
@@ -47,6 +55,8 @@ export function GardenCanvas({
   const latestPlantsRef = useRef(plants);
   const latestCompanionRef = useRef(companion);
   const contentPlantPreviewRef = useRef<ContentPlantPreviewMode | null>(null);
+  const previousPlantsRef = useRef<readonly PlantViewModel[] | null>(null);
+  const pendingPlantFeedbacksRef = useRef(new Map<string, GardenPlantTransitionFeedbackKind>());
   const isSceneReadyRef = useRef(false);
   const failureHandlerRef = useRef<((kind: GardenRuntimeFailure) => void) | null>(null);
   const gameEventHandlerRef = useRef(onGameEvent);
@@ -81,9 +91,15 @@ export function GardenCanvas({
       window.location.search,
       process.env.NODE_ENV,
     );
+    const plantFeedbackPreview = resolvePlantFeedbackPreview(
+      window.location.search,
+      process.env.NODE_ENV,
+    );
     contentPlantPreviewRef.current = contentPlantPreview;
     let isCancelled = false;
     let didFail = false;
+    let feedbackPreviewTimeout: number | null = null;
+    let feedbackPreviewTimer: number | null = null;
     const bridge = new GameBridge();
     const unsubscribeGameEvents = bridge.subscribeToReact((event) => {
       if (event.type === "PLAYER_STATE_CHANGED") {
@@ -127,6 +143,14 @@ export function GardenCanvas({
     setRuntimeState(LOADING_RUNTIME_STATE);
 
     function destroyRuntime(): void {
+      if (feedbackPreviewTimeout !== null) {
+        window.clearTimeout(feedbackPreviewTimeout);
+        feedbackPreviewTimeout = null;
+      }
+      if (feedbackPreviewTimer !== null) {
+        window.clearInterval(feedbackPreviewTimer);
+        feedbackPreviewTimer = null;
+      }
       isSceneReadyRef.current = false;
       runtimeRef.current?.destroy();
       runtimeRef.current = null;
@@ -185,6 +209,35 @@ export function GardenCanvas({
               type: "SET_COMPANION",
               companion: latestCompanionRef.current,
             });
+            for (const [plantId, feedback] of pendingPlantFeedbacksRef.current) {
+              bridge.publishToGame({
+                type: "PLAY_PLANT_FEEDBACK",
+                plantId,
+                feedback,
+              });
+            }
+            pendingPlantFeedbacksRef.current.clear();
+            if (plantFeedbackPreview !== null) {
+              const previewPlants =
+                contentPlantPreview === null
+                  ? [...latestPlantsRef.current]
+                  : [...getContentPlantPreviewPlants(contentPlantPreview)];
+              const playPreview = (): void => {
+                const target = resolvePlantFeedbackPreviewTarget(
+                  previewPlants,
+                  plantFeedbackPreview,
+                );
+                if (target !== null) {
+                  bridge.publishToGame({
+                    type: "PLAY_PLANT_FEEDBACK",
+                    plantId: target.plantId,
+                    feedback: plantFeedbackPreview,
+                  });
+                }
+              };
+              feedbackPreviewTimeout = window.setTimeout(playPreview, 180);
+              feedbackPreviewTimer = window.setInterval(playPreview, 1_400);
+            }
 
             if (isCancelled || didFail) {
               return;
@@ -214,12 +267,27 @@ export function GardenCanvas({
   }, [runtimeAttempt]);
 
   useEffect(() => {
+    const previousPlants = previousPlantsRef.current;
+    previousPlantsRef.current = plants;
+    const contentPlantPreview = contentPlantPreviewRef.current;
+    const feedbacks =
+      contentPlantPreview === null && previousPlants !== null
+        ? collectGardenPlantFeedbacks(previousPlants, plants)
+        : [];
+
     if (!isSceneReadyRef.current) {
+      for (const feedback of feedbacks) {
+        if (
+          pendingPlantFeedbacksRef.current.has(feedback.plantId) ||
+          pendingPlantFeedbacksRef.current.size < 3
+        ) {
+          pendingPlantFeedbacksRef.current.set(feedback.plantId, feedback.kind);
+        }
+      }
       return;
     }
 
     try {
-      const contentPlantPreview = contentPlantPreviewRef.current;
       bridgeRef.current?.publishToGame({
         type: "LOAD_GARDEN",
         plants:
@@ -227,6 +295,13 @@ export function GardenCanvas({
             ? [...plants]
             : [...getContentPlantPreviewPlants(contentPlantPreview)],
       });
+      for (const feedback of feedbacks) {
+        bridgeRef.current?.publishToGame({
+          type: "PLAY_PLANT_FEEDBACK",
+          plantId: feedback.plantId,
+          feedback: feedback.kind,
+        });
+      }
     } catch {
       failureHandlerRef.current?.("update");
     }

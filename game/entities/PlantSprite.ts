@@ -16,12 +16,19 @@ import {
 import type { ContentPlantPreviewVisualState } from "../config/content-plant-preview";
 import type { PlantSlotConfig } from "../config/garden-map";
 import { GARDEN_RENDER_COLORS, PLANT_TEXTURE_KEYS } from "../config/game-config";
+import type { PlantFeedbackKind } from "../config/plant-feedback";
 
 export type PlantClickHandler = (plant: PlantViewModel) => void;
 
 const CONTENT_PLANT_DEPTH_OFFSET = 1_000;
 const CONTENT_PLANT_HOVER_SCALE = 1.03;
 const CONTENT_PLANT_HIT_AREA_PADDING = 4;
+const PLANT_FEEDBACK_DURATIONS: Readonly<Record<PlantFeedbackKind, number>> = Object.freeze({
+  created: 520,
+  dormant: 360,
+  restored: 460,
+  arrived: 280,
+});
 
 function prefersReducedMotion(): boolean {
   return (
@@ -37,9 +44,13 @@ export class PlantSprite extends Phaser.GameObjects.Image {
   private plant: PlantViewModel;
   private readonly idleTween: Phaser.Tweens.Tween;
   private readonly isReducedMotion: boolean;
+  private readonly feedbackMarker: Phaser.GameObjects.Graphics;
   private readonly selectionMarker: Phaser.GameObjects.Graphics;
   private readonly shadow: Phaser.GameObjects.Image;
   private baseY: number;
+  private feedbackGeneration = 0;
+  private feedbackTimer: Phaser.Time.TimerEvent | null = null;
+  private feedbackTween: Phaser.Tweens.Tween | null = null;
   private hasIdleTweenStarted = false;
   private isHovered = false;
   private isSelected = false;
@@ -75,6 +86,7 @@ export class PlantSprite extends Phaser.GameObjects.Image {
       : CONTENT_PLANT_FALLBACK_SHADOW_TEXTURE_KEY;
     this.shadow = scene.add.image(slot.x, slot.y + 2, shadowTextureKey).setAlpha(0.2);
     this.selectionMarker = scene.add.graphics();
+    this.feedbackMarker = scene.add.graphics().setVisible(false);
 
     scene.add.existing(this);
     this.setName("garden-content-plant");
@@ -117,6 +129,7 @@ export class PlantSprite extends Phaser.GameObjects.Image {
   }
 
   updatePlant(plant: PlantViewModel, slot: PlantSlotConfig): void {
+    this.cancelFeedback();
     this.plant = plant;
     this.baseY = slot.y;
     this.setPosition(slot.x, slot.y);
@@ -127,6 +140,9 @@ export class PlantSprite extends Phaser.GameObjects.Image {
     this.selectionMarker
       .setPosition(slot.x, slot.y + 2)
       .setDepth(slot.y + CONTENT_PLANT_DEPTH_OFFSET - 2);
+    this.feedbackMarker
+      .setPosition(slot.x, slot.y)
+      .setDepth(slot.y + CONTENT_PLANT_DEPTH_OFFSET + 2);
     this.setData({
       plantId: plant.plantId,
       fragmentId: plant.fragmentId,
@@ -146,11 +162,81 @@ export class PlantSprite extends Phaser.GameObjects.Image {
     this.applyVisualState();
   }
 
+  playFeedback(feedback: PlantFeedbackKind, onComplete?: () => void): void {
+    this.cancelFeedback();
+    this.feedbackGeneration += 1;
+    const generation = this.feedbackGeneration;
+    const duration = PLANT_FEEDBACK_DURATIONS[feedback];
+    const targetAlpha = this.alpha;
+    const targetScale = this.scaleX;
+    const targetY = this.y;
+
+    this.idleTween.pause();
+    this.setAngle(0);
+    this.drawFeedbackMarker(feedback);
+    this.feedbackMarker.setAlpha(1).setVisible(true);
+    this.setData("plantFeedback", feedback);
+
+    if (!this.isReducedMotion) {
+      if (feedback === "created") {
+        this.setAlpha(0.12)
+          .setScale(targetScale * 0.72)
+          .setY(targetY + 8);
+        this.feedbackTween = this.scene.tweens.add({
+          targets: this,
+          alpha: targetAlpha,
+          scaleX: targetScale,
+          scaleY: targetScale,
+          y: targetY,
+          duration: duration - 40,
+          ease: "Sine.easeOut",
+        });
+      } else if (feedback === "dormant") {
+        this.setAlpha(1);
+        this.feedbackTween = this.scene.tweens.add({
+          targets: this,
+          alpha: targetAlpha,
+          duration: duration - 40,
+          ease: "Sine.easeInOut",
+        });
+      } else {
+        if (feedback === "restored") {
+          this.clearTint();
+        }
+        this.setScale(targetScale * 0.97);
+        this.feedbackTween = this.scene.tweens.add({
+          targets: this,
+          scaleX: targetScale * 1.035,
+          scaleY: targetScale * 1.035,
+          y: targetY - 1,
+          duration: Math.floor((duration - 40) / 2),
+          ease: "Sine.easeInOut",
+          yoyo: true,
+        });
+      }
+    }
+
+    this.feedbackTimer = this.scene.time.delayedCall(duration, () => {
+      if (generation !== this.feedbackGeneration) {
+        return;
+      }
+
+      this.feedbackTimer = null;
+      this.feedbackTween = null;
+      this.feedbackMarker.setVisible(false);
+      this.setData("plantFeedback", null);
+      this.applyVisualState();
+      onComplete?.();
+    });
+  }
+
   destroy(fromScene?: boolean): void {
     this.removeAllListeners();
+    this.cancelFeedback();
     this.idleTween.remove();
     this.shadow.destroy(fromScene);
     this.selectionMarker.destroy(fromScene);
+    this.feedbackMarker.destroy(fromScene);
     super.destroy(fromScene);
   }
 
@@ -246,6 +332,54 @@ export class PlantSprite extends Phaser.GameObjects.Image {
     this.selectionMarker.fillRect(halfWidth - 7, -3, 7, 2);
     this.selectionMarker.fillRect(halfWidth - 2, -3, 2, 6);
     this.selectionMarker.setVisible(false);
+  }
+
+  private drawFeedbackMarker(feedback: PlantFeedbackKind): void {
+    this.feedbackMarker.clear();
+
+    if (feedback === "created") {
+      this.feedbackMarker.fillStyle(GARDEN_RENDER_COLORS.soilEdge, 0.72);
+      this.feedbackMarker.fillRect(-15, 0, 7, 2);
+      this.feedbackMarker.fillRect(-4, 2, 8, 2);
+      this.feedbackMarker.fillRect(8, 0, 7, 2);
+      this.feedbackMarker.fillStyle(GARDEN_RENDER_COLORS.leaf, 0.88);
+      this.feedbackMarker.fillRect(-12, -6, 3, 3);
+      this.feedbackMarker.fillRect(9, -8, 3, 3);
+      return;
+    }
+
+    if (feedback === "dormant") {
+      this.feedbackMarker.fillStyle(0x8aa0a0, 0.62);
+      this.feedbackMarker.fillRect(-13, -2, 6, 2);
+      this.feedbackMarker.fillRect(7, -2, 6, 2);
+      return;
+    }
+
+    if (feedback === "restored") {
+      this.feedbackMarker.fillStyle(GARDEN_RENDER_COLORS.leaf, 0.9);
+      this.feedbackMarker.fillRect(-16, -13, 4, 4);
+      this.feedbackMarker.fillRect(12, -20, 3, 3);
+      this.feedbackMarker.fillStyle(GARDEN_RENDER_COLORS.permanentBloom, 0.82);
+      this.feedbackMarker.fillRect(-2, -30, 3, 3);
+      return;
+    }
+
+    this.feedbackMarker.fillStyle(GARDEN_RENDER_COLORS.selection, 0.78);
+    this.feedbackMarker.fillRect(-20, -5, 7, 2);
+    this.feedbackMarker.fillRect(-20, -5, 2, 7);
+    this.feedbackMarker.fillRect(13, -5, 7, 2);
+    this.feedbackMarker.fillRect(18, -5, 2, 7);
+  }
+
+  private cancelFeedback(): void {
+    this.feedbackGeneration += 1;
+    this.feedbackTimer?.remove(false);
+    this.feedbackTimer = null;
+    this.feedbackTween?.remove();
+    this.feedbackTween = null;
+    this.feedbackMarker.setVisible(false);
+    this.setData("plantFeedback", null);
+    this.applyVisualState();
   }
 
   private handlePointerOver(): void {

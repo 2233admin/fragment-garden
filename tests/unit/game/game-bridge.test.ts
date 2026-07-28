@@ -23,6 +23,11 @@ function assertEventPayloadTypes(bridge: GameBridge): void {
   bridge.publishToGame({ type: "ADD_PLANT", plant: PLANT });
   bridge.publishToGame({ type: "UPDATE_PLANT", plant: PLANT });
   bridge.publishToGame({ type: "REMOVE_PLANT", plantId: PLANT.plantId });
+  bridge.publishToGame({
+    type: "PLAY_PLANT_FEEDBACK",
+    plantId: PLANT.plantId,
+    feedback: "created",
+  });
   bridge.publishToGame({ type: "CANCEL_INTERACTION" });
   bridge.publishToGame({ type: "SET_COMPANION", companion: CAT_COMPANION });
   bridge.publishToGame({ type: "SET_COMPANION", companion: null });
@@ -55,6 +60,12 @@ function assertEventPayloadTypes(bridge: GameBridge): void {
   bridge.publishToReact({ type: "MOVEMENT_FAILED", reason: "unknown" });
   // @ts-expect-error SET_COMPANION accepts only the two documented companion types.
   bridge.publishToGame({ type: "SET_COMPANION", companion: { type: "fox" } });
+  bridge.publishToGame({
+    type: "PLAY_PLANT_FEEDBACK",
+    plantId: PLANT.plantId,
+    // @ts-expect-error Plant feedback accepts only the documented one-shot effects.
+    feedback: "exploded",
+  });
   // @ts-expect-error COMPANION_CLICKED does not carry Settings or companion details.
   bridge.publishToReact({ type: "COMPANION_CLICKED", companionType: "cat" });
   bridge.publishToReact({

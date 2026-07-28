@@ -36,6 +36,19 @@ export function GardenAccessibilitySummary({
     const count = stageCounts.get(stage);
     return count === undefined ? [] : [`${PLANT_STAGE_LABELS[stage]} ${count} 株`];
   }).join(" · ");
+  const isEmpty = snapshot.placedPlantCount === 0 && snapshot.unplacedPlantCount === 0;
+  const isVisibleGardenFull = snapshot.placedPlantCount >= 36;
+  const gardenDescription = isEmpty
+    ? "花园正在等待第一颗想法。"
+    : `花园中有 ${snapshot.placedPlantCount} 株内容植物。`;
+  const gardenGuidance =
+    snapshot.unplacedPlantCount > 0
+      ? `庭院的可见位置已满；另有 ${snapshot.unplacedPlantCount} 篇笔记保存在卡片模式中。`
+      : isEmpty
+        ? "写下一条内容，它会在这里长成植物。"
+        : isVisibleGardenFull
+          ? "庭院已经开满。新的笔记仍会保存，并可在卡片模式中查看。"
+          : "继续记录，让庭院慢慢生长。";
 
   return (
     <section
@@ -53,14 +66,8 @@ export function GardenAccessibilitySummary({
           >
             当前花园
           </h2>
-          <p className="mt-1 text-sm text-garden-muted">
-            花园中有 {snapshot.placedPlantCount} 株已放置植物。
-          </p>
-          <p className="mt-1 text-sm text-garden-muted">
-            {snapshot.unplacedPlantCount > 0
-              ? `有 ${snapshot.unplacedPlantCount} 株植物等待新的种植位置。`
-              : "所有植物都已有种植位置。"}
-          </p>
+          <p className="mt-1 text-sm text-garden-muted">{gardenDescription}</p>
+          <p className="mt-1 text-sm text-garden-muted">{gardenGuidance}</p>
         </div>
         <p className="rounded-full bg-garden-soft px-4 py-2 text-xs font-semibold text-garden-accent">
           {stageSummary.length > 0 ? stageSummary : "尚无植物"}

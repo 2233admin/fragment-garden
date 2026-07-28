@@ -40,7 +40,9 @@ async function createTextFragment(page: Page, title: string, content: string): P
 async function expectGardenPlantCount(page: Page, count: number): Promise<void> {
   const summary = page.getByTestId("garden-accessibility-summary");
   await expect(summary).toHaveAttribute("data-plant-count", String(count));
-  await expect(summary).toContainText(`花园中有 ${count} 株已放置植物`);
+  await expect(summary).toContainText(
+    count === 0 ? "花园正在等待第一颗想法" : `花园中有 ${count} 株内容植物`,
+  );
   await expect(page.getByTestId("garden-canvas-host").locator("canvas")).toHaveCount(1, {
     timeout: 15_000,
   });

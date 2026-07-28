@@ -5,6 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 import { DataBackupDialog } from "@/components/backup/DataBackupDialog";
 import { CompanionExperience } from "@/components/companion/CompanionExperience";
+import { CompanionMark } from "@/components/companion/CompanionMark";
 import { ContentProcessingDialog } from "@/components/content-processing/ContentProcessingDialog";
 import { ContentProcessingIndicator } from "@/components/content-processing/ContentProcessingIndicator";
 import { useContentProcessingRuntime } from "@/components/content-processing/useContentProcessingRuntime";
@@ -77,6 +78,7 @@ export function GardenWorkspace() {
   const gardenModeButtonRef = useRef<HTMLButtonElement>(null);
   const cardModeButtonRef = useRef<HTMLButtonElement>(null);
   const backupButtonRef = useRef<HTMLButtonElement>(null);
+  const companionButtonRef = useRef<HTMLButtonElement>(null);
   const remoteRestoreOperationRef = useRef<string | null>(null);
   const handleContentProcessingEvent = useCallback(
     (event: Readonly<{ type: "completed" | "failed"; message: string }>): void => {
@@ -432,6 +434,19 @@ export function GardenWorkspace() {
               mode={mode}
               onModeChange={handleModeChange}
             />
+            {companion !== null ? (
+              <button
+                aria-haspopup="dialog"
+                className="inline-flex items-center gap-2 rounded-lg border border-[#a98b63] bg-[#f4ead3] px-3.5 py-2 text-sm font-semibold text-garden-ink hover:bg-[#eadbbd]"
+                data-testid="open-companion"
+                onClick={() => handleCompanionChatOpenChange(true)}
+                ref={companionButtonRef}
+                type="button"
+              >
+                <CompanionMark companionType={companion.type} size="small" />
+                打开花园伙伴
+              </button>
+            ) : null}
             <button
               className="rounded-lg border border-[#a98b63] bg-[#f4ead3] px-3.5 py-2 text-sm font-semibold text-garden-ink hover:bg-[#eadbbd]"
               onClick={() => setIsBackupOpen(true)}
@@ -475,6 +490,7 @@ export function GardenWorkspace() {
           gardenSummaryStatus={gardenSummaryState.status}
           preserveCompanionScreen={preserveCompanionScreen}
           isChatOpen={isCompanionChatOpen}
+          triggerButtonRef={companionButtonRef}
           onChatOpenChange={handleCompanionChatOpenChange}
           onCompanionTypeChange={handleCompanionTypeChange}
           onOpenFragment={(

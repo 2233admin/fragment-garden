@@ -96,12 +96,12 @@ dialog::backdrop {
 }
 
 .garden-canvas-frame {
-  border: 9px solid #6d4d30;
-  border-radius: 16px;
-  outline: 4px solid #b98e57;
+  border: 6px solid #6d4d30;
+  border-radius: 14px;
+  outline: 3px solid #b98e57;
   box-shadow:
     0 0 0 1px rgba(63, 42, 25, 0.85),
-    0 18px 44px rgba(56, 65, 39, 0.25);
+    0 16px 36px rgba(56, 65, 39, 0.22);
 }
 
 .garden-canvas-frame::after {
@@ -111,11 +111,6 @@ dialog::backdrop {
   border: 2px solid rgba(255, 231, 180, 0.42);
   content: "";
   pointer-events: none;
-}
-
-.garden-mode-shell .garden-companion-entry {
-  display: flex;
-  justify-content: flex-end;
 }
 
 @media (prefers-reduced-motion: reduce) {

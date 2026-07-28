@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import type { CompanionType } from "@/domain";
@@ -19,7 +19,6 @@ import { dismissFragmentRecommendation } from "@/services/dismiss-fragment-recom
 import { openFragmentRecommendation } from "@/services/open-fragment-recommendation";
 import { requestFragmentRecommendation } from "@/services/request-fragment-recommendation";
 
-import { CompanionMark } from "./CompanionMark";
 import { CompanionNpcDialog, type CompanionNpcRecommendationState } from "./CompanionNpcDialog";
 import { CompanionOnboardingDialog } from "./CompanionOnboardingDialog";
 import type {
@@ -36,6 +35,7 @@ type CompanionExperienceProps = {
   companionOpenGeneration: number;
   preserveCompanionScreen: boolean;
   isChatOpen: boolean;
+  triggerButtonRef: RefObject<HTMLButtonElement | null>;
   onChatOpenChange: (isOpen: boolean, options?: { preserveScreen?: boolean }) => void;
   onCompanionTypeChange: (companionType: CompanionType | null) => void;
   onOpenFragment: (
@@ -90,6 +90,7 @@ export function CompanionExperience({
   companionOpenGeneration,
   preserveCompanionScreen,
   isChatOpen,
+  triggerButtonRef,
   onChatOpenChange,
   onCompanionTypeChange,
   onOpenFragment,
@@ -106,8 +107,6 @@ export function CompanionExperience({
     useState<RecommendationPendingAction>(null);
   const [dormantOpenError, setDormantOpenError] = useState<string | null>(null);
   const [dormantAttempt, setDormantAttempt] = useState(0);
-  const companionButtonRef = useRef<HTMLButtonElement>(null);
-
   const settingsState = useCompanionSettings(settingsAttempt);
   const dormantState: DormantQueryState = useLiveQuery(
     async (): Promise<DormantQueryState> => {
@@ -137,9 +136,9 @@ export function CompanionExperience({
       return;
     }
 
-    const companionButton = companionButtonRef.current;
+    const companionButton = triggerButtonRef.current;
     requestAnimationFrame(() => companionButton?.focus());
-  }, [isChatOpen]);
+  }, [isChatOpen, triggerButtonRef]);
 
   async function chooseCompanion(nextCompanionType: CompanionType): Promise<void> {
     if (isChoosing) {
@@ -212,7 +211,7 @@ export function CompanionExperience({
       await waitForDialogTransition();
       const didOpen = await onOpenFragment(
         result.viewed.fragment.id,
-        companionButtonRef.current,
+        triggerButtonRef.current,
         true,
         true,
       );
@@ -284,7 +283,7 @@ export function CompanionExperience({
       await waitForDialogTransition();
       const didOpen = await onOpenFragment(
         fragmentId,
-        companionButtonRef.current ?? triggerElement,
+        triggerButtonRef.current ?? triggerElement,
         false,
         true,
       );
@@ -335,21 +334,6 @@ export function CompanionExperience({
             重新读取
           </button>
         </aside>
-      ) : null}
-
-      {companionType !== null ? (
-        <div className="garden-companion-entry mx-auto mt-3 max-w-[960px]">
-          <button
-            className="inline-flex items-center gap-2 rounded-lg border border-[#a98b63] bg-[#f4ead3] px-3.5 py-2 text-sm font-semibold text-garden-ink shadow-sm hover:bg-[#eadbbd]"
-            data-testid="open-companion"
-            onClick={() => onChatOpenChange(true)}
-            ref={companionButtonRef}
-            type="button"
-          >
-            <CompanionMark companionType={companionType} size="small" />
-            打开花园伙伴
-          </button>
-        </div>
       ) : null}
 
       <CompanionOnboardingDialog

@@ -1,6 +1,5 @@
 import {
   createWalkabilityGrid,
-  doWorldRectanglesOverlap,
   findPath,
   gridPositionKey,
   gridToWorldPosition,
@@ -24,17 +23,28 @@ function requireNavigationInvariant(condition: boolean, message: string): void {
 export function createGardenWalkabilityGrid(
   config: GardenMapConfig,
   bounds: GridBounds = GARDEN_GRID_BOUNDS,
+  occupiedSlotIds: readonly string[] = [],
 ): WalkabilityGrid {
-  const blockedPlantPositions = config.plantSlots.map((slot) =>
-    worldToGridPosition(slot.x, slot.y, MOVEMENT_GRID_SIZE, bounds),
-  );
+  const slotById = new Map(config.plantSlots.map((slot) => [slot.id, slot] as const));
+  const blockedPositions = [
+    ...config.collisionGridPositions,
+    ...occupiedSlotIds.map((slotId) => {
+      const slot = slotById.get(slotId);
+
+      if (slot === undefined) {
+        throw new Error(`Unknown occupied garden slot: ${slotId}`);
+      }
+
+      return worldToGridPosition(slot.x, slot.y, MOVEMENT_GRID_SIZE, bounds);
+    }),
+  ];
 
   return createWalkabilityGrid({
     bounds,
     gridSize: MOVEMENT_GRID_SIZE,
     walkableAreas: config.walkableAreas,
-    obstacleAreas: config.obstacleAreas,
-    blockedPositions: blockedPlantPositions,
+    obstacleAreas: [],
+    blockedPositions,
   });
 }
 
@@ -44,12 +54,12 @@ export function validateGardenNavigationConfig(
   bounds: GridBounds = GARDEN_GRID_BOUNDS,
 ): void {
   requireNavigationInvariant(
-    !doWorldRectanglesOverlap(config.roadArea, config.pondArea),
-    "the road and pond must not overlap",
-  );
-  requireNavigationInvariant(
     isWorldPositionAtGridCenter(config.playerSpawn, MOVEMENT_GRID_SIZE),
     "the player spawn must be at a grid cell center",
+  );
+  requireNavigationInvariant(
+    isWorldPositionAtGridCenter(config.companionPosition, MOVEMENT_GRID_SIZE),
+    "the companion position must be at a grid cell center",
   );
 
   const spawnGridPosition = worldToGridPosition(
@@ -63,6 +73,22 @@ export function validateGardenNavigationConfig(
     "the player spawn must be walkable",
   );
 
+  const companionGridPosition = worldToGridPosition(
+    config.companionPosition.x,
+    config.companionPosition.y,
+    MOVEMENT_GRID_SIZE,
+    bounds,
+  );
+  requireNavigationInvariant(
+    isGridPositionWalkable(grid, companionGridPosition),
+    "the companion position must be walkable",
+  );
+
+  const fullGardenGrid = createGardenWalkabilityGrid(
+    config,
+    bounds,
+    config.plantSlots.map((slot) => slot.id),
+  );
   const interactionPositionKeys = new Set<string>();
 
   for (const slot of config.plantSlots) {
@@ -90,12 +116,16 @@ export function validateGardenNavigationConfig(
     const interactionPositionKey = gridPositionKey(interactionGridPosition);
 
     requireNavigationInvariant(
-      !isGridPositionWalkable(grid, plantGridPosition),
-      `${slot.id} plant cell must be blocked`,
+      isGridPositionWalkable(grid, plantGridPosition),
+      `${slot.id} empty plant cell must be walkable`,
     );
     requireNavigationInvariant(
-      isGridPositionWalkable(grid, interactionGridPosition),
-      `${slot.id} interaction point must be walkable`,
+      !isGridPositionWalkable(fullGardenGrid, plantGridPosition),
+      `${slot.id} occupied plant cell must be blocked`,
+    );
+    requireNavigationInvariant(
+      isGridPositionWalkable(fullGardenGrid, interactionGridPosition),
+      `${slot.id} interaction point must be walkable in a full garden`,
     );
     requireNavigationInvariant(
       !interactionPositionKeys.has(interactionPositionKey),
@@ -104,7 +134,7 @@ export function validateGardenNavigationConfig(
     interactionPositionKeys.add(interactionPositionKey);
     requireNavigationInvariant(
       findPath({
-        grid,
+        grid: fullGardenGrid,
         start: spawnGridPosition,
         target: interactionGridPosition,
       }) !== null,
@@ -115,16 +145,24 @@ export function validateGardenNavigationConfig(
 
 export class PathfindingSystem {
   readonly bounds: GridBounds;
-  readonly grid: WalkabilityGrid;
   readonly gridSize = MOVEMENT_GRID_SIZE;
+  private currentGrid: WalkabilityGrid;
 
   constructor(
     private readonly config: GardenMapConfig,
     bounds: GridBounds = GARDEN_GRID_BOUNDS,
   ) {
     this.bounds = bounds;
-    this.grid = createGardenWalkabilityGrid(config, bounds);
-    validateGardenNavigationConfig(config, this.grid, bounds);
+    this.currentGrid = createGardenWalkabilityGrid(config, bounds);
+    validateGardenNavigationConfig(config, this.currentGrid, bounds);
+  }
+
+  get grid(): WalkabilityGrid {
+    return this.currentGrid;
+  }
+
+  setOccupiedPlantSlots(slotIds: readonly string[]): void {
+    this.currentGrid = createGardenWalkabilityGrid(this.config, this.bounds, slotIds);
   }
 
   isWorldPositionInsideMap(position: WorldPosition): boolean {
@@ -145,12 +183,12 @@ export class PathfindingSystem {
   }
 
   isWalkable(position: GridPosition): boolean {
-    return isGridPositionWalkable(this.grid, position);
+    return isGridPositionWalkable(this.currentGrid, position);
   }
 
   findPath(startWorldPosition: WorldPosition, target: GridPosition): GridPosition[] | null {
     return findPath({
-      grid: this.grid,
+      grid: this.currentGrid,
       start: this.worldToGrid(startWorldPosition),
       target,
     });

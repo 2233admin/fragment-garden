@@ -3,6 +3,112 @@ import type { PlantStage } from "../../domain/shared/types";
 export const BOOT_SCENE_KEY = "BootScene";
 export const GARDEN_SCENE_KEY = "GardenScene";
 export const PLAYER_TEXTURE_KEY = "garden-player-placeholder";
+export const GARDEN_TILEMAP_KEY = "pixel-garden-map";
+export const GARDEN_MAP_LOAD_FAILED_REGISTRY_KEY = "pixel-garden-map-load-failed";
+
+export const GARDEN_TILEMAP_ASSET_PATH = "/assets/garden/maps/garden-map.json";
+
+export const GARDEN_BASE_OVERLAY_ASSET = Object.freeze({
+  key: "garden-growth-base",
+  path: "/assets/garden/decor/garden-growth-base.png",
+});
+
+export const GARDEN_GROWTH_OVERLAY_ASSETS = Object.freeze([
+  {
+    key: "garden-growth-stage1",
+    layerName: "GlobalGrowth1Low",
+    path: "/assets/garden/decor/garden-growth-stage1.png",
+  },
+  {
+    key: "garden-growth-stage2",
+    layerName: "GlobalGrowth2Low",
+    path: "/assets/garden/decor/garden-growth-stage2.png",
+  },
+  {
+    key: "garden-growth-stage3",
+    layerName: "GlobalGrowth3Medium",
+    path: "/assets/garden/decor/garden-growth-stage3.png",
+  },
+  {
+    key: "garden-growth-stage4",
+    layerName: "GlobalGrowth4Above",
+    path: "/assets/garden/decor/garden-growth-stage4.png",
+  },
+] as const);
+
+export const GARDEN_TILESET_ASSETS = Object.freeze([
+  {
+    key: "garden-terrain",
+    path: "/assets/garden/tiles/garden-terrain.png",
+    tiledName: "garden-terrain",
+  },
+  {
+    key: "garden-path",
+    path: "/assets/garden/tiles/garden-path.png",
+    tiledName: "garden-path",
+  },
+  {
+    key: "garden-flowerbeds",
+    path: "/assets/garden/decor/garden-flowerbeds.png",
+    tiledName: "garden-flowerbeds",
+  },
+  {
+    key: "garden-water",
+    path: "/assets/garden/tiles/garden-water.png",
+    tiledName: "garden-water",
+  },
+  {
+    key: "garden-fence",
+    path: "/assets/garden/tiles/garden-fence.png",
+    tiledName: "garden-fence",
+  },
+  {
+    key: "garden-trees",
+    path: "/assets/garden/decor/garden-trees.png",
+    tiledName: "garden-trees",
+  },
+  {
+    key: "garden-bushes",
+    path: "/assets/garden/decor/garden-bushes.png",
+    tiledName: "garden-bushes",
+  },
+  {
+    key: "garden-details",
+    path: "/assets/garden/decor/garden-details.png",
+    tiledName: "garden-details",
+  },
+  {
+    key: "garden-pond",
+    path: "/assets/garden/decor/garden-pond.png",
+    tiledName: "garden-pond",
+  },
+  {
+    key: "garden-centerpiece",
+    path: "/assets/garden/decor/garden-centerpiece.png",
+    tiledName: "garden-centerpiece",
+  },
+  {
+    key: "garden-ground-details",
+    path: "/assets/garden/decor/garden-ground-details.png",
+    tiledName: "garden-ground-details",
+  },
+  {
+    key: "garden-hedges",
+    path: "/assets/garden/decor/garden-hedges.png",
+    tiledName: "garden-hedges",
+  },
+  {
+    key: "garden-vines",
+    path: "/assets/garden/decor/garden-vines.png",
+    tiledName: "garden-vines",
+  },
+] as const);
+
+export const GARDEN_PIXEL_RENDER_CONFIG = Object.freeze({
+  antialias: false,
+  pixelArt: true,
+  roundPixels: true,
+});
 
 export const PLANT_TEXTURE_KEYS: Readonly<Record<PlantStage, string>> = Object.freeze({
   seedling: "garden-plant-seedling",

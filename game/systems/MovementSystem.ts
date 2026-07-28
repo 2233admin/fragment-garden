@@ -51,6 +51,10 @@ export class MovementSystem {
     return this.motionState.status;
   }
 
+  faceTarget(target: Readonly<{ x: number; y: number }>): void {
+    this.player.faceTarget(target);
+  }
+
   start(path: readonly GridPosition[], target: GridPosition, onArrive: ArrivalHandler): void {
     if (this.isDestroyed) {
       throw new Error("Cannot start a destroyed MovementSystem");

@@ -26,13 +26,13 @@ export function GardenModeToggle({
     <div>
       <nav
         aria-label="浏览模式"
-        className="inline-flex rounded-full border border-garden-line bg-garden-paper p-1 shadow-sm"
+        className="inline-flex rounded-xl border border-[#a98b63] bg-[#f4ead3] p-1 shadow-sm"
       >
         {(["garden", "cards"] as const).map((candidateMode) => (
           <button
             aria-controls={`${candidateMode}-mode-panel`}
             aria-pressed={mode === candidateMode}
-            className="rounded-full px-5 py-2.5 text-sm font-semibold text-garden-muted hover:text-garden-ink aria-pressed:bg-garden-accent aria-pressed:text-white"
+            className="rounded-lg px-4 py-2 text-sm font-semibold text-[#665b47] hover:text-garden-ink aria-pressed:bg-[#426f4d] aria-pressed:text-white"
             key={candidateMode}
             onClick={() => onModeChange(candidateMode)}
             ref={candidateMode === "garden" ? gardenButtonRef : cardButtonRef}
@@ -42,7 +42,7 @@ export function GardenModeToggle({
           </button>
         ))}
       </nav>
-      <p aria-live="polite" className="mt-2 text-center text-xs text-garden-muted">
+      <p aria-live="polite" className="sr-only">
         当前模式：{MODE_LABELS[mode]}
       </p>
     </div>

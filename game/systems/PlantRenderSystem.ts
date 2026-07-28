@@ -1,6 +1,10 @@
 import * as Phaser from "phaser";
 
 import type { PlantViewModel } from "../../domain/garden/plant-view-model";
+import {
+  getContentPlantPreviewVisualState,
+  type ContentPlantPreviewMode,
+} from "../config/content-plant-preview";
 import { PLANT_SLOT_CONFIGS } from "../config/garden-map";
 import { PlantSprite, type PlantClickHandler } from "../entities/PlantSprite";
 import { calculatePlantRenderDiff } from "./plant-render-diff";
@@ -14,6 +18,7 @@ export class PlantRenderSystem {
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly onPlantClicked: PlantClickHandler,
+    private readonly contentPlantPreview: ContentPlantPreviewMode | null = null,
   ) {}
 
   loadGarden(plants: readonly PlantViewModel[]): void {
@@ -44,16 +49,30 @@ export class PlantRenderSystem {
 
     if (existingSprite !== undefined) {
       existingSprite.updatePlant(plant, slot);
+      existingSprite.setPreviewVisualState(
+        getContentPlantPreviewVisualState(this.contentPlantPreview, plant.plantId),
+      );
       return;
     }
 
     const sprite = new PlantSprite(this.scene, plant, slot, this.onPlantClicked);
     sprite.setSelected(this.selectedPlantId === plant.plantId);
+    sprite.setPreviewVisualState(
+      getContentPlantPreviewVisualState(this.contentPlantPreview, plant.plantId),
+    );
     this.sprites.set(plant.plantId, sprite);
   }
 
   getPlant(plantId: string): PlantViewModel | undefined {
     return this.sprites.get(plantId)?.viewModel;
+  }
+
+  getOccupiedSlotIds(): readonly string[] {
+    return [...this.sprites.values()].map((sprite) => sprite.viewModel.slotId);
+  }
+
+  getPlants(): readonly PlantViewModel[] {
+    return [...this.sprites.values()].map((sprite) => sprite.viewModel);
   }
 
   hasPlant(plantId: string): boolean {

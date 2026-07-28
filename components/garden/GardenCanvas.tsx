@@ -6,7 +6,13 @@ import type { PlantViewModel } from "@/domain";
 import type { CompanionViewModel } from "@/domain/garden/companion-view-model";
 import { GameBridge } from "@/game/bridge/game-bridge";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
+import {
+  getContentPlantPreviewPlants,
+  resolveContentPlantPreview,
+  type ContentPlantPreviewMode,
+} from "@/game/config/content-plant-preview";
 import { GARDEN_MAP_CONFIG } from "@/game/config/garden-map";
+import { resolveGardenStagePreview } from "@/game/config/garden-stage-preview";
 import type { GardenGameRuntime, GardenRuntimeFailure } from "@/game/start-garden-game";
 
 import { GardenErrorState, type GardenErrorKind } from "./GardenErrorState";
@@ -40,6 +46,7 @@ export function GardenCanvas({
   const runtimeRef = useRef<GardenGameRuntime | null>(null);
   const latestPlantsRef = useRef(plants);
   const latestCompanionRef = useRef(companion);
+  const contentPlantPreviewRef = useRef<ContentPlantPreviewMode | null>(null);
   const isSceneReadyRef = useRef(false);
   const failureHandlerRef = useRef<((kind: GardenRuntimeFailure) => void) | null>(null);
   const gameEventHandlerRef = useRef(onGameEvent);
@@ -66,6 +73,15 @@ export function GardenCanvas({
 
     const runtimeHost = host;
     const container = containerRef.current;
+    const gardenStagePreview = resolveGardenStagePreview(
+      window.location.search,
+      process.env.NODE_ENV,
+    );
+    const contentPlantPreview = resolveContentPlantPreview(
+      window.location.search,
+      process.env.NODE_ENV,
+    );
+    contentPlantPreviewRef.current = contentPlantPreview;
     let isCancelled = false;
     let didFail = false;
     const bridge = new GameBridge();
@@ -96,6 +112,16 @@ export function GardenCanvas({
       container.dataset.playerX = GARDEN_MAP_CONFIG.playerSpawn.x.toFixed(2);
       container.dataset.playerY = GARDEN_MAP_CONFIG.playerSpawn.y.toFixed(2);
       container.dataset.movementState = "idle";
+      if (gardenStagePreview === null) {
+        delete container.dataset.gardenStagePreview;
+      } else {
+        container.dataset.gardenStagePreview = String(gardenStagePreview);
+      }
+      if (contentPlantPreview === null) {
+        delete container.dataset.contentPlantPreview;
+      } else {
+        container.dataset.contentPlantPreview = contentPlantPreview;
+      }
       delete container.dataset.selectedPlantId;
     }
     setRuntimeState(LOADING_RUNTIME_STATE);
@@ -138,6 +164,8 @@ export function GardenCanvas({
         const runtime = startGardenGame({
           parent: runtimeHost,
           bridge,
+          gardenStagePreview,
+          contentPlantPreview,
           onReady: () => {
             if (isCancelled || didFail) {
               return;
@@ -148,7 +176,10 @@ export function GardenCanvas({
             canvas?.setAttribute("aria-hidden", "true");
             bridge.publishToGame({
               type: "LOAD_GARDEN",
-              plants: [...latestPlantsRef.current],
+              plants:
+                contentPlantPreview === null
+                  ? [...latestPlantsRef.current]
+                  : [...getContentPlantPreviewPlants(contentPlantPreview)],
             });
             bridge.publishToGame({
               type: "SET_COMPANION",
@@ -188,9 +219,13 @@ export function GardenCanvas({
     }
 
     try {
+      const contentPlantPreview = contentPlantPreviewRef.current;
       bridgeRef.current?.publishToGame({
         type: "LOAD_GARDEN",
-        plants: [...plants],
+        plants:
+          contentPlantPreview === null
+            ? [...plants]
+            : [...getContentPlantPreviewPlants(contentPlantPreview)],
       });
     } catch {
       failureHandlerRef.current?.("update");
@@ -244,7 +279,7 @@ export function GardenCanvas({
   return (
     <div
       aria-busy={runtimeState.status === "loading"}
-      className="relative aspect-[3/2] w-full overflow-hidden rounded-2xl border border-garden-line bg-garden-paper shadow-[0_18px_45px_rgba(37,72,56,0.14)]"
+      className="garden-canvas-frame relative aspect-[3/2] w-full overflow-hidden bg-garden-paper"
       data-companion-count={companion === null ? 0 : 1}
       data-companion-type={companion?.type}
       data-plant-count={plants.length}
@@ -258,7 +293,7 @@ export function GardenCanvas({
         aria-label={`花园画面。可以点击地面移动人物，点击植物走近并查看内容。当前有 ${plants.length} 株已放置植物。${
           companion === null ? "尚未选择花园伙伴。" : "可以点击花园伙伴打开规则型对话。"
         }`}
-        className="absolute inset-0 [&_canvas]:block [&_canvas]:max-h-full [&_canvas]:max-w-full"
+        className="pixel-garden-canvas absolute inset-0 [&_canvas]:block [&_canvas]:max-h-full [&_canvas]:max-w-full"
         ref={hostRef}
         role="img"
       />

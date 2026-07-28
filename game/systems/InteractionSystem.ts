@@ -114,6 +114,7 @@ export class InteractionSystem {
         return;
       }
 
+      this.movement.faceTarget({ x: slot.x, y: slot.y });
       this.finishRequest();
       this.bridge.publishToReact({
         type: "PLAYER_REACHED_PLANT",

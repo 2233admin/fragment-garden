@@ -1,21 +1,41 @@
 import * as Phaser from "phaser";
 
 import type { CompanionViewModel } from "../../domain/garden/companion-view-model";
+import {
+  COMPANION_CHARACTER_ASSETS,
+  GARDEN_ENTITY_SHADOW_ASSET,
+  resolveCompanionIdleAnimationKey,
+  resolveGardenCharacterTextureSource,
+  type GardenCharacterTextureSource,
+} from "../config/garden-character-animations";
 import type { GardenPoint } from "../config/garden-map";
 import { GARDEN_RENDER_COLORS } from "../config/game-config";
 
 export type CompanionClickHandler = () => void;
 
+const COMPANION_DEPTH_OFFSET = 1_000;
+const COMPANION_HOVER_SCALE = 1.03;
 const COMPANION_HIT_AREA = Object.freeze({
-  x: -34,
-  y: -70,
-  width: 68,
-  height: 72,
+  x: -30,
+  y: -58,
+  width: 60,
+  height: 60,
 });
 
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 export class CompanionSprite extends Phaser.GameObjects.Container {
-  private readonly feedbackRing: Phaser.GameObjects.Ellipse;
-  private readonly graphics: Phaser.GameObjects.Graphics;
+  private readonly characterSprite: Phaser.GameObjects.Sprite | null;
+  private readonly fallbackGraphics: Phaser.GameObjects.Graphics;
+  private readonly feedbackMarker: Phaser.GameObjects.Graphics;
+  private readonly shadow: Phaser.GameObjects.Image | Phaser.GameObjects.Ellipse;
+  private readonly textureSource: GardenCharacterTextureSource;
   private companion: CompanionViewModel;
 
   constructor(
@@ -26,16 +46,33 @@ export class CompanionSprite extends Phaser.GameObjects.Container {
   ) {
     super(scene, position.x, position.y);
     this.companion = companion;
-    this.feedbackRing = new Phaser.GameObjects.Ellipse(scene, 0, -34, 72, 72)
-      .setStrokeStyle(3, GARDEN_RENDER_COLORS.companionHover, 0.95)
-      .setVisible(false);
-    this.graphics = new Phaser.GameObjects.Graphics(scene);
-    this.add([this.feedbackRing, this.graphics]);
+    const asset = COMPANION_CHARACTER_ASSETS[companion.type];
+    this.textureSource = resolveGardenCharacterTextureSource(scene.textures.exists(asset.key));
+    this.shadow = scene.textures.exists(GARDEN_ENTITY_SHADOW_ASSET.key)
+      ? new Phaser.GameObjects.Image(scene, 0, 2, GARDEN_ENTITY_SHADOW_ASSET.key)
+          .setAlpha(0.16)
+          .setScale(0.68, 0.8)
+      : new Phaser.GameObjects.Ellipse(scene, 0, 2, 32, 8, 0x243626, 0.14);
+    this.feedbackMarker = new Phaser.GameObjects.Graphics(scene);
+    this.fallbackGraphics = new Phaser.GameObjects.Graphics(scene);
+    this.characterSprite =
+      this.textureSource === "formal"
+        ? new Phaser.GameObjects.Sprite(scene, 0, 0, asset.key, 0).setOrigin(0.5, 1)
+        : null;
+    this.add([
+      this.shadow,
+      this.feedbackMarker,
+      this.fallbackGraphics,
+      ...(this.characterSprite === null ? [] : [this.characterSprite]),
+    ]);
 
     scene.add.existing(this);
     this.setName("garden-companion");
-    this.setDepth(position.y + 500);
-    this.setData("companionType", companion.type);
+    this.setDepth(position.y + COMPANION_DEPTH_OFFSET);
+    this.setData({
+      companionType: companion.type,
+      characterTextureSource: this.textureSource,
+    });
     this.setInteractive({
       hitArea: new Phaser.Geom.Rectangle(
         COMPANION_HIT_AREA.x,
@@ -60,7 +97,8 @@ export class CompanionSprite extends Phaser.GameObjects.Container {
         onClick();
       },
     );
-    this.drawCompanion();
+    this.drawFeedbackMarker();
+    this.applyCharacterVisual();
   }
 
   get viewModel(): CompanionViewModel {
@@ -73,65 +111,79 @@ export class CompanionSprite extends Phaser.GameObjects.Container {
   }
 
   private handlePointerOver(): void {
-    this.feedbackRing.setVisible(true);
-    this.setScale(1.05);
+    this.feedbackMarker.setVisible(true);
+    this.setScale(COMPANION_HOVER_SCALE);
   }
 
   private handlePointerOut(): void {
-    this.feedbackRing.setVisible(false);
+    this.feedbackMarker.setVisible(false);
     this.setScale(1);
   }
 
-  private drawCompanion(): void {
+  private applyCharacterVisual(): void {
+    if (this.characterSprite === null) {
+      this.drawFallbackCompanion();
+      return;
+    }
+
+    this.fallbackGraphics.setVisible(false);
+    const animationKey = resolveCompanionIdleAnimationKey(this.companion.type);
+
+    if (prefersReducedMotion() || !this.scene.anims.exists(animationKey)) {
+      this.characterSprite.setFrame(0);
+      return;
+    }
+
+    this.characterSprite.play(animationKey);
+  }
+
+  private drawFeedbackMarker(): void {
+    this.feedbackMarker.clear();
+    this.feedbackMarker.fillStyle(GARDEN_RENDER_COLORS.companionHover, 0.72);
+    this.feedbackMarker.fillRect(-19, -3, 7, 2);
+    this.feedbackMarker.fillRect(-19, -3, 2, 6);
+    this.feedbackMarker.fillRect(12, -3, 7, 2);
+    this.feedbackMarker.fillRect(17, -3, 2, 6);
+    this.feedbackMarker.setVisible(false);
+  }
+
+  private drawFallbackCompanion(): void {
     const fillColor =
       this.companion.type === "cat"
         ? GARDEN_RENDER_COLORS.companionCat
         : GARDEN_RENDER_COLORS.companionDog;
 
-    this.graphics.clear();
-    this.graphics.fillStyle(GARDEN_RENDER_COLORS.companionOutline, 0.18);
-    this.graphics.fillEllipse(0, -3, 46, 14);
-    this.graphics.lineStyle(2, GARDEN_RENDER_COLORS.companionOutline, 1);
-    this.graphics.fillStyle(fillColor, 1);
-    this.graphics.fillRoundedRect(-18, -41, 36, 38, 14);
-    this.graphics.strokeRoundedRect(-18, -41, 36, 38, 14);
+    this.fallbackGraphics.clear();
+    this.fallbackGraphics.setVisible(true);
+    this.fallbackGraphics.lineStyle(2, GARDEN_RENDER_COLORS.companionOutline, 1);
+    this.fallbackGraphics.fillStyle(fillColor, 1);
+    this.fallbackGraphics.fillRoundedRect(-15, -34, 30, 33, 12);
+    this.fallbackGraphics.strokeRoundedRect(-15, -34, 30, 33, 12);
 
     if (this.companion.type === "cat") {
-      this.drawCatHead(fillColor);
+      this.drawFallbackCatHead(fillColor);
     } else {
-      this.drawDogHead(fillColor);
+      this.drawFallbackDogHead(fillColor);
     }
 
-    this.drawFace();
+    this.fallbackGraphics.fillStyle(GARDEN_RENDER_COLORS.companionOutline, 1);
+    this.fallbackGraphics.fillCircle(-5, -43, 2);
+    this.fallbackGraphics.fillCircle(5, -43, 2);
+    this.fallbackGraphics.fillStyle(GARDEN_RENDER_COLORS.companionAccent, 1);
+    this.fallbackGraphics.fillCircle(0, -37, 4);
   }
 
-  private drawCatHead(fillColor: number): void {
-    this.graphics.fillStyle(fillColor, 1);
-    this.graphics.fillTriangle(-17, -57, -10, -76, -2, -59);
-    this.graphics.strokeTriangle(-17, -57, -10, -76, -2, -59);
-    this.graphics.fillTriangle(2, -59, 10, -76, 17, -57);
-    this.graphics.strokeTriangle(2, -59, 10, -76, 17, -57);
-    this.graphics.fillCircle(0, -52, 20);
-    this.graphics.strokeCircle(0, -52, 20);
+  private drawFallbackCatHead(fillColor: number): void {
+    this.fallbackGraphics.fillStyle(fillColor, 1);
+    this.fallbackGraphics.fillTriangle(-14, -48, -8, -62, -2, -50);
+    this.fallbackGraphics.fillTriangle(2, -50, 8, -62, 14, -48);
+    this.fallbackGraphics.fillCircle(0, -43, 16);
   }
 
-  private drawDogHead(fillColor: number): void {
-    this.graphics.fillStyle(fillColor, 1);
-    this.graphics.fillRoundedRect(-27, -66, 13, 29, 6);
-    this.graphics.strokeRoundedRect(-27, -66, 13, 29, 6);
-    this.graphics.fillRoundedRect(14, -66, 13, 29, 6);
-    this.graphics.strokeRoundedRect(14, -66, 13, 29, 6);
-    this.graphics.fillCircle(0, -52, 20);
-    this.graphics.strokeCircle(0, -52, 20);
-  }
-
-  private drawFace(): void {
-    this.graphics.fillStyle(GARDEN_RENDER_COLORS.companionOutline, 1);
-    this.graphics.fillCircle(-7, -54, 2);
-    this.graphics.fillCircle(7, -54, 2);
-    this.graphics.fillStyle(GARDEN_RENDER_COLORS.companionAccent, 1);
-    this.graphics.fillCircle(0, -46, 5);
-    this.graphics.lineStyle(2, GARDEN_RENDER_COLORS.companionOutline, 1);
-    this.graphics.strokeCircle(0, -46, 5);
+  private drawFallbackDogHead(fillColor: number): void {
+    this.fallbackGraphics.fillStyle(fillColor, 1);
+    this.fallbackGraphics.fillRoundedRect(-21, -56, 10, 23, 5);
+    this.fallbackGraphics.fillRoundedRect(11, -56, 10, 23, 5);
+    this.fallbackGraphics.fillCircle(0, -43, 16);
   }
 }

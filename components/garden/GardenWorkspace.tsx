@@ -386,18 +386,43 @@ export function GardenWorkspace() {
   }
 
   return (
-    <main className="min-h-screen px-5 py-8 text-garden-ink sm:px-8 lg:px-12 lg:py-10">
-      <div className="mx-auto max-w-7xl" inert={isRemoteRestoreInProgress}>
-        <header className="flex flex-col gap-6 border-b border-garden-line pb-7 lg:flex-row lg:items-end lg:justify-between">
+    <main
+      className={`min-h-screen px-4 text-garden-ink sm:px-6 lg:px-8 ${
+        mode === "garden" ? "garden-mode-shell py-4 sm:py-5" : "py-8 lg:py-10"
+      }`}
+    >
+      <div
+        className={`mx-auto ${mode === "garden" ? "max-w-[1080px]" : "max-w-7xl"}`}
+        inert={isRemoteRestoreInProgress}
+      >
+        <header
+          className={`flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between ${
+            mode === "garden"
+              ? "garden-scene-header rounded-2xl px-4 py-3 sm:px-5"
+              : "border-b border-garden-line pb-7"
+          }`}
+        >
           <div>
-            <p className="text-xs font-semibold tracking-[0.2em] text-garden-accent uppercase">
+            <p className="text-[11px] font-semibold tracking-[0.18em] text-garden-accent uppercase">
               本地碎片花园
             </p>
-            <h1 className="mt-2 font-display text-4xl leading-tight font-semibold tracking-tight text-garden-ink sm:text-5xl">
+            <h1
+              className={`font-display leading-tight font-semibold tracking-tight text-garden-ink ${
+                mode === "garden" ? "mt-1 text-2xl sm:text-3xl" : "mt-2 text-4xl sm:text-5xl"
+              }`}
+            >
               碎片花园
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-garden-muted sm:text-base">
-              点击花园地面让人物移动，或点击植物走近并查看内容；卡片模式仍可直接记录和整理。
+            <p
+              className={`max-w-2xl text-garden-muted ${
+                mode === "garden"
+                  ? "mt-1 text-xs leading-5 sm:text-sm"
+                  : "mt-3 text-sm leading-6 sm:text-base"
+              }`}
+            >
+              {mode === "garden"
+                ? "在小路间散步，让记录慢慢长成一座自己的花园。"
+                : "用卡片查看、记录和整理已经种下的内容。"}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3 self-start lg:self-auto">
@@ -408,7 +433,7 @@ export function GardenWorkspace() {
               onModeChange={handleModeChange}
             />
             <button
-              className="rounded-md border border-garden-line bg-garden-paper px-4 py-2.5 text-sm font-semibold text-garden-ink hover:bg-garden-soft"
+              className="rounded-lg border border-[#a98b63] bg-[#f4ead3] px-3.5 py-2 text-sm font-semibold text-garden-ink hover:bg-[#eadbbd]"
               onClick={() => setIsBackupOpen(true)}
               ref={backupButtonRef}
               type="button"
@@ -421,9 +446,9 @@ export function GardenWorkspace() {
         <div
           aria-atomic="true"
           aria-live={interactionFeedback?.kind === "error" ? "assertive" : "polite"}
-          className={`mx-auto mt-4 min-h-6 max-w-[960px] text-sm font-semibold ${
-            interactionFeedback?.kind === "error" ? "text-garden-danger" : "text-garden-accent"
-          }`}
+          className={`mx-auto max-w-[960px] text-sm font-semibold ${
+            interactionFeedback === null ? "h-2" : "mt-3 min-h-6"
+          } ${interactionFeedback?.kind === "error" ? "text-garden-danger" : "text-garden-accent"}`}
           data-testid="garden-interaction-status"
           role={interactionFeedback?.kind === "error" ? "alert" : "status"}
         >
@@ -474,20 +499,17 @@ export function GardenWorkspace() {
         />
 
         <Activity mode={mode === "garden" ? "visible" : "hidden"}>
-          <section aria-labelledby="garden-mode-title" className="pt-3" id="garden-mode-panel">
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold tracking-[0.18em] text-garden-accent uppercase">
-                  花园模式
-                </p>
-                <h2
-                  className="mt-1 font-display text-2xl font-semibold text-garden-ink"
-                  id="garden-mode-title"
-                >
-                  固定花园
-                </h2>
-              </div>
-              <p className="text-xs text-garden-muted">点击地面移动 · 点击植物查看</p>
+          <section aria-labelledby="garden-mode-title" className="pt-2" id="garden-mode-panel">
+            <div className="garden-scene-toolbar mx-auto mb-2 flex max-w-[960px] flex-wrap items-center justify-between gap-3 rounded-t-xl px-4 py-2.5">
+              <h2
+                className="font-display text-base font-semibold text-[#463b2b]"
+                id="garden-mode-title"
+              >
+                我的灵感庭院
+              </h2>
+              <p className="text-xs font-medium text-[#75664e]">
+                点击地面散步 · 点击内容植物查看笔记
+              </p>
             </div>
 
             {gardenState.status === "loading" ? (

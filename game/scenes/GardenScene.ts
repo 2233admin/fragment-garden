@@ -3,10 +3,13 @@ import * as Phaser from "phaser";
 import type { GameBridge, UnsubscribeGameBridge } from "../bridge/game-bridge";
 import type { ReactToGameEvent } from "../bridge/game-events";
 import type { PlantViewModel } from "../../domain";
+import type { GardenGrowthStage } from "../../domain/garden/garden-growth";
+import type { ContentPlantPreviewMode } from "../config/content-plant-preview";
 import { GARDEN_MAP_CONFIG } from "../config/garden-map";
 import { GARDEN_SCENE_KEY } from "../config/game-config";
 import { PlayerSprite } from "../entities/PlayerSprite";
 import { CompanionRenderSystem } from "../systems/CompanionRenderSystem";
+import { GardenGrowthSystem } from "../systems/GardenGrowthSystem";
 import { GardenMapRenderer } from "../systems/GardenMapRenderer";
 import { InteractionSystem } from "../systems/InteractionSystem";
 import { MovementSystem, type MovementSnapshot } from "../systems/MovementSystem";
@@ -17,7 +20,9 @@ type RuntimeFailureHandler = (kind: "initialize" | "update") => void;
 
 export class GardenScene extends Phaser.Scene {
   private companionRenderSystem: CompanionRenderSystem | null = null;
+  private gardenGrowthSystem: GardenGrowthSystem | null = null;
   private plantRenderSystem: PlantRenderSystem | null = null;
+  private pathfindingSystem: PathfindingSystem | null = null;
   private movementSystem: MovementSystem | null = null;
   private interactionSystem: InteractionSystem | null = null;
   private player: PlayerSprite | null = null;
@@ -34,28 +39,37 @@ export class GardenScene extends Phaser.Scene {
     private readonly bridge: GameBridge,
     private readonly onReady: () => void,
     private readonly onFailure: RuntimeFailureHandler,
+    private readonly gardenStagePreview: GardenGrowthStage | null,
+    private readonly contentPlantPreview: ContentPlantPreviewMode | null,
   ) {
     super(GARDEN_SCENE_KEY);
   }
 
   create(): void {
     try {
-      new GardenMapRenderer(this, GARDEN_MAP_CONFIG).render();
+      const mapRenderResult = new GardenMapRenderer(this, GARDEN_MAP_CONFIG).render();
+      this.gardenGrowthSystem = new GardenGrowthSystem(
+        mapRenderResult.growthLayers,
+        this.gardenStagePreview,
+      );
+      this.gardenGrowthSystem.update([]);
       this.player = new PlayerSprite(
         this,
         GARDEN_MAP_CONFIG.playerSpawn.x,
         GARDEN_MAP_CONFIG.playerSpawn.y,
       );
-      const pathfindingSystem = new PathfindingSystem(GARDEN_MAP_CONFIG);
-      this.plantRenderSystem = new PlantRenderSystem(this, (plant) =>
-        this.handlePlantClicked(plant),
+      this.pathfindingSystem = new PathfindingSystem(GARDEN_MAP_CONFIG);
+      this.plantRenderSystem = new PlantRenderSystem(
+        this,
+        (plant) => this.handlePlantClicked(plant),
+        this.contentPlantPreview,
       );
       this.companionRenderSystem = new CompanionRenderSystem(
         this,
         GARDEN_MAP_CONFIG.companionPosition,
         () => this.handleCompanionClicked(),
       );
-      this.movementSystem = new MovementSystem(this.player, pathfindingSystem, (snapshot) => {
+      this.movementSystem = new MovementSystem(this.player, this.pathfindingSystem, (snapshot) => {
         this.movementSnapshot = snapshot;
         this.publishPlayerState();
       });
@@ -63,7 +77,7 @@ export class GardenScene extends Phaser.Scene {
         this,
         GARDEN_MAP_CONFIG,
         this.bridge,
-        pathfindingSystem,
+        this.pathfindingSystem,
         this.movementSystem,
         this.plantRenderSystem,
         (plantId) => {
@@ -129,6 +143,8 @@ export class GardenScene extends Phaser.Scene {
           break;
       }
 
+      this.pathfindingSystem?.setOccupiedPlantSlots(renderSystem.getOccupiedSlotIds());
+      this.gardenGrowthSystem?.update(renderSystem.getPlants());
       this.interactionSystem?.handlePlantDataChanged();
     } catch {
       this.onFailure("update");
@@ -193,6 +209,8 @@ export class GardenScene extends Phaser.Scene {
     this.interactionSystem?.destroy();
     this.interactionSystem = null;
     this.movementSystem = null;
+    this.pathfindingSystem = null;
+    this.gardenGrowthSystem = null;
     this.companionRenderSystem?.destroy();
     this.companionRenderSystem = null;
     this.plantRenderSystem?.destroy();

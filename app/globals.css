@@ -72,6 +72,52 @@ dialog::backdrop {
   color: var(--color-garden-accent-strong);
 }
 
+.pixel-garden-canvas canvas {
+  image-rendering: pixelated;
+}
+
+.garden-mode-shell {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 250, 228, 0.72), transparent 34rem),
+    linear-gradient(180deg, #dfe6cd 0%, #d3ddc2 100%);
+}
+
+.garden-scene-header {
+  border: 1px solid rgba(124, 100, 68, 0.36);
+  background: rgba(249, 241, 218, 0.86);
+  box-shadow: 0 10px 30px rgba(69, 79, 48, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.garden-scene-toolbar {
+  border: 1px solid rgba(124, 100, 68, 0.32);
+  border-bottom: 0;
+  background: rgba(239, 224, 190, 0.94);
+}
+
+.garden-canvas-frame {
+  border: 9px solid #6d4d30;
+  border-radius: 16px;
+  outline: 4px solid #b98e57;
+  box-shadow:
+    0 0 0 1px rgba(63, 42, 25, 0.85),
+    0 18px 44px rgba(56, 65, 39, 0.25);
+}
+
+.garden-canvas-frame::after {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  border: 2px solid rgba(255, 231, 180, 0.42);
+  content: "";
+  pointer-events: none;
+}
+
+.garden-mode-shell .garden-companion-entry {
+  display: flex;
+  justify-content: flex-end;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

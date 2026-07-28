@@ -1,9 +1,26 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
+import { GARDEN_MAP_CONFIG, PLANT_SLOT_CONFIGS } from "../../game/config/garden-map";
 import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
 
 const FRAGMENT_TITLE = "沿着小路找到旧灵感";
 const FRAGMENT_TEXT = "让人物走到植物旁边，再重新打开这条碎片。";
+const FIRST_PLANT_SLOT = PLANT_SLOT_CONFIGS[0];
+const RAPID_CLICK_FINAL_TARGET = PLANT_SLOT_CONFIGS[17];
+const COLLISION_GRID_KEYS = new Set(
+  GARDEN_MAP_CONFIG.collisionGridPositions.map(({ column, row }) => `${column},${row}`),
+);
+const BLOCKED_WATER_GRID = GARDEN_MAP_CONFIG.waterGridPositions.find(({ column, row }) =>
+  COLLISION_GRID_KEYS.has(`${column},${row}`),
+);
+
+if (
+  FIRST_PLANT_SLOT === undefined ||
+  RAPID_CLICK_FINAL_TARGET === undefined ||
+  BLOCKED_WATER_GRID === undefined
+) {
+  throw new Error("The garden requires plant slots and blocked water.");
+}
 
 async function clearIndexedDb(context: BrowserContext, page: Page): Promise<void> {
   const baseURL = test.info().project.use.baseURL;
@@ -38,22 +55,21 @@ async function createTextFragment(page: Page): Promise<void> {
 
 async function clickCanvasWorld(page: Page, worldX: number, worldY: number): Promise<void> {
   const canvas = page.getByTestId("garden-canvas-host").locator("canvas");
-  const scale = await canvas.evaluate((element) => {
-    const canvasElement = element as HTMLCanvasElement;
-    const bounds = canvasElement.getBoundingClientRect();
+  await canvas.scrollIntoViewIfNeeded();
+  const point = await canvas.evaluate(
+    (element, target) => {
+      const canvasElement = element as HTMLCanvasElement;
+      const bounds = canvasElement.getBoundingClientRect();
 
-    return {
-      x: bounds.width / canvasElement.width,
-      y: bounds.height / canvasElement.height,
-    };
-  });
-
-  await canvas.click({
-    position: {
-      x: worldX * scale.x,
-      y: worldY * scale.y,
+      return {
+        x: bounds.left + target.worldX * (bounds.width / canvasElement.width),
+        y: bounds.top + target.worldY * (bounds.height / canvasElement.height),
+      };
     },
-  });
+    { worldX, worldY },
+  );
+
+  await page.mouse.click(point.x, point.y);
 }
 
 async function readPlayerPosition(page: Page): Promise<{
@@ -131,7 +147,7 @@ test("moves through the fixed garden and opens fragments through plants", async 
   });
 
   await test.step("点击植物后走到 interaction point 并只记录一次查看", async () => {
-    await clickCanvasWorld(page, 112, 60);
+    await clickCanvasWorld(page, FIRST_PLANT_SLOT.x, FIRST_PLANT_SLOT.y);
     await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute(
       "data-selected-plant-id",
       /.+/u,
@@ -149,11 +165,19 @@ test("moves through the fixed garden and opens fragments through plants", async 
   await test.step("快速连续点击时只有最后一个地面目标生效", async () => {
     await clickCanvasWorld(page, 400, 240);
     await page.waitForTimeout(120);
-    await clickCanvasWorld(page, 144, 400);
+    await clickCanvasWorld(
+      page,
+      RAPID_CLICK_FINAL_TARGET.interactionX,
+      RAPID_CLICK_FINAL_TARGET.interactionY,
+    );
+    await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute(
+      "data-movement-state",
+      "moving",
+    );
     await waitForIdlePlayer(page);
     const finalPosition = await readPlayerPosition(page);
-    expect(finalPosition.x).toBeCloseTo(144, 1);
-    expect(finalPosition.y).toBeCloseTo(400, 1);
+    expect(finalPosition.x).toBeCloseTo(RAPID_CLICK_FINAL_TARGET.interactionX, 1);
+    expect(finalPosition.y).toBeCloseTo(RAPID_CLICK_FINAL_TARGET.interactionY, 1);
   });
 
   await test.step("模式切换重建单 Canvas，并阻止人物进入水池", async () => {
@@ -162,7 +186,11 @@ test("moves through the fixed garden and opens fragments through plants", async 
     await selectMode(page, "花园模式");
     await expect(page.locator("canvas")).toHaveCount(1);
     const beforePondClick = await readPlayerPosition(page);
-    await clickCanvasWorld(page, 720, 336);
+    await clickCanvasWorld(
+      page,
+      BLOCKED_WATER_GRID.column * GARDEN_MAP_CONFIG.tileSize + GARDEN_MAP_CONFIG.tileSize / 2,
+      BLOCKED_WATER_GRID.row * GARDEN_MAP_CONFIG.tileSize + GARDEN_MAP_CONFIG.tileSize / 2,
+    );
     await expect(page.getByTestId("garden-interaction-status")).toContainText("不能通行");
     expect(await readPlayerPosition(page)).toEqual(beforePondClick);
   });
@@ -172,7 +200,7 @@ test("moves through the fixed garden and opens fragments through plants", async 
     const directOpenButton = page.getByRole("button", {
       name: `打开“${FRAGMENT_TITLE}”`,
     });
-    await clickCanvasWorld(page, 112, 60);
+    await clickCanvasWorld(page, FIRST_PLANT_SLOT.x, FIRST_PLANT_SLOT.y);
     await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute(
       "data-movement-state",
       "moving",
@@ -203,7 +231,7 @@ test("moves through the fixed garden and opens fragments through plants", async 
 
   await test.step("返回花园后再次点击植物仍可打开，删除后植物同步消失", async () => {
     await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute("aria-busy", "false");
-    await clickCanvasWorld(page, 112, 60);
+    await clickCanvasWorld(page, FIRST_PLANT_SLOT.x, FIRST_PLANT_SLOT.y);
     await expect(page.getByTestId("garden-canvas-host")).toHaveAttribute(
       "data-selected-plant-id",
       /.+/u,
@@ -224,4 +252,44 @@ test("moves through the fixed garden and opens fragments through plants", async 
   });
 
   expect(pageErrors).toEqual([]);
+});
+
+test("falls back to one interactive Canvas when pixel map assets cannot load", async ({
+  context,
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
+  });
+
+  await clearIndexedDb(context, page);
+  await page.route("**/assets/garden/**", async (route) => {
+    await route.abort("failed");
+  });
+  await page.goto("/garden");
+  await completeCompanionOnboardingIfNeeded(page);
+
+  const gardenHost = page.getByTestId("garden-canvas-host");
+  await expect(gardenHost.locator("canvas")).toHaveCount(1);
+  await expect(gardenHost).toHaveAttribute("aria-busy", "false");
+  await expect
+    .poll(() =>
+      consoleErrors.some((message) =>
+        message.includes("像素花园地图暂时无法载入，已切换到本地备用地图"),
+      ),
+    )
+    .toBe(true);
+
+  const before = await readPlayerPosition(page);
+  await clickCanvasWorld(page, 496, 400);
+  await waitForIdlePlayer(page);
+  expect(await readPlayerPosition(page)).not.toEqual(before);
+
+  await selectMode(page, "卡片模式");
+  await expect(page.locator("canvas")).toHaveCount(0);
+  await selectMode(page, "花园模式");
+  await expect(page.locator("canvas")).toHaveCount(1);
 });

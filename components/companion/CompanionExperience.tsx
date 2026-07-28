@@ -338,9 +338,9 @@ export function CompanionExperience({
       ) : null}
 
       {companionType !== null ? (
-        <div className="mx-auto mt-4 max-w-[960px]">
+        <div className="garden-companion-entry mx-auto mt-3 max-w-[960px]">
           <button
-            className="inline-flex items-center gap-2 rounded-full border border-garden-line bg-garden-paper px-4 py-2 text-sm font-semibold text-garden-ink shadow-sm hover:bg-garden-soft"
+            className="inline-flex items-center gap-2 rounded-lg border border-[#a98b63] bg-[#f4ead3] px-3.5 py-2 text-sm font-semibold text-garden-ink shadow-sm hover:bg-[#eadbbd]"
             data-testid="open-companion"
             onClick={() => onChatOpenChange(true)}
             ref={companionButtonRef}

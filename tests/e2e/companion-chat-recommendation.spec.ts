@@ -7,6 +7,7 @@ import {
   type Request,
 } from "@playwright/test";
 
+import { GARDEN_MAP_CONFIG } from "../../game/config/garden-map";
 import { expectSingleCompanion } from "./helpers/companion";
 import { readFragmentGardenPersistence } from "./helpers/indexed-db";
 
@@ -37,7 +38,10 @@ const ARCHIVED_FRAGMENT_ID = "stage8-archived-fragment";
 const ARCHIVED_FRAGMENT_TITLE = "已经封存的旧计划";
 const NPC_CREATED_TITLE = "伙伴入口种下的窗边想法";
 const NPC_CREATED_TEXT = "把窗边整理出来，先放一盆容易照看的植物。";
-const COMPANION_WORLD_POSITION = { x: 496, y: 76 };
+const COMPANION_WORLD_POSITION = {
+  x: GARDEN_MAP_CONFIG.companionPosition.x,
+  y: GARDEN_MAP_CONFIG.companionPosition.y - 34,
+};
 
 type RuntimeObservations = {
   failedExternalRequests: string[];

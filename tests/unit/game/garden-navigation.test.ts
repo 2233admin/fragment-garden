@@ -15,7 +15,7 @@ import {
 } from "../../../game/systems/PathfindingSystem";
 
 describe("garden navigation configuration", () => {
-  it("builds a 30 by 20 cached grid and validates the fixed map", () => {
+  it("builds a 30 by 20 grid from the Tiled collision layer", () => {
     const grid = createGardenWalkabilityGrid(GARDEN_MAP_CONFIG);
 
     expect(grid).toHaveLength(20);
@@ -23,7 +23,12 @@ describe("garden navigation configuration", () => {
     expect(() => validateGardenNavigationConfig(GARDEN_MAP_CONFIG, grid)).not.toThrow();
   });
 
-  it("keeps the spawn and every interaction point centered, walkable, unique, and reachable", () => {
+  it("keeps every interaction point walkable, unique, and reachable in a full garden", () => {
+    const fullGardenGrid = createGardenWalkabilityGrid(
+      GARDEN_MAP_CONFIG,
+      undefined,
+      GARDEN_MAP_CONFIG.plantSlots.map((slot) => slot.id),
+    );
     const pathfinding = new PathfindingSystem(GARDEN_MAP_CONFIG);
     const spawn = pathfinding.worldToGrid(GARDEN_MAP_CONFIG.playerSpawn);
     const interactionKeys = new Set<string>();
@@ -34,13 +39,14 @@ describe("garden navigation configuration", () => {
     expect(pathfinding.isWalkable(spawn)).toBe(true);
 
     for (const slot of GARDEN_MAP_CONFIG.plantSlots) {
+      const plant = pathfinding.worldToGrid({ x: slot.x, y: slot.y });
       const interactionWorldPosition = {
         x: slot.interactionX,
         y: slot.interactionY,
       };
       const interaction = pathfinding.worldToGrid(interactionWorldPosition);
       const path = findPath({
-        grid: pathfinding.grid,
+        grid: fullGardenGrid,
         start: spawn,
         target: interaction,
       });
@@ -49,32 +55,80 @@ describe("garden navigation configuration", () => {
         isWorldPositionAtGridCenter(interactionWorldPosition, MOVEMENT_GRID_SIZE),
         slot.id,
       ).toBe(true);
-      expect(isGridPositionWalkable(pathfinding.grid, interaction), slot.id).toBe(true);
+      expect(isGridPositionWalkable(fullGardenGrid, plant), `${slot.id} plant`).toBe(false);
+      expect(isGridPositionWalkable(fullGardenGrid, interaction), `${slot.id} interaction`).toBe(
+        true,
+      );
+      expect(
+        Math.abs(plant.column - interaction.column) + Math.abs(plant.row - interaction.row),
+        `${slot.id} adjacency`,
+      ).toBe(1);
       expect(interactionKeys.has(gridPositionKey(interaction)), slot.id).toBe(false);
       expect(path, slot.id).not.toBeNull();
-      expect(path?.at(-1), slot.id).toEqual(interaction);
       interactionKeys.add(gridPositionKey(interaction));
     }
 
     expect(interactionKeys.size).toBe(36);
   });
 
-  it("blocks the pond, decorative hedge, map border, and plant cells", () => {
+  it("updates dynamic plant blockers without changing fixed map collisions", () => {
     const pathfinding = new PathfindingSystem(GARDEN_MAP_CONFIG);
-    const pondCell = pathfinding.worldToGrid({ x: 688, y: 304 });
-    const hedgeCell = pathfinding.worldToGrid({ x: 48, y: 304 });
-    const borderCell = pathfinding.worldToGrid({ x: 16, y: 16 });
     const firstPlant = GARDEN_MAP_CONFIG.plantSlots[0];
+    const fixedCollision = GARDEN_MAP_CONFIG.collisionGridPositions[0];
 
-    expect(pathfinding.isWalkable(pondCell)).toBe(false);
-    expect(pathfinding.isWalkable(hedgeCell)).toBe(false);
-    expect(pathfinding.isWalkable(borderCell)).toBe(false);
     expect(firstPlant).toBeDefined();
+    expect(fixedCollision).toBeDefined();
 
-    if (firstPlant !== undefined) {
-      expect(
-        pathfinding.isWalkable(pathfinding.worldToGrid({ x: firstPlant.x, y: firstPlant.y })),
-      ).toBe(false);
+    if (firstPlant === undefined || fixedCollision === undefined) {
+      return;
+    }
+
+    const plantPosition = pathfinding.worldToGrid({ x: firstPlant.x, y: firstPlant.y });
+
+    expect(pathfinding.isWalkable(plantPosition)).toBe(true);
+    expect(pathfinding.isWalkable(fixedCollision)).toBe(false);
+
+    pathfinding.setOccupiedPlantSlots([firstPlant.id]);
+    expect(pathfinding.isWalkable(plantPosition)).toBe(false);
+    expect(pathfinding.isWalkable(fixedCollision)).toBe(false);
+
+    pathfinding.setOccupiedPlantSlots([]);
+    expect(pathfinding.isWalkable(plantPosition)).toBe(true);
+    expect(pathfinding.isWalkable(fixedCollision)).toBe(false);
+  });
+
+  it("blocks water, trees, fences, and the map border while paths remain walkable", () => {
+    const pathfinding = new PathfindingSystem(GARDEN_MAP_CONFIG);
+    const waterCell = GARDEN_MAP_CONFIG.waterGridPositions.find((position) =>
+      GARDEN_MAP_CONFIG.collisionGridPositions.some(
+        (collision) => collision.column === position.column && collision.row === position.row,
+      ),
+    );
+    const pathCell = GARDEN_MAP_CONFIG.pathGridPositions.find(
+      (position) =>
+        !GARDEN_MAP_CONFIG.collisionGridPositions.some(
+          (collision) => collision.column === position.column && collision.row === position.row,
+        ),
+    );
+
+    expect(waterCell).toBeDefined();
+    expect(pathCell).toBeDefined();
+    expect(pathfinding.isWalkable({ column: 0, row: 0 })).toBe(false);
+
+    if (waterCell !== undefined) {
+      expect(pathfinding.isWalkable(waterCell)).toBe(false);
+    }
+
+    if (pathCell !== undefined) {
+      expect(pathfinding.isWalkable(pathCell)).toBe(true);
+    }
+
+    for (const blockedCell of [
+      { column: 1, row: 5 },
+      { column: 2, row: 18 },
+      { column: 13, row: 1 },
+    ]) {
+      expect(pathfinding.isWalkable(blockedCell)).toBe(false);
     }
   });
 });

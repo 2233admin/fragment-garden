@@ -1,11 +1,17 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
+import { PLANT_SLOT_CONFIGS } from "../../game/config/garden-map";
 import { completeCompanionOnboardingIfNeeded } from "./helpers/companion";
 
 const DORMANT_TITLE = "等待重新发现的想法";
 const COMPLETED_TITLE = "把阅读角真正搭起来";
 const CHILD_TITLE = "阅读角的第一场分享";
 const ARCHIVED_TITLE = "暂时收好的旅行清单";
+const FIRST_PLANT_SLOT = PLANT_SLOT_CONFIGS[0];
+
+if (FIRST_PLANT_SLOT === undefined) {
+  throw new Error("The garden requires at least one plant slot.");
+}
 
 type StoredFragmentSnapshot = Readonly<{
   completionStatus: string;
@@ -346,7 +352,7 @@ test("persists automatic dormancy and restores without exposing lifecycle in car
   await selectMode(page, "花园模式");
   const summary = page.getByTestId("garden-accessibility-summary");
   await expect(summary.getByText(new RegExp(`${DORMANT_TITLE}.*休眠`, "u"))).toBeAttached();
-  await clickCanvasWorld(page, 112, 60);
+  await clickCanvasWorld(page, FIRST_PLANT_SLOT.x, FIRST_PLANT_SLOT.y);
 
   const detail = page.getByRole("dialog", { name: DORMANT_TITLE });
   await expect(detail).toBeVisible({ timeout: 12_000 });

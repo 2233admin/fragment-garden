@@ -47,6 +47,8 @@ function assertEventPayloadTypes(bridge: GameBridge): void {
     targetId: PLANT.plantId,
   });
   bridge.publishToReact({ type: "COMPANION_CLICKED" });
+  bridge.publishToReact({ type: "GARDEN_FEATURE_CLICKED", feature: "house" });
+  bridge.publishToReact({ type: "GARDEN_FEATURE_CLICKED", feature: "backup" });
 
   // @ts-expect-error LOAD_GARDEN requires a plants array.
   bridge.publishToGame({ type: "LOAD_GARDEN" });
@@ -68,6 +70,11 @@ function assertEventPayloadTypes(bridge: GameBridge): void {
   });
   // @ts-expect-error COMPANION_CLICKED does not carry Settings or companion details.
   bridge.publishToReact({ type: "COMPANION_CLICKED", companionType: "cat" });
+  bridge.publishToReact({
+    type: "GARDEN_FEATURE_CLICKED",
+    // @ts-expect-error Only configured map features may cross the bridge.
+    feature: "shop",
+  });
   bridge.publishToReact({
     type: "PLAYER_STATE_CHANGED",
     playerX: 496,
@@ -129,6 +136,24 @@ describe("GameBridge", () => {
 
     expect(listener).toHaveBeenCalledOnce();
     expect(listener).toHaveBeenCalledWith({ type: "COMPANION_CLICKED" });
+  });
+
+  it("publishes typed garden feature clicks to React subscribers", () => {
+    const bridge = new GameBridge();
+    const listener = vi.fn();
+    bridge.subscribeToReact(listener);
+
+    bridge.publishToReact({ type: "GARDEN_FEATURE_CLICKED", feature: "house" });
+    bridge.publishToReact({ type: "GARDEN_FEATURE_CLICKED", feature: "backup" });
+
+    expect(listener).toHaveBeenNthCalledWith(1, {
+      type: "GARDEN_FEATURE_CLICKED",
+      feature: "house",
+    });
+    expect(listener).toHaveBeenNthCalledWith(2, {
+      type: "GARDEN_FEATURE_CLICKED",
+      feature: "backup",
+    });
   });
 
   it("stops delivering either direction after unsubscribe", () => {

@@ -10,6 +10,7 @@ import { GARDEN_SCENE_KEY } from "../config/game-config";
 import { PlayerSprite } from "../entities/PlayerSprite";
 import { CompanionRenderSystem } from "../systems/CompanionRenderSystem";
 import { GardenGrowthSystem } from "../systems/GardenGrowthSystem";
+import { GardenFeatureInteractionSystem } from "../systems/GardenFeatureInteractionSystem";
 import { GardenMapRenderer } from "../systems/GardenMapRenderer";
 import { InteractionSystem } from "../systems/InteractionSystem";
 import { MovementSystem, type MovementSnapshot } from "../systems/MovementSystem";
@@ -21,6 +22,7 @@ type RuntimeFailureHandler = (kind: "initialize" | "update") => void;
 export class GardenScene extends Phaser.Scene {
   private companionRenderSystem: CompanionRenderSystem | null = null;
   private gardenGrowthSystem: GardenGrowthSystem | null = null;
+  private gardenFeatureInteractionSystem: GardenFeatureInteractionSystem | null = null;
   private plantRenderSystem: PlantRenderSystem | null = null;
   private pathfindingSystem: PathfindingSystem | null = null;
   private movementSystem: MovementSystem | null = null;
@@ -53,6 +55,11 @@ export class GardenScene extends Phaser.Scene {
         this.gardenStagePreview,
       );
       this.gardenGrowthSystem.update([]);
+      this.gardenFeatureInteractionSystem = new GardenFeatureInteractionSystem(this, (feature) => {
+        if (this.isDisposed) return;
+        this.interactionSystem?.cancelInteraction();
+        this.bridge.publishToReact({ type: "GARDEN_FEATURE_CLICKED", feature });
+      });
       this.player = new PlayerSprite(
         this,
         GARDEN_MAP_CONFIG.playerSpawn.x,
@@ -214,6 +221,8 @@ export class GardenScene extends Phaser.Scene {
     this.movementSystem = null;
     this.pathfindingSystem = null;
     this.gardenGrowthSystem = null;
+    this.gardenFeatureInteractionSystem?.destroy();
+    this.gardenFeatureInteractionSystem = null;
     this.companionRenderSystem?.destroy();
     this.companionRenderSystem = null;
     this.plantRenderSystem?.destroy();

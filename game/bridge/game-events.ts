@@ -1,6 +1,7 @@
 import type { CompanionViewModel } from "../../domain/garden/companion-view-model";
 import type { PlantViewModel } from "../../domain/garden/plant-view-model";
 import type { PlantFeedbackKind } from "../config/plant-feedback";
+import type { GardenFeatureId } from "../config/garden-feature-hotspots";
 
 export type ReactToGameEvent =
   | {
@@ -58,6 +59,10 @@ export type GameToReactEvent =
     }
   | {
       type: "COMPANION_CLICKED";
+    }
+  | {
+      type: "GARDEN_FEATURE_CLICKED";
+      feature: GardenFeatureId;
     };
 
 export type GardenInteractionEvent = Exclude<GameToReactEvent, { type: "PLAYER_STATE_CHANGED" }>;

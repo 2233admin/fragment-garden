@@ -19,7 +19,6 @@ import {
 import type { DormantFragmentView } from "@/data/queries/companion-npc-query";
 
 import { ModalDialog } from "../shared/ModalDialog";
-import { CompanionMark } from "./CompanionMark";
 import {
   FragmentRecommendationCard,
   type FragmentRecommendationView,
@@ -74,10 +73,10 @@ const SCREEN_LABELS: Readonly<Record<CompanionNpcScreen, string>> = {
   recommendation_result: "回看推荐",
 };
 
-const BUTTON_CLASS =
-  "w-full rounded-xl border border-garden-line bg-garden-paper px-4 py-3 text-left text-sm font-semibold text-garden-ink transition hover:border-garden-accent hover:bg-garden-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-garden-accent disabled:cursor-wait disabled:opacity-55";
-const SECONDARY_BUTTON_CLASS =
-  "rounded-full border border-garden-line px-4 py-2 text-sm font-semibold text-garden-ink transition hover:bg-garden-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-garden-accent disabled:opacity-55";
+const BUTTON_CLASS = "companion-pixel-option";
+const SECONDARY_BUTTON_CLASS = "companion-pixel-button";
+const PANEL_CLASS = "companion-pixel-panel";
+const ERROR_PANEL_CLASS = "companion-pixel-panel companion-pixel-panel--error";
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
@@ -177,7 +176,7 @@ export function CompanionNpcDialog({
 
   function renderFooter(options: readonly CompanionNpcOption[]): ReactElement {
     return (
-      <div className="mt-6 flex flex-wrap gap-2">
+      <div className="companion-pixel-footer">
         {options.map((option) => {
           return (
             <button
@@ -197,9 +196,13 @@ export function CompanionNpcDialog({
 
   function renderMain(): ReactElement {
     return (
-      <section aria-labelledby={`${titleId}-screen`} className="space-y-4" role="region">
-        <p className="font-display text-xl leading-8 text-garden-ink">今天想先看看花园里的什么？</p>
-        <div className="grid gap-3" role="list">
+      <section
+        aria-labelledby={`${titleId}-screen`}
+        className="companion-pixel-screen"
+        role="region"
+      >
+        <p className="companion-pixel-prompt">今天想先看看花园里的什么？</p>
+        <div className="companion-pixel-options" role="list">
           {getCompanionNpcMainOptions().map((option) => (
             <NpcOptionButton
               key={option.action.type}
@@ -215,11 +218,13 @@ export function CompanionNpcDialog({
 
   function renderMore(): ReactElement {
     return (
-      <section aria-labelledby={`${titleId}-screen`} className="space-y-4" role="region">
-        <p className="font-display text-xl leading-8 text-garden-ink">
-          还有一些关于花园的事，我也可以告诉你。
-        </p>
-        <div className="grid gap-3" role="list">
+      <section
+        aria-labelledby={`${titleId}-screen`}
+        className="companion-pixel-screen"
+        role="region"
+      >
+        <p className="companion-pixel-prompt">还有一些关于花园的事，我也可以告诉你。</p>
+        <div className="companion-pixel-options" role="list">
           {getCompanionNpcMoreOptions().map((option) => (
             <NpcOptionButton
               key={option.action.type}
@@ -235,31 +240,29 @@ export function CompanionNpcDialog({
 
   function renderSummary(): ReactElement {
     return (
-      <section aria-labelledby={`${titleId}-screen`} className="space-y-4" role="region">
+      <section
+        aria-labelledby={`${titleId}-screen`}
+        className="companion-pixel-screen"
+        role="region"
+      >
         {gardenSummaryStatus === "loading" ? (
-          <p aria-live="polite" className="rounded-2xl bg-garden-canvas/55 p-4 text-sm">
+          <p aria-live="polite" className={PANEL_CLASS}>
             正在整理花园近况…
           </p>
         ) : null}
         {gardenSummaryStatus === "error" ? (
-          <p
-            aria-live="assertive"
-            className="rounded-2xl bg-garden-danger-soft p-4 text-sm leading-6 text-garden-danger"
-            role="alert"
-          >
+          <p aria-live="assertive" className={ERROR_PANEL_CLASS} role="alert">
             暂时没能整理花园近况，你仍然可以直接查看卡片。
           </p>
         ) : null}
         {gardenSummaryStatus === "ready" ? (
-          <div className="space-y-2 rounded-2xl border border-garden-line bg-garden-canvas/55 p-4">
+          <div className={PANEL_CLASS}>
             {getGardenSummaryLines(gardenSummary).map((line) => (
-              <p className="text-sm leading-6 text-garden-ink" key={line}>
-                {line}
-              </p>
+              <p key={line}>{line}</p>
             ))}
           </div>
         ) : null}
-        <div className="grid gap-3">
+        <div className="companion-pixel-options">
           {gardenSummaryStatus === "ready" && gardenSummary.dormantCount > 0 ? (
             <NpcOptionButton
               disabled={isPending}
@@ -283,39 +286,31 @@ export function CompanionNpcDialog({
 
   function renderDormantList(): ReactElement {
     return (
-      <section aria-labelledby={`${titleId}-screen`} className="space-y-4" role="region">
+      <section
+        aria-labelledby={`${titleId}-screen`}
+        className="companion-pixel-screen"
+        role="region"
+      >
         {dormantOpenError !== null ? (
-          <p
-            aria-live="assertive"
-            className="rounded-2xl bg-garden-danger-soft p-4 text-sm leading-6 text-garden-danger"
-            role="alert"
-          >
+          <p aria-live="assertive" className={ERROR_PANEL_CLASS} role="alert">
             {dormantOpenError}
           </p>
         ) : null}
         {dormantState.status === "loading" ? (
-          <p aria-live="polite" className="rounded-2xl bg-garden-canvas/55 p-4 text-sm">
+          <p aria-live="polite" className={PANEL_CLASS}>
             正在看看哪些植物在休息…
           </p>
         ) : null}
         {dormantState.status === "error" ? (
-          <div className="rounded-2xl bg-garden-danger-soft p-4" role="alert">
-            <p className="text-sm font-semibold text-garden-danger">
-              暂时没能整理休眠植物，你仍然可以在卡片模式中查看。
-            </p>
-            <button
-              className={`${SECONDARY_BUTTON_CLASS} mt-3 border-garden-danger text-garden-danger`}
-              onClick={onRetryDormant}
-              type="button"
-            >
+          <div className={ERROR_PANEL_CLASS} role="alert">
+            <p>暂时没能整理休眠植物，你仍然可以在卡片模式中查看。</p>
+            <button className={SECONDARY_BUTTON_CLASS} onClick={onRetryDormant} type="button">
               重新读取
             </button>
           </div>
         ) : null}
         {dormantState.status === "ready" && dormantState.items.length === 0 ? (
-          <p className="rounded-2xl bg-garden-canvas/55 p-4 text-sm leading-6 text-garden-ink">
-            现在没有正在休眠的植物。
-          </p>
+          <p className={PANEL_CLASS}>现在没有正在休眠的植物。</p>
         ) : null}
         {dormantState.status === "ready" && dormantState.items.length > 0 ? (
           <>
@@ -353,12 +348,14 @@ export function CompanionNpcDialog({
 
   function renderRules(lines: readonly string[], nextAction: CompanionNpcOption): ReactElement {
     return (
-      <section aria-labelledby={`${titleId}-screen`} className="space-y-4" role="region">
-        <div className="space-y-3 rounded-2xl border border-garden-line bg-garden-canvas/55 p-4">
+      <section
+        aria-labelledby={`${titleId}-screen`}
+        className="companion-pixel-screen"
+        role="region"
+      >
+        <div className={PANEL_CLASS}>
           {lines.map((line) => (
-            <p className="text-sm leading-6 text-garden-ink" key={line}>
-              {line}
-            </p>
+            <p key={line}>{line}</p>
           ))}
         </div>
         {renderFooter([
@@ -377,10 +374,12 @@ export function CompanionNpcDialog({
         : "我暂时看不清花园近况，不过我会在这里，等你想起花园的时候再来。";
 
     return (
-      <section aria-labelledby={`${titleId}-screen`} className="space-y-4" role="region">
-        <p className="rounded-2xl border border-garden-line bg-garden-canvas/55 p-4 font-display text-xl leading-8 text-garden-ink">
-          {line}
-        </p>
+      <section
+        aria-labelledby={`${titleId}-screen`}
+        className="companion-pixel-screen"
+        role="region"
+      >
+        <p className={`${PANEL_CLASS} companion-pixel-panel--quote`}>{line}</p>
         {renderFooter([
           { action: { type: "back" }, label: "返回" },
           { action: { type: "leave" }, label: "离开" },
@@ -392,20 +391,21 @@ export function CompanionNpcDialog({
   function renderRecommendation(): ReactElement {
     const state = recommendationState;
     return (
-      <section aria-labelledby={`${titleId}-screen`} className="space-y-4" role="region">
+      <section
+        aria-labelledby={`${titleId}-screen`}
+        className="companion-pixel-screen"
+        role="region"
+      >
         {state.status === "loading" ? (
-          <p aria-live="polite" className="rounded-2xl bg-garden-canvas/55 p-4 text-sm">
+          <p aria-live="polite" className={PANEL_CLASS}>
             我去花园里看看…
           </p>
         ) : null}
         {state.status === "error" ? (
-          <div
-            className="rounded-2xl bg-garden-danger-soft p-4 text-sm leading-6 text-garden-danger"
-            role="alert"
-          >
+          <div className={ERROR_PANEL_CLASS} role="alert">
             <p>{state.message}</p>
             <button
-              className={`${SECONDARY_BUTTON_CLASS} mt-3 border-garden-danger text-garden-danger`}
+              className={SECONDARY_BUTTON_CLASS}
               disabled={isPending}
               onClick={onRequestRecommendation}
               type="button"
@@ -415,26 +415,19 @@ export function CompanionNpcDialog({
           </div>
         ) : null}
         {state.status === "empty" ? (
-          <p className="rounded-2xl bg-garden-canvas/55 p-4 text-sm leading-6 text-garden-ink">
-            现在没有特别适合回看的植物。你也可以直接去卡片模式里看看。
-          </p>
+          <p className={PANEL_CLASS}>现在没有特别适合回看的植物。你也可以直接去卡片模式里看看。</p>
         ) : null}
         {state.status === "dismissed" ? (
-          <p className="rounded-2xl bg-garden-canvas/55 p-4 text-sm leading-6 text-garden-ink">
-            好，先不用看它。它会继续留在花园里，想看的时候再回来就好。
-          </p>
+          <p className={PANEL_CLASS}>好，先不用看它。它会继续留在花园里，想看的时候再回来就好。</p>
         ) : null}
         {state.status === "ready" ? (
           <>
             {state.actionError !== null ? (
-              <p
-                className="rounded-2xl bg-garden-danger-soft p-4 text-sm leading-6 text-garden-danger"
-                role="alert"
-              >
+              <p className={ERROR_PANEL_CLASS} role="alert">
                 {state.actionError}
               </p>
             ) : null}
-            <p className="text-sm leading-6 text-garden-ink">
+            <p className="companion-pixel-copy">
               我找到了一株以前种下的植物。现在再看它，也许会有新的想法。
             </p>
             <FragmentRecommendationCard
@@ -482,43 +475,47 @@ export function CompanionNpcDialog({
 
   return (
     <ModalDialog
-      className="m-auto flex max-h-[88vh] w-[min(94vw,38rem)] flex-col overflow-hidden rounded-3xl border border-garden-line bg-garden-paper p-0 shadow-2xl"
+      className="companion-pixel-dialog m-auto max-h-[90vh] w-[min(94vw,46rem)] border-0 bg-transparent p-0"
       describedBy={descriptionId}
       isOpen={isOpen}
       labelledBy={titleId}
       onRequestClose={onClose}
     >
-      <header className="flex items-start justify-between gap-4 border-b border-garden-line bg-garden-paper px-5 py-4 sm:px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <CompanionMark companionType={companionType} size="medium" />
-          <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-[0.14em] text-garden-accent uppercase">
-              花园中的伙伴
-            </p>
-            <h2 className="font-display text-2xl font-semibold text-garden-ink" id={titleId}>
-              花园伙伴
-            </h2>
-            <p className="sr-only" id={descriptionId}>
-              通过固定选项查看花园近况、回看植物和了解花园规则。
-            </p>
+      <div className="companion-pixel-dialog__shell">
+        <header className="companion-pixel-dialog__header">
+          <div className="companion-pixel-dialog__identity">
+            <span
+              aria-hidden="true"
+              className={`garden-companion-portrait garden-companion-portrait--${companionType}`}
+            />
+            <div className="min-w-0">
+              <p className="companion-pixel-dialog__eyebrow">花园中的伙伴</p>
+              <h2 className="companion-pixel-dialog__title" id={titleId}>
+                花园伙伴
+              </h2>
+              <p className="sr-only" id={descriptionId}>
+                通过固定选项查看花园近况、回看植物和了解花园规则。
+              </p>
+            </div>
           </div>
-        </div>
-        <button
-          aria-label="关闭花园伙伴"
-          className={SECONDARY_BUTTON_CLASS}
-          onClick={onClose}
-          type="button"
-        >
-          关闭
-        </button>
-      </header>
+          <button
+            aria-label="关闭花园伙伴"
+            className="companion-pixel-close"
+            onClick={onClose}
+            type="button"
+          >
+            <span aria-hidden="true">×</span>
+            <span>关闭</span>
+          </button>
+        </header>
 
-      <div className="min-h-0 overflow-y-auto bg-garden-canvas/30 px-5 py-5 sm:px-6">
-        <h3 className="sr-only" id={`${titleId}-screen`}>
-          {SCREEN_LABELS[screen]}
-        </h3>
-        <div aria-live="polite" ref={screenContainerRef}>
-          {renderScreen()}
+        <div className="companion-pixel-dialog__body">
+          <h3 className="sr-only" id={`${titleId}-screen`}>
+            {SCREEN_LABELS[screen]}
+          </h3>
+          <div aria-live="polite" ref={screenContainerRef}>
+            {renderScreen()}
+          </div>
         </div>
       </div>
     </ModalDialog>

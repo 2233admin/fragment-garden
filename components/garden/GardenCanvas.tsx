@@ -30,6 +30,7 @@ type GardenCanvasProps = {
   plants: readonly PlantViewModel[];
   companion: CompanionViewModel | null;
   cancelInteractionRequest: number;
+  feedback: Readonly<{ kind: "status" | "error"; message: string }> | null;
   onGameEvent: (event: GardenInteractionEvent) => void;
   onShowCards: () => void;
 };
@@ -43,6 +44,7 @@ export function GardenCanvas({
   plants,
   companion,
   cancelInteractionRequest,
+  feedback,
   onGameEvent,
   onShowCards,
 }: GardenCanvasProps) {
@@ -377,6 +379,17 @@ export function GardenCanvas({
           <GardenLoadingState phase="runtime" />
         </div>
       ) : null}
+      <div
+        aria-atomic="true"
+        aria-live={feedback?.kind === "error" ? "assertive" : "polite"}
+        className={`garden-game-toast ${feedback === null ? "garden-game-toast--empty" : ""} ${
+          feedback?.kind === "error" ? "garden-game-toast--error" : ""
+        }`}
+        data-testid="garden-interaction-status"
+        role={feedback?.kind === "error" ? "alert" : "status"}
+      >
+        {feedback?.message}
+      </div>
     </div>
   );
 }

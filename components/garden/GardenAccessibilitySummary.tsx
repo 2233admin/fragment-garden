@@ -53,24 +53,32 @@ export function GardenAccessibilitySummary({
   return (
     <section
       aria-labelledby="garden-summary-title"
-      className="rounded-2xl border border-garden-line bg-garden-paper px-5 py-4"
+      className="garden-game-hud"
       data-plant-count={snapshot.placedPlantCount}
       data-testid="garden-accessibility-summary"
       data-unplaced-plant-count={snapshot.unplacedPlantCount}
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div aria-atomic="true" aria-live="polite">
-          <h2
-            className="font-display text-lg font-semibold text-garden-ink"
-            id="garden-summary-title"
-          >
-            当前花园
-          </h2>
-          <p className="mt-1 text-sm text-garden-muted">{gardenDescription}</p>
-          <p className="mt-1 text-sm text-garden-muted">{gardenGuidance}</p>
+      <div className="garden-game-hud__content">
+        <div aria-atomic="true" aria-live="polite" className="garden-game-hud__message">
+          <span aria-hidden="true" className="garden-game-hud__sprout">
+            ✦
+          </span>
+          <div>
+            <h2
+              className="font-display text-base font-semibold text-[#3e2d20]"
+              id="garden-summary-title"
+            >
+              庭院手记
+            </h2>
+            <p className="mt-0.5 text-xs font-medium text-[#725b42] sm:text-sm">
+              {gardenDescription} {gardenGuidance}
+            </p>
+          </div>
         </div>
-        <p className="rounded-full bg-garden-soft px-4 py-2 text-xs font-semibold text-garden-accent">
-          {stageSummary.length > 0 ? stageSummary : "尚无植物"}
+        <p className="garden-game-hud__count">
+          <span aria-hidden="true">❈</span>
+          {snapshot.placedPlantCount}
+          <span className="font-normal">株</span>
         </p>
       </div>
 
@@ -87,10 +95,8 @@ export function GardenAccessibilitySummary({
       </ul>
 
       {snapshot.plants.length > 0 ? (
-        <details className="mt-4 border-t border-garden-line pt-3">
-          <summary className="cursor-pointer text-sm font-semibold text-garden-accent focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-garden-accent">
-            用列表直接打开植物
-          </summary>
+        <details className="garden-game-ledger">
+          <summary className="garden-game-ledger__summary">打开植物名册</summary>
           <ul aria-label="可直接打开的花园植物" className="mt-3 grid gap-2 sm:grid-cols-2">
             {snapshot.plants.map((plant) => {
               const isOpening = openingPlantId === plant.plantId;
@@ -100,7 +106,7 @@ export function GardenAccessibilitySummary({
                   <button
                     aria-busy={isOpening}
                     aria-label={`打开“${plant.title}”`}
-                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-garden-line bg-garden-soft/60 px-3 py-2 text-left text-sm text-garden-ink hover:border-garden-accent disabled:cursor-wait disabled:opacity-65"
+                    className="garden-game-ledger__item"
                     disabled={openingPlantId !== null}
                     onClick={(event) => onOpenPlant(plant.plantId, event.currentTarget)}
                     type="button"

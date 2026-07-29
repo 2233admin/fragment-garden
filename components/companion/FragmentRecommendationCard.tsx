@@ -39,23 +39,18 @@ export function FragmentRecommendationCard({
   return (
     <article
       aria-labelledby={titleId}
-      className="rounded-2xl border border-garden-accent/25 bg-garden-paper p-4 shadow-[0_12px_28px_rgba(24,55,43,0.08)]"
+      className="companion-pixel-recommendation"
       data-fragment-id={recommendation.fragmentId}
     >
-      <p className="text-xs font-semibold tracking-[0.14em] text-garden-accent uppercase">
-        值得再看一眼
-      </p>
-      <h3
-        className="mt-2 font-display text-xl leading-7 font-semibold text-garden-ink"
-        id={titleId}
-      >
+      <p className="companion-pixel-recommendation__eyebrow">值得再看一眼</p>
+      <h3 className="companion-pixel-recommendation__title" id={titleId}>
         {recommendation.title}
       </h3>
-      <p className="mt-2 line-clamp-3 text-sm leading-6 text-garden-muted">
+      <p className="companion-pixel-recommendation__excerpt">
         {recommendation.excerpt || "这条碎片还没有可预览的文字。"}
       </p>
 
-      <dl className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-garden-canvas/65 px-3 py-3 text-xs">
+      <dl className="companion-pixel-recommendation__facts">
         <div>
           <dt className="text-garden-muted">最近互动</dt>
           <dd className="mt-1 font-semibold text-garden-ink">
@@ -70,10 +65,10 @@ export function FragmentRecommendationCard({
         </div>
       </dl>
 
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
+      <div className="companion-pixel-footer">
         <button
           aria-busy={pendingAction === "dismissing"}
-          className="rounded-full border border-garden-line px-4 py-2 text-sm font-semibold text-garden-ink hover:bg-garden-soft disabled:cursor-wait disabled:opacity-55"
+          className="companion-pixel-button"
           disabled={isPending}
           onClick={onDismiss}
           type="button"
@@ -82,7 +77,7 @@ export function FragmentRecommendationCard({
         </button>
         <button
           aria-busy={pendingAction === "opening"}
-          className="rounded-full bg-garden-accent px-4 py-2 text-sm font-semibold text-white hover:bg-garden-accent-strong disabled:cursor-wait disabled:opacity-60"
+          className="companion-pixel-button companion-pixel-button--primary"
           disabled={isPending}
           onClick={onOpen}
           type="button"

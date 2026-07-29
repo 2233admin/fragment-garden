@@ -1,7 +1,10 @@
 import type { PlantViewModel } from "@/domain";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
 
-export type GardenMovementEvent = Exclude<GardenInteractionEvent, { type: "COMPANION_CLICKED" }>;
+export type GardenMovementEvent = Extract<
+  GardenInteractionEvent,
+  { type: "MOVEMENT_STARTED" | "PLAYER_REACHED_PLANT" | "MOVEMENT_FAILED" }
+>;
 
 export type GardenEventResponse =
   | Readonly<{

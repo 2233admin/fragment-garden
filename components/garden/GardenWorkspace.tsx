@@ -5,7 +5,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 import { DataBackupDialog } from "@/components/backup/DataBackupDialog";
 import { CompanionExperience } from "@/components/companion/CompanionExperience";
-import { CompanionMark } from "@/components/companion/CompanionMark";
 import { ContentProcessingDialog } from "@/components/content-processing/ContentProcessingDialog";
 import { ContentProcessingIndicator } from "@/components/content-processing/ContentProcessingIndicator";
 import { useContentProcessingRuntime } from "@/components/content-processing/useContentProcessingRuntime";
@@ -18,6 +17,10 @@ import type { GardenPlantSnapshot } from "@/domain";
 import type { GardenSummary } from "@/domain/companion/context-builder";
 import type { CompanionViewModel } from "@/domain/garden/companion-view-model";
 import type { GardenInteractionEvent } from "@/game/bridge/game-events";
+import {
+  CARD_MODE_ENTRY_DELAY_MS,
+  GARDEN_MODE_ENTRY_DELAY_MS,
+} from "@/game/config/garden-feature-hotspots";
 import { queryGardenPlantSnapshot, queryGardenSummary } from "@/services/garden-query-service";
 import {
   RESTORE_COMPLETED_SESSION_KEY,
@@ -29,8 +32,13 @@ import { GardenAccessibilitySummary } from "./GardenAccessibilitySummary";
 import { GardenCanvas } from "./GardenCanvas";
 import { resolveGardenEventResponse } from "./garden-event-response";
 import { GardenErrorState } from "./GardenErrorState";
+import { GardenHouseEntryDialog, type HouseEntryState } from "./GardenHouseEntryDialog";
 import { GardenLoadingState } from "./GardenLoadingState";
 import { GardenModeToggle, type GardenMode } from "./GardenModeToggle";
+import {
+  GardenReturnTransitionDialog,
+  type GardenReturnState,
+} from "./GardenReturnTransitionDialog";
 
 type GardenQueryState =
   { status: "loading" } | { status: "error" } | { status: "ready"; snapshot: GardenPlantSnapshot };
@@ -54,6 +62,8 @@ type OpenFragmentOptions = Readonly<{
 const LOADING_GARDEN_STATE: GardenQueryState = { status: "loading" };
 const LOADING_GARDEN_SUMMARY: GardenSummaryState = { status: "loading" };
 
+function ignorePendingTransitionClose(): void {}
+
 export function GardenWorkspace() {
   const [mode, setMode] = useState<GardenMode>("garden");
   const [queryAttempt, setQueryAttempt] = useState(0);
@@ -68,6 +78,8 @@ export function GardenWorkspace() {
   const [preserveCompanionScreen, setPreserveCompanionScreen] = useState(false);
   const [openCreateRequest, setOpenCreateRequest] = useState(0);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const [houseEntryState, setHouseEntryState] = useState<HouseEntryState>("closed");
+  const [gardenReturnState, setGardenReturnState] = useState<GardenReturnState>("closed");
   const [isRemoteRestoreInProgress, setIsRemoteRestoreInProgress] = useState(false);
   const selectedFragmentIdRef = useRef<string | null>(null);
   const isCompanionDialogOpenRef = useRef(false);
@@ -80,6 +92,7 @@ export function GardenWorkspace() {
   const backupButtonRef = useRef<HTMLButtonElement>(null);
   const companionButtonRef = useRef<HTMLButtonElement>(null);
   const remoteRestoreOperationRef = useRef<string | null>(null);
+  const modeTransitionTimersRef = useRef<number[]>([]);
   const handleContentProcessingEvent = useCallback(
     (event: Readonly<{ type: "completed" | "failed"; message: string }>): void => {
       setInteractionFeedback({
@@ -136,6 +149,16 @@ export function GardenWorkspace() {
       unsubscribe();
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      for (const timer of modeTransitionTimersRef.current) {
+        window.clearTimeout(timer);
+      }
+      modeTransitionTimersRef.current = [];
+    },
+    [],
+  );
   const handleCompanionTypeChange = useCallback(
     (companionType: CompanionViewModel["type"] | null): void => {
       setCompanion((current) => {
@@ -318,6 +341,17 @@ export function GardenWorkspace() {
       return;
     }
 
+    if (event.type === "GARDEN_FEATURE_CLICKED") {
+      if (event.feature === "house") {
+        setCancelInteractionRequest((request) => request + 1);
+        setHouseEntryState("confirming");
+      } else {
+        setCancelInteractionRequest((request) => request + 1);
+        setIsBackupOpen(true);
+      }
+      return;
+    }
+
     const response = resolveGardenEventResponse(
       event,
       gardenState.status === "ready" ? gardenState.snapshot.plants : [],
@@ -339,16 +373,76 @@ export function GardenWorkspace() {
   }
 
   function handleModeChange(nextMode: GardenMode): void {
+    if (nextMode === mode) {
+      return;
+    }
+
+    if (nextMode === "garden") {
+      beginGardenReturn();
+      return;
+    }
+
+    clearModeTransitionTimers();
+    setHouseEntryState("closed");
+    setGardenReturnState("closed");
     setMode(nextMode);
     setIsCompanionChatOpen(false);
-    setInteractionFeedback(
-      nextMode === "cards"
-        ? {
-            kind: "status",
-            message: "已切换到卡片模式，花园移动已停止。",
-          }
-        : null,
-    );
+    setInteractionFeedback({
+      kind: "status",
+      message: "已切换到卡片模式，花园移动已停止。",
+    });
+  }
+
+  function clearModeTransitionTimers(): void {
+    for (const timer of modeTransitionTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+    modeTransitionTimersRef.current = [];
+  }
+
+  function cancelHouseEntry(): void {
+    clearModeTransitionTimers();
+    setHouseEntryState("closed");
+  }
+
+  function confirmHouseEntry(): void {
+    clearModeTransitionTimers();
+    setCancelInteractionRequest((request) => request + 1);
+    setHouseEntryState("waiting");
+    const transitionTimer = window.setTimeout(() => {
+      setHouseEntryState("transitioning");
+    }, 800);
+    const modeTimer = window.setTimeout(() => {
+      modeTransitionTimersRef.current = [];
+      setHouseEntryState("closed");
+      setMode("cards");
+      setIsCompanionChatOpen(false);
+      setInteractionFeedback({
+        kind: "status",
+        message: "已经进入小屋，可以整理和回看笔记。",
+      });
+    }, CARD_MODE_ENTRY_DELAY_MS);
+    modeTransitionTimersRef.current = [transitionTimer, modeTimer];
+  }
+
+  function beginGardenReturn(): void {
+    clearModeTransitionTimers();
+    setHouseEntryState("closed");
+    setGardenReturnState("waiting");
+    setIsCompanionChatOpen(false);
+    setInteractionFeedback(null);
+    // Mount the Phaser scene behind the modal while the door transition is
+    // visible, so users do not wait through a second loading screen afterward.
+    setMode("garden");
+    const transitionTimer = window.setTimeout(() => {
+      setGardenReturnState("transitioning");
+    }, 800);
+    const modeTimer = window.setTimeout(() => {
+      modeTransitionTimersRef.current = [];
+      setGardenReturnState("closed");
+      window.requestAnimationFrame(() => gardenModeButtonRef.current?.focus());
+    }, GARDEN_MODE_ENTRY_DELAY_MS);
+    modeTransitionTimersRef.current = [transitionTimer, modeTimer];
   }
 
   function openPlantFromAccessibleList(plantId: string, triggerElement: HTMLButtonElement): void {
@@ -389,86 +483,95 @@ export function GardenWorkspace() {
 
   return (
     <main
-      className={`min-h-screen px-4 text-garden-ink sm:px-6 lg:px-8 ${
-        mode === "garden" ? "garden-mode-shell py-4 sm:py-5" : "py-8 lg:py-10"
+      className={`min-h-screen text-garden-ink ${
+        mode === "garden"
+          ? "garden-mode-shell garden-mode-shell--immersive"
+          : "px-4 py-8 sm:px-6 lg:px-8 lg:py-10"
       }`}
     >
       <div
-        className={`mx-auto ${mode === "garden" ? "max-w-[1080px]" : "max-w-7xl"}`}
+        className={`mx-auto ${mode === "garden" ? "garden-mode-layout" : "max-w-7xl"}`}
         inert={isRemoteRestoreInProgress}
       >
-        <header
-          className={`flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between ${
-            mode === "garden"
-              ? "garden-scene-header rounded-2xl px-4 py-3 sm:px-5"
-              : "border-b border-garden-line pb-7"
-          }`}
-        >
-          <div>
-            <p className="text-[11px] font-semibold tracking-[0.18em] text-garden-accent uppercase">
-              本地碎片花园
-            </p>
-            <h1
-              className={`font-display leading-tight font-semibold tracking-tight text-garden-ink ${
-                mode === "garden" ? "mt-1 text-2xl sm:text-3xl" : "mt-2 text-4xl sm:text-5xl"
-              }`}
-            >
-              碎片花园
-            </h1>
-            <p
-              className={`max-w-2xl text-garden-muted ${
-                mode === "garden"
-                  ? "mt-1 text-xs leading-5 sm:text-sm"
-                  : "mt-3 text-sm leading-6 sm:text-base"
-              }`}
-            >
-              {mode === "garden"
-                ? "在小路间散步，让记录慢慢长成一座自己的花园。"
-                : "用卡片查看、记录和整理已经种下的内容。"}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 self-start lg:self-auto">
+        {mode === "cards" ? (
+          <header className="flex flex-col gap-4 border-b border-garden-line pb-7 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.18em] text-garden-accent uppercase">
+                花园小屋
+              </p>
+              <h1 className="mt-2 font-display text-4xl leading-tight font-semibold tracking-tight text-garden-ink sm:text-5xl">
+                碎片花园
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-garden-muted sm:text-base">
+                用卡片查看、记录和整理已经种下的内容。
+              </p>
+            </div>
             <GardenModeToggle
               cardButtonRef={cardModeButtonRef}
               gardenButtonRef={gardenModeButtonRef}
               mode={mode}
               onModeChange={handleModeChange}
             />
-            {companion !== null ? (
+          </header>
+        ) : null}
+
+        <div aria-label="花园快捷入口" className="garden-map-accessible-actions">
+          {mode === "garden" ? (
+            <>
               <button
-                aria-haspopup="dialog"
-                className="inline-flex items-center gap-2 rounded-lg border border-[#a98b63] bg-[#f4ead3] px-3.5 py-2 text-sm font-semibold text-garden-ink hover:bg-[#eadbbd]"
-                data-testid="open-companion"
-                onClick={() => handleCompanionChatOpenChange(true)}
-                ref={companionButtonRef}
+                aria-controls="garden-mode-panel"
+                aria-pressed="true"
+                onClick={() => handleModeChange("garden")}
+                ref={gardenModeButtonRef}
                 type="button"
               >
-                <CompanionMark companionType={companion.type} size="small" />
-                打开花园伙伴
+                花园模式
               </button>
-            ) : null}
+              <button
+                aria-controls="cards-mode-panel"
+                aria-pressed="false"
+                onClick={() => handleModeChange("cards")}
+                ref={cardModeButtonRef}
+                type="button"
+              >
+                卡片模式
+              </button>
+            </>
+          ) : null}
+          {companion !== null ? (
             <button
-              className="rounded-lg border border-[#a98b63] bg-[#f4ead3] px-3.5 py-2 text-sm font-semibold text-garden-ink hover:bg-[#eadbbd]"
-              onClick={() => setIsBackupOpen(true)}
-              ref={backupButtonRef}
+              aria-haspopup="dialog"
+              data-testid="open-companion"
+              onClick={() => handleCompanionChatOpenChange(true)}
+              ref={companionButtonRef}
               type="button"
             >
-              数据与备份
+              打开花园伙伴
             </button>
-          </div>
-        </header>
-
-        <div
-          aria-atomic="true"
-          aria-live={interactionFeedback?.kind === "error" ? "assertive" : "polite"}
-          className={`mx-auto mt-3 min-h-6 max-w-[960px] text-sm font-semibold ${
-            interactionFeedback?.kind === "error" ? "text-garden-danger" : "text-garden-accent"
-          }`}
-          data-testid="garden-interaction-status"
-          role={interactionFeedback?.kind === "error" ? "alert" : "status"}
-        >
-          {interactionFeedback?.message}
+          ) : null}
+          <button
+            aria-haspopup="dialog"
+            onClick={() => setIsBackupOpen(true)}
+            ref={backupButtonRef}
+            type="button"
+          >
+            数据与备份
+          </button>
         </div>
+
+        {mode === "cards" ? (
+          <div
+            aria-atomic="true"
+            aria-live={interactionFeedback?.kind === "error" ? "assertive" : "polite"}
+            className={`mx-auto mt-3 min-h-6 max-w-[960px] text-sm font-semibold ${
+              interactionFeedback?.kind === "error" ? "text-garden-danger" : "text-garden-accent"
+            }`}
+            data-testid="garden-interaction-status"
+            role={interactionFeedback?.kind === "error" ? "alert" : "status"}
+          >
+            {interactionFeedback?.message}
+          </div>
+        ) : null}
 
         <CompanionExperience
           companionOpenGeneration={companionOpenGeneration}
@@ -515,27 +618,36 @@ export function GardenWorkspace() {
         />
 
         <Activity mode={mode === "garden" ? "visible" : "hidden"}>
-          <section aria-labelledby="garden-mode-title" className="pt-2" id="garden-mode-panel">
-            <div className="garden-scene-toolbar mx-auto mb-2 flex max-w-[960px] flex-wrap items-center justify-between gap-3 rounded-t-xl px-4 py-2.5">
-              <h2
-                className="font-display text-base font-semibold text-[#463b2b]"
-                id="garden-mode-title"
-              >
-                我的灵感庭院
-              </h2>
-              <p className="text-xs font-medium text-[#75664e]">
-                点击地面散步 · 点击内容植物查看笔记
-              </p>
+          <section aria-labelledby="garden-mode-title" id="garden-mode-panel">
+            <div className="garden-game-marquee garden-game-stage">
+              <div>
+                <h1 className="sr-only">碎片花园</h1>
+                <p className="garden-game-kicker">本地碎片花园</p>
+                <h2 className="garden-game-title" id="garden-mode-title">
+                  我的灵感庭院
+                </h2>
+              </div>
+              <div aria-label="花园中的功能入口" className="garden-game-legend">
+                <span>
+                  <b aria-hidden="true">⌂</b> 小屋整理笔记
+                </span>
+                <span>
+                  <b aria-hidden="true">♢</b> 伙伴陪你回看
+                </span>
+                <span>
+                  <b aria-hidden="true">▣</b> 木箱保管数据
+                </span>
+              </div>
             </div>
 
             {gardenState.status === "loading" ? (
-              <div className="mx-auto aspect-[3/2] max-w-[960px] overflow-hidden rounded-2xl border border-garden-line">
+              <div className="garden-game-stage aspect-[3/2] overflow-hidden border border-garden-line">
                 <GardenLoadingState phase="data" />
               </div>
             ) : null}
 
             {gardenState.status === "error" ? (
-              <div className="mx-auto max-w-[960px]">
+              <div className="garden-game-stage">
                 <GardenErrorState
                   kind="data"
                   onRetry={() => setQueryAttempt((attempt) => attempt + 1)}
@@ -545,10 +657,11 @@ export function GardenWorkspace() {
             ) : null}
 
             {gardenState.status === "ready" ? (
-              <div className="mx-auto max-w-[960px] space-y-4">
+              <div className="garden-game-stage space-y-2">
                 <GardenCanvas
                   cancelInteractionRequest={cancelInteractionRequest}
                   companion={companion}
+                  feedback={interactionFeedback}
                   onGameEvent={handleGameEvent}
                   onShowCards={() => handleModeChange("cards")}
                   plants={gardenState.snapshot.plants}
@@ -642,6 +755,15 @@ export function GardenWorkspace() {
         isOpen={isBackupOpen && !isRemoteRestoreInProgress}
         onClose={() => setIsBackupOpen(false)}
         onRestoreCompleted={() => window.location.reload()}
+      />
+      <GardenHouseEntryDialog
+        entryState={houseEntryState}
+        onCancel={cancelHouseEntry}
+        onConfirm={confirmHouseEntry}
+      />
+      <GardenReturnTransitionDialog
+        entryState={gardenReturnState}
+        onRequestClose={ignorePendingTransitionClose}
       />
       {isRemoteRestoreInProgress ? (
         <div

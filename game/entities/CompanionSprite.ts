@@ -34,6 +34,7 @@ export class CompanionSprite extends Phaser.GameObjects.Container {
   private readonly characterSprite: Phaser.GameObjects.Sprite | null;
   private readonly fallbackGraphics: Phaser.GameObjects.Graphics;
   private readonly feedbackMarker: Phaser.GameObjects.Graphics;
+  private readonly interactionLabel: Phaser.GameObjects.Text;
   private readonly shadow: Phaser.GameObjects.Image | Phaser.GameObjects.Ellipse;
   private readonly textureSource: GardenCharacterTextureSource;
   private companion: CompanionViewModel;
@@ -54,6 +55,16 @@ export class CompanionSprite extends Phaser.GameObjects.Container {
           .setScale(0.68, 0.8)
       : new Phaser.GameObjects.Ellipse(scene, 0, 2, 32, 8, 0x243626, 0.14);
     this.feedbackMarker = new Phaser.GameObjects.Graphics(scene);
+    this.interactionLabel = new Phaser.GameObjects.Text(scene, 0, -74, "花园伙伴", {
+      backgroundColor: "#3d2b1f",
+      color: "#fff1c7",
+      fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+      fontSize: "13px",
+      fontStyle: "bold",
+      padding: { x: 7, y: 4 },
+    })
+      .setOrigin(0.5, 1)
+      .setVisible(false);
     this.fallbackGraphics = new Phaser.GameObjects.Graphics(scene);
     this.characterSprite =
       this.textureSource === "formal"
@@ -62,6 +73,7 @@ export class CompanionSprite extends Phaser.GameObjects.Container {
     this.add([
       this.shadow,
       this.feedbackMarker,
+      this.interactionLabel,
       this.fallbackGraphics,
       ...(this.characterSprite === null ? [] : [this.characterSprite]),
     ]);
@@ -112,11 +124,13 @@ export class CompanionSprite extends Phaser.GameObjects.Container {
 
   private handlePointerOver(): void {
     this.feedbackMarker.setVisible(true);
+    this.interactionLabel.setVisible(true);
     this.setScale(COMPANION_HOVER_SCALE);
   }
 
   private handlePointerOut(): void {
     this.feedbackMarker.setVisible(false);
+    this.interactionLabel.setVisible(false);
     this.setScale(1);
   }
 

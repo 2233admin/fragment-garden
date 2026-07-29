@@ -1155,13 +1155,19 @@ type GameToReactEvent =
 Bridge 为双向独立监听集合，两个方向不会接收到自己的事件。订阅可单独取消，销毁会清空全部监听；Strict Mode 重订阅不会产生重复到达处理。`PLAYER_STATE_CHANGED` 只在初始化、开始、停止、到达、取消或选择变化时发送，供 Canvas 容器更新非敏感诊断属性，不在 Phaser `update` 中逐帧发送，也不进入业务详情处理。
 
 伙伴点击不会触发人物寻路，也不传递 Settings、ChatMessage 或伙伴类型。Phaser 只发出无 payload 的
-`COMPANION_CLICKED`。React 当前打开与 Canvas 外“打开花园伙伴”按钮共用的 `CompanionNpcDialog`；即使
-Phaser 渲染失败，键盘和屏幕阅读器用户仍可进入同一功能。两个入口都会先取消尚未完成的植物交互，避免
-人物随后到达时把碎片详情叠加到 NPC 面板上。
+`COMPANION_CLICKED`。花屋和长椅旁木箱由场景热点发出带受限 `feature` 判别值的
+`GARDEN_FEATURE_CLICKED`，React 分别负责像素确认/等待态和既有备份弹窗；Phaser 不直接控制 React
+界面。伙伴的固定选项继续由 React 渲染，但外框、角色头像、选项和状态面板使用与场景一致的像素 UI；
+Domain 选项和数据查询不变。花园中不再显示现代网页式功能按钮，键盘和屏幕阅读器仍通过同一组不可见快捷入口进入对应功能；
+场景资源失败时 `GardenErrorState` 仍可直接进入卡片模式。所有入口都会先取消尚未完成的植物交互，避免
+人物随后到达时叠加无关详情。
 
 ### 9.3 Canvas 生命周期
 
-Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡片模式时，React Activity 保留卡片搜索、排序和创建状态，同时销毁 Phaser Game、输入监听、路线、Bridge 和 Canvas。返回花园时使用最新快照重建单个 Canvas，人物一致地回到出生点，旧交互目标不会继续。
+Phaser 只在 `GardenCanvas` 的客户端 effect 中动态加载。切换到卡片模式时，React Activity 保留卡片搜索、
+排序和创建状态，同时销毁 Phaser Game、输入监听、路线、Bridge 和 Canvas。返回花园时先显示约两秒的像素
+过渡框，并在遮罩后使用最新快照预先重建单个 Canvas；过渡结束后直接显示已准备的庭院，人物一致地回到
+出生点，旧交互目标不会继续。花园舞台只改变 CSS 显示尺寸，内部世界、导航和碰撞仍为 `960 × 640`。
 
 异步 import 使用取消标记，避免 Strict Mode 或 HMR 留下孤立 Canvas。同一页面最多存在一个 Canvas。测试诊断属性由 GameBridge 的低频状态转换事件更新，只暴露人物坐标、移动状态和选中 plant id，不包含正文或附件，产品逻辑不依赖这些属性。
 

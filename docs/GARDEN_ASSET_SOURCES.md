@@ -236,6 +236,6 @@ https://github.com/Huu-Yuu/StardewValley-Assets
 - 未将参考仓库设为 submodule
 - 地图运行只读取 `public/assets/garden` 中的最小生成资源
 - 这些参考素材只用于当前个人、非商业作品集验证
-- 项目外作品集截图不进入 Git，也不作为可再分发素材包
+- README 使用的三张真实产品截图保存在 `docs/images`；其余调试和阶段验收截图不进入 Git
 - 公开分发或商业化前需要重新确认授权，并优先替换为原创或明确授权资源
 - 视觉层、运行边界和后续替换计划见 [`GARDEN_VISUAL_SYSTEM.md`](./GARDEN_VISUAL_SYSTEM.md)

@@ -10,7 +10,7 @@ import { ContentProcessingIndicator } from "@/components/content-processing/Cont
 import { useContentProcessingRuntime } from "@/components/content-processing/useContentProcessingRuntime";
 import { FragmentDetailDialog } from "@/components/fragments/FragmentDetailDialog";
 import { FragmentWorkspace } from "@/components/fragments/FragmentWorkspace";
-import { useDormancySync } from "@/components/fragments/useDormancySync";
+import { useDormancySync, type DormancySyncFeedback } from "@/components/fragments/useDormancySync";
 import { useExternalLinkImportRuntime } from "@/components/link-imports/useExternalLinkImportRuntime";
 import { fragmentGardenDb } from "@/data/db";
 import type { GardenPlantSnapshot } from "@/domain";
@@ -93,6 +93,7 @@ export function GardenWorkspace() {
   const companionButtonRef = useRef<HTMLButtonElement>(null);
   const remoteRestoreOperationRef = useRef<string | null>(null);
   const modeTransitionTimersRef = useRef<number[]>([]);
+  const restoreNoticeHasPriorityRef = useRef(false);
   const handleContentProcessingEvent = useCallback(
     (event: Readonly<{ type: "completed" | "failed"; message: string }>): void => {
       setInteractionFeedback({
@@ -110,6 +111,7 @@ export function GardenWorkspace() {
     let restoredNoticeFrame: number | null = null;
     if (sessionStorage.getItem(RESTORE_COMPLETED_SESSION_KEY) === "true") {
       sessionStorage.removeItem(RESTORE_COMPLETED_SESSION_KEY);
+      restoreNoticeHasPriorityRef.current = true;
       restoredNoticeFrame = window.requestAnimationFrame(() => {
         setInteractionFeedback({ kind: "status", message: "花园已经恢复完成。" });
       });
@@ -193,7 +195,16 @@ export function GardenWorkspace() {
     setOpenCreateRequest((request) => request + 1);
   }, []);
 
-  useDormancySync({ onFeedback: setInteractionFeedback });
+  const handleDormancyFeedback = useCallback((feedback: DormancySyncFeedback): void => {
+    // A successful restore is the action the user just completed. Dormancy
+    // synchronization may still run on restored data, but its secondary notice
+    // must not replace the restore confirmation on this page load.
+    if (!restoreNoticeHasPriorityRef.current) {
+      setInteractionFeedback(feedback);
+    }
+  }, []);
+
+  useDormancySync({ onFeedback: handleDormancyFeedback });
 
   const gardenState: GardenQueryState = useLiveQuery(
     async (): Promise<GardenQueryState> => {
@@ -431,14 +442,12 @@ export function GardenWorkspace() {
     setGardenReturnState("waiting");
     setIsCompanionChatOpen(false);
     setInteractionFeedback(null);
-    // Mount the Phaser scene behind the modal while the door transition is
-    // visible, so users do not wait through a second loading screen afterward.
-    setMode("garden");
     const transitionTimer = window.setTimeout(() => {
       setGardenReturnState("transitioning");
     }, 800);
     const modeTimer = window.setTimeout(() => {
       modeTransitionTimersRef.current = [];
+      setMode("garden");
       setGardenReturnState("closed");
       window.requestAnimationFrame(() => gardenModeButtonRef.current?.focus());
     }, GARDEN_MODE_ENTRY_DELAY_MS);
@@ -520,7 +529,7 @@ export function GardenWorkspace() {
             <>
               <button
                 aria-controls="garden-mode-panel"
-                aria-pressed="true"
+                aria-pressed={gardenReturnState === "closed"}
                 onClick={() => handleModeChange("garden")}
                 ref={gardenModeButtonRef}
                 type="button"
@@ -662,6 +671,7 @@ export function GardenWorkspace() {
                   cancelInteractionRequest={cancelInteractionRequest}
                   companion={companion}
                   feedback={interactionFeedback}
+                  isActive={mode === "garden"}
                   onGameEvent={handleGameEvent}
                   onShowCards={() => handleModeChange("cards")}
                   plants={gardenState.snapshot.plants}

@@ -31,6 +31,7 @@ type GardenCanvasProps = {
   companion: CompanionViewModel | null;
   cancelInteractionRequest: number;
   feedback: Readonly<{ kind: "status" | "error"; message: string }> | null;
+  isActive: boolean;
   onGameEvent: (event: GardenInteractionEvent) => void;
   onShowCards: () => void;
 };
@@ -45,6 +46,7 @@ export function GardenCanvas({
   companion,
   cancelInteractionRequest,
   feedback,
+  isActive,
   onGameEvent,
   onShowCards,
 }: GardenCanvasProps) {
@@ -385,7 +387,7 @@ export function GardenCanvas({
         className={`garden-game-toast ${feedback === null ? "garden-game-toast--empty" : ""} ${
           feedback?.kind === "error" ? "garden-game-toast--error" : ""
         }`}
-        data-testid="garden-interaction-status"
+        data-testid={isActive ? "garden-interaction-status" : undefined}
         role={feedback?.kind === "error" ? "alert" : "status"}
       >
         {feedback?.message}

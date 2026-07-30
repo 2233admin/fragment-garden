@@ -1,0 +1,24 @@
+# Local dependencies and build outputs
+node_modules
+.next
+.next-*
+out
+build
+
+# Test and review artifacts
+coverage
+playwright-report
+test-results
+
+# Local Vercel metadata and TypeScript caches
+.vercel
+*.tsbuildinfo
+
+# Secrets and local-only data
+.env*
+backups
+local-data
+tmp
+
+# Repository metadata is not needed by the deployment bundle
+.git

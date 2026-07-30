@@ -64,13 +64,22 @@ describe("calculateGrowthScore", () => {
     expect(calculateGrowthScore(events)).toBe(0);
   });
 
-  it("counts the same event type once per UTC date", () => {
+  it("counts every independently saved text supplement on the same UTC date", () => {
     const events = [
       createEvent("text_added", "2026-07-23T23:30:00.000-02:00"),
       createEvent("text_added", "2026-07-24T20:00:00.000Z"),
     ];
 
-    expect(calculateGrowthScore(events)).toBe(1);
+    expect(calculateGrowthScore(events)).toBe(2);
+  });
+
+  it("continues to deduplicate other event types on the same UTC date", () => {
+    const events = [
+      createEvent("progress_recorded", "2026-07-24T08:00:00.000Z"),
+      createEvent("progress_recorded", "2026-07-24T20:00:00.000Z"),
+    ];
+
+    expect(calculateGrowthScore(events)).toBe(2);
   });
 
   it("counts the same event type again on a different UTC date", () => {
@@ -157,6 +166,16 @@ describe("resolvePlantStage", () => {
         createEvent("progress_recorded", "2026-07-23T08:00:00.000Z"),
         createEvent("progress_recorded", "2026-07-24T08:00:00.000Z"),
         createEvent("child_fragment_created", "2026-07-23T09:00:00.000Z"),
+      ],
+      "blooming",
+    ],
+    [
+      [
+        createEvent("text_added", "2026-07-23T08:00:00.000Z"),
+        createEvent("text_added", "2026-07-23T09:00:00.000Z"),
+        createEvent("text_added", "2026-07-23T10:00:00.000Z"),
+        createEvent("text_added", "2026-07-23T11:00:00.000Z"),
+        createEvent("text_added", "2026-07-23T12:00:00.000Z"),
       ],
       "blooming",
     ],

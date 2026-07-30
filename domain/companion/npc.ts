@@ -279,7 +279,7 @@ export function getCasualLine(summary: CompanionNpcGardenSummary): string {
 /** Fixed explanation of growth behavior; it intentionally avoids internals. */
 export function getGrowthRuleLines(): readonly string[] {
   return [
-    "补充文字、添加链接、添加图片、添加语音、写下一步、记录现实进展，以及发展成新想法，都会按照花园的规则留下成长记录。同类行为在同一天只计一次。",
+    "每保存一条新的追加笔记，植物都会获得一次成长；编辑已有追加不会重复成长。添加链接、添加图片、添加语音、写下一步、记录现实进展，以及发展成新想法，也会按照花园的规则留下成长记录。",
     "图片分析和语音转写本身不会增加成长分，也不会自动改变植物阶段。标记完成后，植物会永久盛开；休眠不是死亡。",
   ];
 }

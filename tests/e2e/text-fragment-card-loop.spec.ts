@@ -23,6 +23,11 @@ type StoredTextState = Readonly<{
   >;
 }>;
 
+type StoredPlantGrowth = Readonly<{
+  growthScore: number;
+  stage: string;
+}>;
+
 function getTextCard(page: Page, title: string) {
   return page.getByRole("button", { name: `打开笔记：${title}` });
 }
@@ -98,6 +103,39 @@ async function readStoredTextState(page: Page): Promise<StoredTextState> {
         .filter((note) => note.fragmentId === fragment.id)
         .sort((left, right) => left.id.localeCompare(right.id))
         .map((note) => ({ id: note.id, contentMarkdown: note.contentMarkdown })),
+    };
+  });
+}
+
+async function readStoredPlantGrowth(page: Page): Promise<StoredPlantGrowth> {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("fragment-garden");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const transaction = database.transaction(["fragments", "plants"], "readonly");
+    const readAll = <T>(storeName: string): Promise<T[]> =>
+      new Promise<T[]>((resolve, reject) => {
+        const request = transaction.objectStore(storeName).getAll();
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result as T[]);
+      });
+    const [fragments, plants] = await Promise.all([
+      readAll<{ contentType: string; id: string }>("fragments"),
+      readAll<{ fragmentId: string; growthScore: number; stage: string }>("plants"),
+    ]);
+    const fragment = fragments.find((candidate) => candidate.contentType === "text");
+    const plant = plants.find((candidate) => candidate.fragmentId === fragment?.id);
+
+    database.close();
+    if (plant === undefined) {
+      throw new Error("The text Fragment Plant was not found");
+    }
+
+    return {
+      growthScore: plant.growthScore,
+      stage: plant.stage,
     };
   });
 }
@@ -281,4 +319,42 @@ test("keeps the text note flow content-first across edits, notes, and refreshes"
     expect((await readStoredTextState(page)).contentMarkdown).toBe(editedBodyMarkdown);
     await expectAtMostOneCanvas(page);
   });
+});
+
+test("grows once for every independently saved appended note", async ({ context, page }) => {
+  const baseURL = test.info().project.use.baseURL;
+
+  if (typeof baseURL !== "string") {
+    throw new Error("The Playwright project must define a baseURL.");
+  }
+
+  const cdpSession = await context.newCDPSession(page);
+  await cdpSession.send("Storage.clearDataForOrigin", {
+    origin: new URL(baseURL).origin,
+    storageTypes: "indexeddb",
+  });
+  await cdpSession.detach();
+
+  await page.goto("/garden");
+  await completeCompanionOnboardingIfNeeded(page);
+  await page.getByRole("button", { name: "卡片模式", exact: true }).click();
+  await page.getByRole("button", { name: "种下碎片", exact: true }).click();
+
+  const createDialog = page.getByRole("dialog", { name: "种下文字碎片" });
+  await createDialog.getByLabel("标题（可选）").fill("连续成长测试");
+  await createDialog.getByLabel("内容").fill("每一条独立追加都应该推动植物成长。");
+  await createDialog.getByRole("button", { name: "种下", exact: true }).click();
+  await getTextCard(page, "连续成长测试").click();
+
+  const detail = page.getByRole("dialog", { name: "连续成长测试" });
+  for (let index = 1; index <= 5; index += 1) {
+    const note = `第 ${index} 条独立追加`;
+    await detail.getByRole("button", { name: "追加笔记", exact: true }).click();
+    await detail.getByRole("textbox", { name: "追加笔记内容", exact: true }).fill(note);
+    await detail.getByRole("button", { name: "保存笔记", exact: true }).click();
+    await expect(detail.getByText(note, { exact: true })).toBeVisible();
+    await expect.poll(async () => (await readStoredPlantGrowth(page)).growthScore).toBe(index);
+  }
+
+  await expect.poll(async () => (await readStoredPlantGrowth(page)).stage).toBe("blooming");
 });

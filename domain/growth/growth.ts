@@ -85,6 +85,14 @@ export function calculateGrowthScore(events: readonly FragmentEvent[]): number {
       continue;
     }
 
+    // Every independently saved user supplement is meaningful growth. Editing an
+    // existing note does not create another text_added event, so no date-based
+    // deduplication is needed for this event type.
+    if (event.type === "text_added") {
+      growthScore += eventScore;
+      continue;
+    }
+
     const growthDate = resolveGrowthDate(event);
     if (growthDate === null) {
       continue;

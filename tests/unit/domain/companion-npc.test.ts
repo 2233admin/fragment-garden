@@ -146,7 +146,8 @@ describe("companion NPC fixed copy", () => {
     const lifecycle = getLifecycleRuleLines();
 
     expect(growth).toHaveLength(2);
-    expect(growth.join("\n")).toContain("同类行为在同一天只计一次");
+    expect(growth.join("\n")).toContain("每保存一条新的追加笔记");
+    expect(growth.join("\n")).toContain("编辑已有追加不会重复成长");
     expect(growth.join("\n")).toContain("添加图片");
     expect(growth.join("\n")).toContain("添加语音");
     expect(growth.join("\n")).toContain("写下一步");

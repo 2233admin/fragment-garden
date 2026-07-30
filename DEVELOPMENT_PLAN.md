@@ -298,7 +298,8 @@ test: cover typed GameBridge events
 
 ## 范围
 
-- 成长分和阶段继续由 Domain 事件规则计算，同类成长事件同一天只计一次；
+- 成长分和阶段继续由 Domain 事件规则计算；经正式体验校准后，每条独立保存的用户追加笔记都计一次成长，
+  编辑已有追加不重复计分，其他同类成长事件同一天只计一次；
 - 增加 `dormant` Event，并为 `reviewed`、`completed`、`child_fragment_created`、`archived` 和 `restored` 定义统一、可校验的 payload；
 - 在 `/garden` 客户端挂载、窗口 `focus` 和页面重新 visible 时，显式调用 Service 持久化三天休眠转换；
 - 休眠同步使用同一个 ISO `now`、运行锁和幂等事务；卡片、详情与花园查询保持只读；
@@ -327,7 +328,7 @@ test: cover typed GameBridge events
 ## 验收
 
 - 补充内容后植物成长；
-- 单日重复同类行为不重复计分；
+- 同日连续新建多条独立追加笔记时逐条计分，编辑已有追加不重复计分；其他重复同类行为仍按原规则去重；
 - 模拟 72 小时后，挂载、focus 或重新 visible 能把符合条件的 active/open 内容持久化为 dormant，并且不会重复写事件；
 - live query 和 Query Service 不产生休眠写入，休眠同步失败不阻止读取原内容；
 - 查看 dormant 内容或选择“仍然感兴趣”后恢复 active；active 和 archived 内容不产生多余 restored Event；

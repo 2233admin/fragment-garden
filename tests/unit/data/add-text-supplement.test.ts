@@ -83,7 +83,7 @@ describe("addTextSupplement", () => {
     await expect(database.fragmentNotes.count()).resolves.toBe(1);
   });
 
-  it("saves repeated same-day supplements but scores the event type once", async () => {
+  it("scores every independently saved same-day supplement", async () => {
     const fragment = createStageTwoFragment();
     const plant = createStageTwoPlant();
     await database.fragments.add(fragment);
@@ -106,7 +106,7 @@ describe("addTextSupplement", () => {
       },
     );
 
-    expect(secondResult.plant.growthScore).toBe(1);
+    expect(secondResult.plant.growthScore).toBe(2);
     expect(secondResult.plant.stage).toBe("growing");
     await expect(database.fragmentEvents.where("type").equals("text_added").count()).resolves.toBe(
       2,

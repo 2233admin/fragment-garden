@@ -1,0 +1,11 @@
+.next/
+.next-release-build/
+node_modules/
+coverage/
+playwright-report/
+test-results/
+.playwright-cli/
+package-lock.json
+next-env.d.ts
+*.md
+.env*

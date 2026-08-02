@@ -1,0 +1,52 @@
+export const FRAGMENT_GARDEN_DATABASE_NAME = "fragment-garden";
+
+export const FRAGMENT_GARDEN_DATABASE_VERSION_V1 = 1;
+export const FRAGMENT_GARDEN_DATABASE_VERSION_V2 = 2;
+export const FRAGMENT_GARDEN_DATABASE_VERSION_V3 = 3;
+export const FRAGMENT_GARDEN_DATABASE_VERSION_V4 = 4;
+export const FRAGMENT_GARDEN_DATABASE_VERSION_V5 = 5;
+export const FRAGMENT_GARDEN_DATABASE_VERSION = FRAGMENT_GARDEN_DATABASE_VERSION_V5;
+
+export const FRAGMENT_GARDEN_SCHEMA_V1 = {
+  settings: "id",
+  fragments: "id,lifecycleStatus,completionStatus,contentType,createdAt,lastInteractedAt",
+  attachments: "id,fragmentId",
+  fragmentEvents: "id,fragmentId,type,occurredAt",
+  plants: "id,fragmentId,slotId,stage,vitality",
+  relations: "id,sourceFragmentId,targetFragmentId,status",
+  clusters: "id",
+  recommendations: "id,fragmentId,shownAt",
+  chatMessages: "id,createdAt",
+} as const;
+
+export const FRAGMENT_GARDEN_SCHEMA_V3 = {
+  externalLinkImports: "id,&fragmentId,normalizedUrl,status,taskId,externalNoteId,createdAt",
+} as const;
+
+export const FRAGMENT_GARDEN_SCHEMA_V4 = {
+  mediaAssets: "id,fragmentId,kind,processingStatus,createdAt",
+} as const;
+
+/** Both stores are declared together; later stages may use jobs without mutating V5. */
+export const FRAGMENT_GARDEN_SCHEMA_V5 = {
+  fragmentNotes: "id,fragmentId,source,createdAt,updatedAt",
+  contentProcessingJobs: "id,kind,status,createdAt,updatedAt,sourceFragmentId,createdFragmentId",
+} as const;
+
+/**
+ * The complete current schema is the source of truth for full-garden backups.
+ * Keeping the table list derived from it prevents a later schema addition from
+ * being silently omitted by export or restore.
+ */
+export const FRAGMENT_GARDEN_SCHEMA = {
+  ...FRAGMENT_GARDEN_SCHEMA_V1,
+  ...FRAGMENT_GARDEN_SCHEMA_V3,
+  ...FRAGMENT_GARDEN_SCHEMA_V4,
+  ...FRAGMENT_GARDEN_SCHEMA_V5,
+} as const;
+
+export type FragmentGardenTableName = keyof typeof FRAGMENT_GARDEN_SCHEMA;
+
+export const FRAGMENT_GARDEN_TABLE_NAMES = Object.freeze(
+  Object.keys(FRAGMENT_GARDEN_SCHEMA) as FragmentGardenTableName[],
+);
